@@ -84,3 +84,4 @@ uv sync
 - 精确任务可能耗时较长。系统将原始任务日志保留在 `var/runs/<job-id>/`，并在恢复时复用已完成的弹性结果。
 - 若 QHA 日志报告虚频，平台仍可保留曲线供诊断，但会标记为定性结果，不能作为高置信热膨胀结论。
 - 软件著作权的功能与截图清单见 [docs/software-registration.md](docs/software-registration.md)。
+- V0.5.0 的真实集成验证证据见 [docs/validation.md](docs/validation.md)。
