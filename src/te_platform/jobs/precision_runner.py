@@ -10,6 +10,21 @@ from te_platform.precision.results import parse_precision_results
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
 
 
+def precision_progress(database: str | Path, job_id: str) -> dict[str, int | float] | None:
+    root = Path(database).parent / "runs" / job_id / "elastic"
+    if not root.is_dir():
+        return None
+    tasks = [path for path in root.rglob("strain_*") if path.is_dir()]
+    if not tasks:
+        return None
+    completed = sum((path / "CONTCAR").is_file() for path in tasks)
+    return {
+        "completed_strains": completed,
+        "total_strains": len(tasks),
+        "percent": round(100.0 * completed / len(tasks), 1),
+    }
+
+
 def submit_precision_job(database: str | Path, structure: bytes, config: PrecisionTaskConfig) -> dict[str, object]:
     job = create_job(database, workflow="precision_elastic_qha", parameters={"config": config.__dict__})
     work = Path(database).parent / "runs" / job["id"]

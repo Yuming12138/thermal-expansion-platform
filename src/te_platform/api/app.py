@@ -22,7 +22,7 @@ from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
 from te_platform.agent.chat import respond as agent_respond
-from te_platform.jobs.precision_runner import submit_precision_job
+from te_platform.jobs.precision_runner import precision_progress, submit_precision_job
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
 
@@ -295,7 +295,9 @@ def create_app(database: Path | None = None) -> FastAPI:
     @app.get("/api/precision/jobs/{job_id}")
     def precision_job(job_id: str) -> dict[str, object]:
         try:
-            return get_job(db_path, job_id)
+            job = get_job(db_path, job_id)
+            job["progress"] = precision_progress(db_path, job_id)
+            return job
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
