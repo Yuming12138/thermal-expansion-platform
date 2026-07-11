@@ -69,13 +69,17 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
 
     parent = get_job(database, parent_job_id)
     parent_work = Path(database).parent / "runs" / parent_job_id
-    if not (parent_work / "elastic" / "ELASTIC_TENSOR").is_file():
-        raise ValueError("QHA recovery requires a completed elastic tensor in the parent task")
+    elastic_source_job_id = _find_elastic_source_job(database, parent_job_id)
     config = PrecisionTaskConfig(**parent["parameters"]["config"])
     job = create_job(
         database,
         workflow="precision_elastic_qha",
-        parameters={"config": config.__dict__, "parent_job_id": parent_job_id, "mode": "thermal_only"},
+        parameters={
+            "config": config.__dict__,
+            "parent_job_id": parent_job_id,
+            "elastic_source_job_id": elastic_source_job_id,
+            "mode": "thermal_only",
+        },
     )
     work = Path(database).parent / "runs" / job["id"]
     work.mkdir(parents=True, exist_ok=False)
@@ -84,6 +88,25 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
     transition_job(database, job["id"], JobStatus.QUEUED)
     threading.Thread(target=_run, args=(Path(database), job["id"], work, config, True), daemon=True).start()
     return job
+
+
+def _find_elastic_source_job(database: str | Path, job_id: str) -> str:
+    """Resolve a QHA recovery chain to the task that produced its elastic tensor."""
+    from te_platform.jobs.repository import get_job
+
+    visited: set[str] = set()
+    current_job_id = job_id
+    while current_job_id not in visited:
+        visited.add(current_job_id)
+        work = Path(database).parent / "runs" / current_job_id
+        if (work / "elastic" / "ELASTIC_TENSOR").is_file():
+            return current_job_id
+        current = get_job(database, current_job_id)
+        ancestor_job_id = current["parameters"].get("parent_job_id")
+        if not isinstance(ancestor_job_id, str) or not ancestor_job_id:
+            break
+        current_job_id = ancestor_job_id
+    raise ValueError("QHA recovery requires a completed elastic tensor in this task's lineage")
 
 
 def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig, thermal_only: bool) -> None:
