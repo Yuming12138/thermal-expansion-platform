@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from te_platform.jobs.repository import create_job, get_job, transition_job
+from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
 
 
@@ -24,6 +24,11 @@ class JobRepositoryTests(unittest.TestCase):
             )
             self.assertEqual(complete["result"]["alpha_300k_ppm_per_k"], 5.9)
             self.assertEqual(get_job(database, job["id"])["status"], "SUCCEEDED")
+            refreshed = replace_completed_job_result(
+                database, job["id"], {"alpha_300k_ppm_per_k": 6.1, "quality_warnings": ["warning"]}
+            )
+            self.assertEqual(refreshed["status"], "SUCCEEDED")
+            self.assertEqual(refreshed["result"]["alpha_300k_ppm_per_k"], 6.1)
 
 
 if __name__ == "__main__":

@@ -82,3 +82,20 @@ def transition_job(
             ),
         )
     return get_job(database, job_id)
+
+
+def replace_completed_job_result(
+    database: str | Path, job_id: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    """Replace parsed output for a completed task without changing its terminal state."""
+    current = get_job(database, job_id)
+    if JobStatus(current["status"]) is not JobStatus.SUCCEEDED:
+        raise ValueError("Only a succeeded task can have its parsed result refreshed")
+    with connect_database(database) as connection:
+        connection.execute(
+            """UPDATE calculation_jobs
+            SET result_json = ?, updated_at = ?
+            WHERE id = ?""",
+            (json.dumps(result, ensure_ascii=False, sort_keys=True), _timestamp(), job_id),
+        )
+    return get_job(database, job_id)

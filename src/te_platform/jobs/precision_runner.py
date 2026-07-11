@@ -6,7 +6,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from te_platform.jobs.repository import create_job, transition_job
+from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
 from te_platform.precision.results import parse_precision_results
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
@@ -66,8 +66,6 @@ def submit_precision_job(database: str | Path, structure: bytes, config: Precisi
 
 
 def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, object]:
-    from te_platform.jobs.repository import get_job
-
     parent = get_job(database, parent_job_id)
     parent_work = Path(database).parent / "runs" / parent_job_id
     elastic_source_job_id = _find_elastic_source_job(database, parent_job_id)
@@ -100,8 +98,6 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
 
 def _find_elastic_source_job(database: str | Path, job_id: str) -> str:
     """Resolve a QHA recovery chain to the task that produced its elastic tensor."""
-    from te_platform.jobs.repository import get_job
-
     visited: set[str] = set()
     current_job_id = job_id
     while current_job_id not in visited:
@@ -115,6 +111,15 @@ def _find_elastic_source_job(database: str | Path, job_id: str) -> str:
             break
         current_job_id = ancestor_job_id
     raise ValueError("QHA recovery requires a completed elastic tensor in this task's lineage")
+
+
+def refresh_precision_result(database: str | Path, job_id: str) -> dict[str, object]:
+    """Reparse a succeeded task after result-parser or quality-rule updates."""
+    if get_job(database, job_id)["status"] != JobStatus.SUCCEEDED.value:
+        raise ValueError("Only a succeeded task can have its parsed result refreshed")
+    work = Path(database).parent / "runs" / job_id
+    result = parse_precision_results(work).to_dict()
+    return replace_completed_job_result(database, job_id, result)
 
 
 def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig, thermal_only: bool) -> None:

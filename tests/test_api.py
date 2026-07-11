@@ -194,6 +194,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "job-123")
 
+    @patch("te_platform.api.app.refresh_precision_result")
+    def test_precision_result_refresh_endpoint(self, refresh_mock) -> None:
+        refresh_mock.return_value = {
+            "id": "job-123",
+            "status": "SUCCEEDED",
+            "result": {"quality_warnings": ["Imaginary phonon frequencies were detected"]},
+        }
+
+        response = self.client.post("/api/precision/jobs/job-123/refresh-result")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "SUCCEEDED")
+        refresh_mock.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
