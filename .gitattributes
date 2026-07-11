@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.ps1 text eol=crlf
+
+# Version the compressed dataset snapshot with Git LFS.
+datasets/releases/**/*.json.gz filter=lfs diff=lfs merge=lfs -text

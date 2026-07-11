@@ -1,0 +1,45 @@
+{
+  "release_slug": "nte-candidates-6702-v1",
+  "dataset_id": "nte-candidates-6702",
+  "title": "NTE候选材料6702条首版数据快照",
+  "version": "1.0.0",
+  "record_count": 6702,
+  "unique_material_count": 6702,
+  "structure_format": "POSCAR",
+  "source": {
+    "original_directory": "D:\\9.Project\\5.NTE_PTE_Composite\\0.NTE_new_dataset",
+    "original_file": "nte_ml_features_filtered.json",
+    "original_file_bytes": 36228021,
+    "original_file_sha256": "4a207206a5f10cb9ae739dfb6fc8398a42b528ba8124d23f805f2a7c6c146372",
+    "original_last_write_time": "2026-03-01T23:35:47.6072235+08:00"
+  },
+  "publication_history": {
+    "paper_reported_count": 6697,
+    "platform_v1_authoritative_count": 6702,
+    "note": "平台V1以当前本地整理后的6702条唯一记录为准。"
+  },
+  "snapshot_file": "datasets/releases/nte_candidates_6702_v1/nte_candidates_6702.json.gz",
+  "snapshot_sha256": "87b07123db1b038f5225271f1bb2d482648b13db54be30dbf5acabfeb2f4506a",
+  "schema": "datasets/schema/nte_candidates_v1.schema.json",
+  "distribution_status": "internal_research_pending_rights_review",
+  "required_fields": [
+    "material_folder",
+    "POSCAR"
+  ],
+  "scientific_notes": [
+    "该数据集是物理引导的NTE候选集合，不代表可合成性保证。",
+    "结构、计算模型、参数和来源需要在后续版本中继续补全溯源字段。"
+  ],
+  "known_quality_profile": [
+    {
+      "code": "nonpositive_bulk_modulus",
+      "count": 1,
+      "handling": "保留原值并阻止其直接进入力学约束复合设计。"
+    },
+    {
+      "code": "porosity_out_of_unit_interval",
+      "count": 25,
+      "handling": "保留原值并标记，待核对孔隙率定义和生成方法。"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[project]
+name = "thermal-expansion-platform"
+version = "0.1.0"
+description = "热膨胀材料智能计算、筛选、数据管理与零膨胀设计平台"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "NTE/PTE Research Team" }
+]
+dependencies = []
+
+[project.scripts]
+tep = "te_platform.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

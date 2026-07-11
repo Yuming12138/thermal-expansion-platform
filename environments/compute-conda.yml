@@ -1,0 +1,17 @@
+name: te-platform-compute
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - scipy
+  - pandas
+  - ase
+  - phonopy
+  - spglib
+  - pymatgen
+  - pip:
+      # MatterSim and model weights are installed separately after checking
+      # the active environment, platform support and redistribution terms.
+      - typing-extensions

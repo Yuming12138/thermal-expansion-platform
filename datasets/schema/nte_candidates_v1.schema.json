@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NTE candidate dataset V1",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "material_folder",
+      "POSCAR"
+    ],
+    "properties": {
+      "material_folder": { "type": "string", "minLength": 1 },
+      "POSCAR": { "type": "string", "minLength": 1 },
+      "Material_Cost_USD_per_kg": { "type": ["number", "null"] },
+      "Band_Gap_eV": { "type": ["number", "null"] },
+      "Pearson_Electronegativity_eV": { "type": ["number", "null"] },
+      "CBM_eV": { "type": ["number", "null"] },
+      "VBM_eV": { "type": ["number", "null"] },
+      "K_GPa": { "type": ["number", "null"] },
+      "G_GPa": { "type": ["number", "null"] },
+      "E_GPa": { "type": ["number", "null"] },
+      "E_tilde_GPa": { "type": ["number", "null"] },
+      "E_coh_eV_per_atom": { "type": ["number", "null"] },
+      "avg_cn": { "type": ["number", "null"] },
+      "porosity": { "type": ["number", "null"] },
+      "AAV": { "type": ["number", "null"] },
+      "TE_300K": { "type": ["number", "null"] },
+      "T2": { "type": ["number", "null"] },
+      "CTE_ppm": { "type": ["number", "null"] },
+      "volume_shrinkage": { "type": ["number", "null"] },
+      "volume_shrinkage_percent": { "type": ["number", "null"] },
+      "NTE_temp_range": {},
+      "TE_min": { "type": ["number", "null"] },
+      "TE_min_K": { "type": ["number", "null"] },
+      "alpha_integral_0_300K": { "type": ["number", "null"] },
+      "alpha_integral_0_600K": { "type": ["number", "null"] },
+      "alpha_integral_0_900K": { "type": ["number", "null"] }
+    },
+    "additionalProperties": true
+  }
+}
