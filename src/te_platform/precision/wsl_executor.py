@@ -46,16 +46,22 @@ def prepare_precision_task(work_directory: str | Path) -> Path:
     return tools
 
 
-def build_precision_command(work_directory: str | Path, config: PrecisionTaskConfig) -> list[str]:
+def build_precision_command(
+    work_directory: str | Path,
+    config: PrecisionTaskConfig,
+    *,
+    thermal_only: bool = False,
+) -> list[str]:
     config.validate()
     work = Path(work_directory).resolve()
     script = work / "workflow_scripts" / "complete_properties_calc.sh"
     if not (work / "POSCAR").is_file() or not script.is_file():
         raise ValueError("Precision task requires POSCAR and prepared workflow scripts")
+    mode = " --thermal-only" if thermal_only else ""
     command = (
         "source /home/gmchen/anaconda3/etc/profile.d/conda.sh && "
         "export PATH=\"$HOME/1.software/vaspkit.1.5.1/bin:$PATH\" && "
-        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))} --device cpu --parallel {config.parallel_workers} "
+        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))}{mode} --device cpu --parallel {config.parallel_workers} "
         f"--qha-n {config.qha_points} --qha-mesh {config.qha_mesh} "
         f"--qha-scale {config.qha_scale} {shlex.quote(windows_to_wsl(work / 'POSCAR'))}"
     )

@@ -22,7 +22,7 @@ from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
 from te_platform.agent.chat import respond as agent_respond
-from te_platform.jobs.precision_runner import precision_progress, submit_precision_job
+from te_platform.jobs.precision_runner import precision_progress, resume_precision_qha, submit_precision_job
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
 
@@ -300,6 +300,13 @@ def create_app(database: Path | None = None) -> FastAPI:
             return job
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/precision/jobs/{job_id}/resume-qha")
+    def resume_qha_job(job_id: str) -> dict[str, object]:
+        try:
+            return resume_precision_qha(db_path, job_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     return app
 

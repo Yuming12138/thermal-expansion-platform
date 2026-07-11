@@ -32,16 +32,43 @@ def submit_precision_job(database: str | Path, structure: bytes, config: Precisi
     (work / "POSCAR").write_bytes(structure)
     prepare_precision_task(work)
     transition_job(database, job["id"], JobStatus.QUEUED)
-    threading.Thread(target=_run, args=(Path(database), job["id"], work, config), daemon=True).start()
+    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, False), daemon=True).start()
     return job
 
 
-def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig) -> None:
+def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, object]:
+    from te_platform.jobs.repository import get_job
+
+    parent = get_job(database, parent_job_id)
+    parent_work = Path(database).parent / "runs" / parent_job_id
+    if not (parent_work / "elastic" / "ELASTIC_TENSOR").is_file():
+        raise ValueError("QHA recovery requires a completed elastic tensor in the parent task")
+    config = PrecisionTaskConfig(**parent["parameters"]["config"])
+    job = create_job(
+        database,
+        workflow="precision_elastic_qha",
+        parameters={"config": config.__dict__, "parent_job_id": parent_job_id, "mode": "thermal_only"},
+    )
+    work = Path(database).parent / "runs" / job["id"]
+    work.mkdir(parents=True, exist_ok=False)
+    (work / "POSCAR").write_bytes((parent_work / "POSCAR").read_bytes())
+    prepare_precision_task(work)
+    transition_job(database, job["id"], JobStatus.QUEUED)
+    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, True), daemon=True).start()
+    return job
+
+
+def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig, thermal_only: bool) -> None:
     transition_job(database, job_id, JobStatus.RUNNING)
     log = work / "workflow.log"
     try:
         with log.open("w", encoding="utf-8") as handle:
-            completed = subprocess.run(build_precision_command(work, config), stdout=handle, stderr=subprocess.STDOUT, check=False)
+            completed = subprocess.run(
+                build_precision_command(work, config, thermal_only=thermal_only),
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
         if completed.returncode != 0:
             transition_job(database, job_id, JobStatus.FAILED, error_message=f"Workflow failed; see {log}")
             return
