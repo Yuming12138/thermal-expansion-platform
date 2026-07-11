@@ -8,7 +8,7 @@ from te_platform.screening.sbr import classify_sbr
 
 def default_registry() -> ToolRegistry:
     registry = ToolRegistry()
-    registry.register("classify_sbr", classify_sbr)
-    registry.register("fast_screen_structure_features", fast_screen_sbr)
-    registry.register("optimize_composite", optimize_zte_fraction)
+    registry.register("classify_sbr", lambda **kwargs: classify_sbr(**kwargs).to_dict())
+    registry.register("fast_screen_structure_features", lambda **kwargs: fast_screen_sbr(**kwargs).to_dict())
+    registry.register("optimize_composite", lambda **kwargs: optimize_zte_fraction(**kwargs).to_dict())
     return registry

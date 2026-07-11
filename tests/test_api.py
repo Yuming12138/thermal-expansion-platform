@@ -100,6 +100,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(rom.status_code, 200)
         self.assertAlmostEqual(rom.json()["nte_volume_fraction"], 0.4)
 
+    def test_agent_tools_are_allowlisted(self) -> None:
+        tools = self.client.get("/api/agent/tools")
+        self.assertEqual(tools.status_code, 200)
+        self.assertIn("classify_sbr", tools.json()["tools"])
+        allowed = self.client.post(
+            "/api/agent/call",
+            json={"tool": "classify_sbr", "arguments": {"shear_modulus_gpa": 20, "bonding_modulus_gpa": 10}},
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.json()["result"]["classification"], "high_probability_nte")
+        denied = self.client.post("/api/agent/call", json={"tool": "shell", "arguments": {}})
+        self.assertEqual(denied.status_code, 422)
+
     def test_structure_inspection_for_poscar_and_cif(self) -> None:
         poscar = self.client.post(
             "/api/structures/inspect",

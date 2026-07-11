@@ -19,6 +19,7 @@ from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
+from te_platform.agent.tools import default_registry
 from te_platform.jobs.precision_runner import submit_precision_job
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
@@ -47,6 +48,11 @@ class ROMRequest(BaseModel):
     target_alpha: float = 0.0
 
 
+class AgentToolRequest(BaseModel):
+    tool: str
+    arguments: dict[str, object] = Field(default_factory=dict)
+
+
 def create_app(database: Path | None = None) -> FastAPI:
     db_path = database or database_path()
 
@@ -68,6 +74,7 @@ def create_app(database: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.mount("/static", StaticFiles(directory=WEB_DIRECTORY), name="static")
+    agent_tools = default_registry()
 
     @app.get("/", include_in_schema=False)
     def web_home() -> FileResponse:
@@ -81,6 +88,17 @@ def create_app(database: Path | None = None) -> FastAPI:
             "dataset_release": summary["release"]["slug"],
             "material_count": summary["counts"]["materials"],
         }
+
+    @app.get("/api/agent/tools")
+    def agent_tool_names() -> dict[str, object]:
+        return {"tools": agent_tools.names()}
+
+    @app.post("/api/agent/call")
+    def agent_call(request: AgentToolRequest) -> dict[str, object]:
+        try:
+            return {"tool": request.tool, "result": agent_tools.call(request.tool, **request.arguments)}
+        except (KeyError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:
