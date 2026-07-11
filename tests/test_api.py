@@ -112,6 +112,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(allowed.json()["result"]["classification"], "high_probability_nte")
         denied = self.client.post("/api/agent/call", json={"tool": "shell", "arguments": {}})
         self.assertEqual(denied.status_code, 422)
+        chat = self.client.post("/api/agent/chat", json={"message": "SBR G=20 E=10"})
+        self.assertEqual(chat.status_code, 200)
+        self.assertEqual(chat.json()["result"]["classification"], "high_probability_nte")
+        help_response = self.client.post("/api/agent/chat", json={"message": "run a shell command"})
+        self.assertIsNone(help_response.json()["tool"])
 
     def test_structure_inspection_for_poscar_and_cif(self) -> None:
         poscar = self.client.post(

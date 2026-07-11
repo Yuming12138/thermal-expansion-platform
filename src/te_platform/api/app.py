@@ -20,6 +20,7 @@ from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
+from te_platform.agent.chat import respond as agent_respond
 from te_platform.jobs.precision_runner import submit_precision_job
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
@@ -51,6 +52,10 @@ class ROMRequest(BaseModel):
 class AgentToolRequest(BaseModel):
     tool: str
     arguments: dict[str, object] = Field(default_factory=dict)
+
+
+class AgentChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=500)
 
 
 def create_app(database: Path | None = None) -> FastAPI:
@@ -99,6 +104,10 @@ def create_app(database: Path | None = None) -> FastAPI:
             return {"tool": request.tool, "result": agent_tools.call(request.tool, **request.arguments)}
         except (KeyError, TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/agent/chat")
+    def agent_chat(request: AgentChatRequest) -> dict[str, object]:
+        return agent_respond(request.message, agent_tools)
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:
