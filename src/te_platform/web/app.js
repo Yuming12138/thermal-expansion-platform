@@ -201,6 +201,34 @@ async function initialize() {
       document.querySelector("#upload-result").textContent = error.message;
     }
   });
+  document.querySelector("#precision-button").addEventListener("click", async () => {
+    const file = document.querySelector("#structure-file").files[0];
+    if (!file) {
+      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
+      return;
+    }
+    const body = new FormData();
+    body.append("file", file);
+    document.querySelector("#upload-result").textContent = "精确任务已提交，正在等待后台Worker…";
+    try {
+      const job = await api("/api/precision/jobs", {method: "POST", body});
+      show("#upload-result", job);
+      const poll = async () => {
+        const latest = await api("/api/precision/jobs/" + encodeURIComponent(job.id));
+        show("#upload-result", latest);
+        if (["PENDING", "QUEUED", "RUNNING"].includes(latest.status)) {
+          window.setTimeout(() => poll().catch(error => {
+            document.querySelector("#upload-result").textContent = error.message;
+          }), 3000);
+        }
+      };
+      window.setTimeout(() => poll().catch(error => {
+        document.querySelector("#upload-result").textContent = error.message;
+      }), 1000);
+    } catch (error) {
+      document.querySelector("#upload-result").textContent = error.message;
+    }
+  });
 }
 
 initialize();
