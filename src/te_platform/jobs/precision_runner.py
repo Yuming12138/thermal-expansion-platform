@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -10,18 +11,45 @@ from te_platform.precision.results import parse_precision_results
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
 
 
-def precision_progress(database: str | Path, job_id: str) -> dict[str, int | float] | None:
-    root = Path(database).parent / "runs" / job_id / "elastic"
+_QHA_DISPLACEMENT_PROGRESS = re.compile(
+    r"(?P<percent>\d+)%\|.*?\|\s*(?P<completed>\d+)/(?P<total>\d+)\s+\["
+)
+
+
+def precision_progress(database: str | Path, job_id: str) -> dict[str, str | int | float] | None:
+    work = Path(database).parent / "runs" / job_id
+    root = work / "elastic"
     if not root.is_dir():
-        return None
+        return _qha_displacement_progress(work)
     tasks = [path for path in root.rglob("strain_*") if path.is_dir()]
-    if not tasks:
+    if tasks:
+        completed = sum((path / "CONTCAR").is_file() for path in tasks)
+        return {
+            "stage": "elastic",
+            "completed_strains": completed,
+            "total_strains": len(tasks),
+            "percent": round(100.0 * completed / len(tasks), 1),
+        }
+    return _qha_displacement_progress(work)
+
+
+def _qha_displacement_progress(work: Path) -> dict[str, str | int | float] | None:
+    log_path = work / "qha_calc.log"
+    if not log_path.is_file():
         return None
-    completed = sum((path / "CONTCAR").is_file() for path in tasks)
+    matches = list(_QHA_DISPLACEMENT_PROGRESS.finditer(log_path.read_text(encoding="utf-8", errors="replace")))
+    if not matches:
+        return None
+    match = matches[-1]
+    completed = int(match["completed"])
+    total = int(match["total"])
+    if total <= 0:
+        return None
     return {
-        "completed_strains": completed,
-        "total_strains": len(tasks),
-        "percent": round(100.0 * completed / len(tasks), 1),
+        "stage": "qha_force_constants",
+        "completed_displacements": completed,
+        "total_displacements": total,
+        "percent": round(100.0 * completed / total, 1),
     }
 
 
