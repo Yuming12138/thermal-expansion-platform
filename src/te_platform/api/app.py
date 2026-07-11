@@ -18,6 +18,7 @@ from te_platform.config import DEFAULT_RELEASE_SLUG, database_path
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
+from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 
 
 WEB_DIRECTORY = Path(__file__).resolve().parents[1] / "web"
@@ -53,7 +54,7 @@ def create_app(database: Path | None = None) -> FastAPI:
 
     app = FastAPI(
         title="热膨胀材料智能计算与设计平台",
-        version="0.4.0",
+        version="0.5.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -186,6 +187,46 @@ def create_app(database: Path | None = None) -> FastAPI:
                 "Run MatterSim cohesive-energy and CrystalNN coordination workers "
                 "to calculate E_tilde and the fast SBR result."
             ),
+        }
+
+    @app.post("/api/structures/fast-screen")
+    async def structure_fast_screen(file: UploadFile = File(...)) -> dict[str, object]:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="A structure filename is required")
+        content = await file.read()
+        if not content or len(content) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Structure must be between 1 byte and 5 MB")
+        try:
+            inspection = inspect_structure(file.filename, content)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        suffix = Path(file.filename).suffix.lower() or ".vasp"
+        structure_hash = sha256(content).hexdigest()
+        upload_directory = db_path.parent / "uploads"
+        upload_directory.mkdir(parents=True, exist_ok=True)
+        structure_path = upload_directory / f"{structure_hash}{suffix}"
+        if not structure_path.exists():
+            structure_path.write_bytes(content)
+        try:
+            alignn = predict_alignn_shear(structure_path)
+            mattersim = predict_mattersim_descriptors(structure_path)
+            descriptors = mattersim.descriptors
+            result = fast_screen_sbr(
+                float(alignn.prediction["shear_modulus_gpa"]),
+                float(descriptors["cohesive_energy_ev_per_atom"]),
+                float(inspection.cell_volume_a3 or 0.0),
+                int(descriptors["atom_count"]),
+                float(descriptors["average_coordination_number"]),
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        return {
+            "structure_sha256": structure_hash,
+            "inspection": inspection.to_dict(),
+            "alignn": alignn.to_dict(),
+            "mattersim": mattersim.to_dict(),
+            "fast_sbr": result.to_dict(),
+            "next_step": "Use full elastic tensor and QHA for a high-confidence alpha(T) result.",
         }
 
     return app

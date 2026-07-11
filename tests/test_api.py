@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from te_platform.api.app import create_app
 from te_platform.workers.alignn_runner import AlignnWorkerPrediction
+from te_platform.workers.mattersim_runner import MatterSimPrediction
 
 
 POSCAR = b"""BaCrSi4O10
@@ -130,6 +131,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()["alignn"]["prediction"]["shear_modulus_gpa"], 29.53)
         self.assertEqual(len(response.json()["structure_sha256"]), 64)
         prediction_mock.assert_called_once()
+
+    @patch("te_platform.api.app.predict_mattersim_descriptors")
+    @patch("te_platform.api.app.predict_alignn_shear")
+    def test_fast_screen_endpoint_combines_controlled_workers(
+        self, alignn_mock, mattersim_mock
+    ) -> None:
+        alignn_mock.return_value = AlignnWorkerPrediction(
+            prediction={"shear_modulus_gpa": 10.0},
+            worker_seconds=3.0,
+            configuration={},
+        )
+        mattersim_mock.return_value = MatterSimPrediction(
+            descriptors={
+                "cohesive_energy_ev_per_atom": -5.0,
+                "atom_count": 16,
+                "average_coordination_number": 3.0,
+            },
+            worker_seconds=2.0,
+        )
+        response = self.client.post(
+            "/api/structures/fast-screen",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["fast_sbr"]["decision_quality"],
+            "robust_high_probability_nte",
+        )
 
 
 if __name__ == "__main__":

@@ -186,6 +186,21 @@ async function initialize() {
       document.querySelector("#upload-result").textContent = error.message;
     }
   });
+  document.querySelector("#fast-screen-button").addEventListener("click", async () => {
+    const file = document.querySelector("#structure-file").files[0];
+    if (!file) {
+      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
+      return;
+    }
+    const body = new FormData();
+    body.append("file", file);
+    document.querySelector("#upload-result").textContent = "正在计算 ALIGNN、MatterSim 与 CrystalNN…";
+    try {
+      show("#upload-result", await api("/api/structures/fast-screen", {method: "POST", body}));
+    } catch (error) {
+      document.querySelector("#upload-result").textContent = error.message;
+    }
+  });
 }
 
 initialize();

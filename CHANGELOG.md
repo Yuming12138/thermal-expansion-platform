@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-07-12
+
+- 增加 MatterSim-5M 内聚能和 CrystalNN 平均配位数受控 Worker；
+- 增加上传结构的完整快速 SBR 判断接口与浏览器入口；
+- 以 BaCrSi4O10 完成真实 HTTP 上传的 PTE/NTE 判定验证。
+
 ## 0.4.0 - 2026-07-12
 
 - 增加受控外部ALIGNN Worker，隔离旧版Torch、DGL和JARVIS依赖；
