@@ -37,6 +37,9 @@ class PrecisionRecoveryTests(unittest.TestCase):
             self.assertEqual(recovered["parameters"]["elastic_source_job_id"], original["id"])
             recovered_work = database.parent / "runs" / recovered["id"]
             self.assertEqual((recovered_work / "POSCAR").read_text(encoding="utf-8"), "child-poscar")
+            self.assertEqual(
+                (recovered_work / "elastic" / "ELASTIC_TENSOR").read_text(encoding="utf-8"), "tensor"
+            )
             thread.return_value.start.assert_called_once()
 
 

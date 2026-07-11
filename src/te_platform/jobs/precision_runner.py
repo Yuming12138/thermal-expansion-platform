@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -70,6 +71,7 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
     parent = get_job(database, parent_job_id)
     parent_work = Path(database).parent / "runs" / parent_job_id
     elastic_source_job_id = _find_elastic_source_job(database, parent_job_id)
+    elastic_source_work = Path(database).parent / "runs" / elastic_source_job_id
     config = PrecisionTaskConfig(**parent["parameters"]["config"])
     job = create_job(
         database,
@@ -84,6 +86,12 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
     work = Path(database).parent / "runs" / job["id"]
     work.mkdir(parents=True, exist_ok=False)
     (work / "POSCAR").write_bytes((parent_work / "POSCAR").read_bytes())
+    elastic_work = work / "elastic"
+    elastic_work.mkdir()
+    shutil.copy2(elastic_source_work / "elastic" / "ELASTIC_TENSOR", elastic_work / "ELASTIC_TENSOR")
+    source_bm_log = elastic_source_work / "elastic" / "BM_SS.log"
+    if source_bm_log.is_file():
+        shutil.copy2(source_bm_log, elastic_work / "BM_SS.log")
     prepare_precision_task(work)
     transition_job(database, job["id"], JobStatus.QUEUED)
     threading.Thread(target=_run, args=(Path(database), job["id"], work, config, True), daemon=True).start()
