@@ -14,6 +14,7 @@ from te_platform.api.services import active_dataset_summary, ensure_active_datab
 from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import material_detail, material_landscape, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
+from te_platform.composites.curve_rom import optimize_curve_rom
 from te_platform.config import DEFAULT_RELEASE_SLUG, database_path
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
@@ -47,6 +48,14 @@ class ROMRequest(BaseModel):
     alpha_pte: float
     alpha_nte: float
     target_alpha: float = 0.0
+
+
+class CurveROMRequest(BaseModel):
+    pte_alpha: list[float] = Field(min_length=2)
+    nte_alpha: list[float] = Field(min_length=2)
+    target_alpha: float = 0.0
+    pte_density: float | None = Field(default=None, gt=0)
+    nte_density: float | None = Field(default=None, gt=0)
 
 
 class AgentToolRequest(BaseModel):
@@ -161,6 +170,19 @@ def create_app(database: Path | None = None) -> FastAPI:
             request.alpha_nte,
             request.target_alpha,
         ).to_dict()
+
+    @app.post("/api/composites/curve-rom")
+    def composite_curve_rom(request: CurveROMRequest) -> dict[str, object]:
+        try:
+            return optimize_curve_rom(
+                request.pte_alpha,
+                request.nte_alpha,
+                request.target_alpha,
+                pte_density=request.pte_density,
+                nte_density=request.nte_density,
+            ).to_dict()
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/structures/inspect")
     async def structure_inspect(file: UploadFile = File(...)) -> dict[str, object]:

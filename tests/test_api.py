@@ -99,6 +99,12 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(rom.status_code, 200)
         self.assertAlmostEqual(rom.json()["nte_volume_fraction"], 0.4)
+        curve = self.client.post(
+            "/api/composites/curve-rom",
+            json={"pte_alpha": [8, 10], "nte_alpha": [-12, -15], "pte_density": 2, "nte_density": 4},
+        )
+        self.assertEqual(curve.status_code, 200)
+        self.assertAlmostEqual(curve.json()["nte_volume_fraction"], 0.4)
 
     def test_agent_tools_are_allowlisted(self) -> None:
         tools = self.client.get("/api/agent/tools")
