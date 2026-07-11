@@ -19,6 +19,9 @@ from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
+from te_platform.jobs.precision_runner import submit_precision_job
+from te_platform.jobs.repository import get_job
+from te_platform.precision.wsl_executor import PrecisionTaskConfig
 
 
 WEB_DIRECTORY = Path(__file__).resolve().parents[1] / "web"
@@ -228,6 +231,24 @@ def create_app(database: Path | None = None) -> FastAPI:
             "fast_sbr": result.to_dict(),
             "next_step": "Use full elastic tensor and QHA for a high-confidence alpha(T) result.",
         }
+
+    @app.post("/api/precision/jobs")
+    async def submit_precision(file: UploadFile = File(...)) -> dict[str, object]:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        try:
+            inspect_structure(file.filename or "POSCAR", content)
+            return submit_precision_job(db_path, content, PrecisionTaskConfig())
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/api/precision/jobs/{job_id}")
+    def precision_job(job_id: str) -> dict[str, object]:
+        try:
+            return get_job(db_path, job_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     return app
 

@@ -160,6 +160,16 @@ class ApiTests(unittest.TestCase):
             "robust_high_probability_nte",
         )
 
+    @patch("te_platform.api.app.submit_precision_job")
+    def test_precision_job_submission_endpoint(self, submission_mock) -> None:
+        submission_mock.return_value = {"id": "job-123", "status": "PENDING"}
+        response = self.client.post(
+            "/api/precision/jobs",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "job-123")
+
 
 if __name__ == "__main__":
     unittest.main()
