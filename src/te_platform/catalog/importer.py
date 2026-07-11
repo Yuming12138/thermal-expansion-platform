@@ -40,7 +40,7 @@ PROPERTY_UNITS = {
     "alpha_integral_0_900K": "dimensionless",
 }
 
-MATERIAL_PATTERN = re.compile(r"^(?P<formula>.+)-(?P<external_id>mp-\d+)$")
+MATERIAL_PATTERN = re.compile(r"^(?P<formula>.+)[-_](?P<external_id>mp-\d+)$")
 
 
 @dataclass(frozen=True)

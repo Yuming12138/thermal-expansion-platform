@@ -11,9 +11,11 @@ from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.config import (
     DEFAULT_DATASET_PATH,
     DEFAULT_MANIFEST_PATH,
+    DEFAULT_RELEASE_SLUG,
     database_path,
 )
 from te_platform.db.schema import connect_database, initialize_database
+from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 
 
@@ -40,24 +42,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     stats = subparsers.add_parser("dataset-stats", help="Show imported dataset statistics")
     _database_argument(stats)
-    stats.add_argument("--release", default="nte-candidates-6702-v1")
+    stats.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
 
     search = subparsers.add_parser("search-materials", help="Search the material catalog")
     _database_argument(search)
-    search.add_argument("--release", default="nte-candidates-6702-v1")
+    search.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
     search.add_argument("--query", default="")
     search.add_argument("--limit", type=int, default=20)
 
     detail = subparsers.add_parser("material-detail", help="Show material properties")
     _database_argument(detail)
     detail.add_argument("material_key")
-    detail.add_argument("--release", default="nte-candidates-6702-v1")
+    detail.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
 
     sbr = subparsers.add_parser("classify-sbr", help="Classify thermal expansion by SBR")
     sbr.add_argument("--g", type=float, required=True, help="Shear modulus in GPa")
     sbr.add_argument(
         "--e-tilde", type=float, required=True, help="Bonding modulus in GPa"
     )
+
+    fast_sbr = subparsers.add_parser(
+        "fast-screen", help="Combine ALIGNN G with fast bonding descriptors"
+    )
+    fast_sbr.add_argument("--g-pred", type=float, required=True)
+    fast_sbr.add_argument("--e-coh", type=float, required=True)
+    fast_sbr.add_argument("--cell-volume", type=float, required=True)
+    fast_sbr.add_argument("--atom-count", type=int, required=True)
+    fast_sbr.add_argument("--avg-cn", type=float, required=True)
+    fast_sbr.add_argument("--g-mae", type=float, default=9.476007)
 
     rom = subparsers.add_parser("optimize-zte", help="Optimize two-phase ROM fraction")
     rom.add_argument("--alpha-pte", type=float, required=True)
@@ -142,6 +154,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "classify-sbr":
         _json_output(classify_sbr(args.g, args.e_tilde).to_dict())
+        return 0
+    if args.command == "fast-screen":
+        _json_output(
+            fast_screen_sbr(
+                args.g_pred,
+                args.e_coh,
+                args.cell_volume,
+                args.atom_count,
+                args.avg_cn,
+                shear_model_mae_gpa=args.g_mae,
+            ).to_dict()
+        )
         return 0
     if args.command == "optimize-zte":
         _json_output(

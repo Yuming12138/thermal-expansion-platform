@@ -1,0 +1,51 @@
+{
+  "release_slug": "nte-candidates-6701-v1-1",
+  "dataset_id": "nte-candidates-curated",
+  "title": "NTE候选材料6701条力学质量清洗数据集",
+  "version": "1.1.0",
+  "record_count": 6701,
+  "unique_material_count": 6701,
+  "parent_release_slug": "nte-candidates-6702-v1",
+  "active": true,
+  "structure_format": "POSCAR",
+  "source": {
+    "original_directory": "D:\\9.Project\\5.NTE_PTE_Composite\\0.NTE_new_dataset",
+    "original_file": "nte_ml_features_filtered.json",
+    "original_file_bytes": 36228021,
+    "original_file_sha256": "4a207206a5f10cb9ae739dfb6fc8398a42b528ba8124d23f805f2a7c6c146372"
+  },
+  "exclusions": [
+    {
+      "material_folder": "CsNO3-mp-561851",
+      "external_id": "mp-561851",
+      "reason_code": "nonpositive_bulk_modulus",
+      "observed_K_GPa": -88.209,
+      "reason": "非正体积模量，禁止进入活跃数据库及力学约束复合设计。"
+    }
+  ],
+  "property_provenance": {
+    "G_GPa": "ALIGNN jv_shear_modulus_gv prediction",
+    "E_tilde_GPa": "cohesive-energy density divided by average coordination number",
+    "full_elastic_tensor": "not available for the high-throughput prediction dataset"
+  },
+  "snapshot_file": "datasets/releases/nte_candidates_6701_v1_1/nte_candidates_6701.json.gz",
+  "snapshot_sha256": "c978df0f3b2ece78bccb546c308d2021f5f0a874d432cd51fc583e1cff969d58",
+  "schema": "datasets/schema/nte_candidates_v1.schema.json",
+  "distribution_status": "internal_research_pending_rights_review",
+  "required_fields": [
+    "material_folder",
+    "POSCAR"
+  ],
+  "known_quality_profile": [
+    {
+      "code": "porosity_out_of_unit_interval",
+      "count": 25,
+      "handling": "保留原值并标记，待核对孔隙率定义和生成方法。"
+    }
+  ],
+  "scientific_notes": [
+    "该数据集是物理引导的NTE候选集合，不代表可合成性保证。",
+    "活跃版本已经排除全部K_GPa小于等于0的记录。",
+    "ALIGNN预测标量不等价于完整弹性张量。"
+  ]
+}

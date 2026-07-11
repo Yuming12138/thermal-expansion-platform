@@ -18,6 +18,8 @@ flowchart LR
     ZTE --> REPORT
 ```
 
+用户上传结构首先进入ALIGNN快速筛选路径：预测`G`，结合MatterSim静态内聚能和CrystalNN配位数计算`E_tilde`，在秒级返回带误差区间的SBR判断。边界材料再升级到完整弹性张量和QHA工作流。
+
 关键边界：
 
 - `PotentialAdapter`只提供能量、力、应力及模型元数据；

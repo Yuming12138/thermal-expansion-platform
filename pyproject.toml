@@ -1,6 +1,6 @@
 [project]
 name = "thermal-expansion-platform"
-version = "0.1.0"
+version = "0.2.0"
 description = "热膨胀材料智能计算、筛选、数据管理与零膨胀设计平台"
 readme = "README.md"
 requires-python = ">=3.11"

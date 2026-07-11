@@ -5,6 +5,8 @@
 后续计算环境可能使用以下第三方项目，但不会把它们的源码或模型权重作为本项目自有代码登记：
 
 - ASE
+- ALIGNN（NIST Terms of Use，须保留原许可与免责声明）
+- DGL
 - MatterSim及其模型权重
 - Phonopy / Phono3py
 - pymatgen

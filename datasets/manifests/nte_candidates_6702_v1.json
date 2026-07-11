@@ -3,6 +3,8 @@
   "dataset_id": "nte-candidates-6702",
   "title": "NTE候选材料6702条首版数据快照",
   "version": "1.0.0",
+  "active": false,
+  "superseded_by": "nte-candidates-6701-v1-1",
   "record_count": 6702,
   "unique_material_count": 6702,
   "structure_format": "POSCAR",
