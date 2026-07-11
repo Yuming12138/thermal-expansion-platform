@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,10 +54,9 @@ def build_precision_command(work_directory: str | Path, config: PrecisionTaskCon
         raise ValueError("Precision task requires POSCAR and prepared workflow scripts")
     command = (
         "source /home/gmchen/anaconda3/etc/profile.d/conda.sh && "
-        "conda activate mattersim && "
         "export PATH=\"$HOME/1.software/vaspkit.1.5.1/bin:$PATH\" && "
-        f"bash {windows_to_wsl(script)} --device cpu --parallel {config.parallel_workers} "
+        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))} --device cpu --parallel {config.parallel_workers} "
         f"--qha-n {config.qha_points} --qha-mesh {config.qha_mesh} "
-        f"--qha-scale {config.qha_scale} {windows_to_wsl(work / 'POSCAR')}"
+        f"--qha-scale {config.qha_scale} {shlex.quote(windows_to_wsl(work / 'POSCAR'))}"
     )
     return ["wsl", "-d", WSL_DISTRO, "--", "bash", "-lc", command]
