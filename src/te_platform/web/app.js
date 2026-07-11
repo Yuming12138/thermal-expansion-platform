@@ -229,6 +229,19 @@ async function initialize() {
       document.querySelector("#upload-result").textContent = error.message;
     }
   });
+  document.querySelector("#agent-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const message = document.querySelector("#agent-message").value;
+    try {
+      show("#agent-result", await api("/api/agent/chat", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({message}),
+      }));
+    } catch (error) {
+      document.querySelector("#agent-result").textContent = error.message;
+    }
+  });
 }
 
 initialize();
