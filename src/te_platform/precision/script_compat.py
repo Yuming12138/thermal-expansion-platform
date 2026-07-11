@@ -6,8 +6,9 @@ from pathlib import Path
 OLD_IMPORT = "from ase.constraints import ExpCellFilter"
 OLD_THERMAL_COPY = "shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
 NEW_THERMAL_COPY = "if os.path.exists('thermal_properties.yaml'): shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
-OLD_THERMAL_COMMAND = "phonopy -t --dim"
-NEW_THERMAL_COMMAND = "phonopy -t --pretend-real --dim"
+OLD_THERMAL_COMMAND = "os.system('phonopy -t --dim \"{} {} {}\" --mesh=\"{} {} {}\" -c POSCAR'.format(self.dim[0], self.dim[1], self.dim[2], self.mesh, self.mesh, self.mesh))"
+NEW_THERMAL_INIT = "os.system('phonopy-init --dim \"{} {} {}\" -c POSCAR -d --include-fc --sp'.format(self.dim[0], self.dim[1], self.dim[2]))"
+NEW_THERMAL_COMMAND = "os.system('phonopy phonopy_params.yaml -t --pretend-real --mesh {} {} {}'.format(self.mesh, self.mesh, self.mesh))"
 NEW_IMPORT = """try:
     from ase.filters import ExpCellFilter
 except ImportError:
@@ -29,14 +30,21 @@ def make_qha_script_ase_compatible(source: str) -> str:
         raise ValueError("QHA script does not contain the expected ExpCellFilter import")
     patched_lines: list[str] = []
     for line in result.splitlines(keepends=True):
-        if line.strip() != OLD_THERMAL_COPY:
+        stripped = line.strip()
+        if stripped == OLD_THERMAL_COMMAND:
+            indentation = line[: len(line) - len(line.lstrip())]
+            line_ending = "\n" if line.endswith("\n") else ""
+            patched_lines.append(f"{indentation}{NEW_THERMAL_INIT}{line_ending}")
+            patched_lines.append(f"{indentation}{NEW_THERMAL_COMMAND}{line_ending}")
+            continue
+        if stripped != OLD_THERMAL_COPY:
             patched_lines.append(line)
             continue
 
         indentation = line[: len(line) - len(line.lstrip())]
         line_ending = "\n" if line.endswith("\n") else ""
         patched_lines.append(f"{indentation}{NEW_THERMAL_COPY}{line_ending}")
-    return "".join(patched_lines).replace(OLD_THERMAL_COMMAND, NEW_THERMAL_COMMAND)
+    return "".join(patched_lines)
 
 
 def copy_compatible_qha_script(source_path: str | Path, target_path: str | Path) -> Path:

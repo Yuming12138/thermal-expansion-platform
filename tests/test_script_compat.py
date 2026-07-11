@@ -2,6 +2,7 @@ import unittest
 
 from te_platform.precision.script_compat import (
     NEW_THERMAL_COPY,
+    NEW_THERMAL_INIT,
     NEW_THERMAL_COMMAND,
     OLD_IMPORT,
     OLD_THERMAL_COPY,
@@ -23,15 +24,16 @@ class ScriptCompatibilityTests(unittest.TestCase):
             f"{OLD_IMPORT}\n"
             "def collect():\n"
             f"    {OLD_THERMAL_COPY}\n"
-            f"    os.system('{OLD_THERMAL_COMMAND} 2 2 2')\n"
+            f"    {OLD_THERMAL_COMMAND}\n"
             "    do_other_work()\n"
             f"    {OLD_THERMAL_COPY}\n"
-            f"    os.system('{OLD_THERMAL_COMMAND} 2 2 2')\n"
+            f"    {OLD_THERMAL_COMMAND}\n"
         )
 
         patched = make_qha_script_ase_compatible(source)
 
         self.assertEqual(patched.count(NEW_THERMAL_COPY), 2)
+        self.assertEqual(patched.count(NEW_THERMAL_INIT), 2)
         self.assertEqual(patched.count(NEW_THERMAL_COMMAND), 2)
         self.assertEqual(patched, make_qha_script_ase_compatible(patched))
         compile(patched, "patched_qha_calcu.py", "exec")
