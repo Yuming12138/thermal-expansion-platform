@@ -70,10 +70,11 @@
       </section>
       <section class="panel">
         <h2>上传结构检查</h2>
-        <p class="muted">支持POSCAR和CIF的基本解析。下一阶段将直接提交至常驻ALIGNN + MatterSim快速预测Worker。</p>
+        <p class="muted">支持POSCAR和CIF。可先进行结构检查，或调用独立ALIGNN环境预测剪切模量G；完整快速SBR还需后续的MatterSim和配位数Worker。</p>
         <form id="upload-form" class="row">
           <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
-          <button>检查结构</button>
+          <button type="submit">检查结构</button>
+          <button id="alignn-button" type="button">ALIGNN预测 G</button>
         </form>
         <pre id="upload-result"></pre>
       </section>

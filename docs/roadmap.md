@@ -12,6 +12,7 @@
 
 - [x] ALIGNN剪切模量预测适配器与模型溯源
 - [x] 快速E_tilde/SBR计算和灰区判断
+- [x] 受控外部ALIGNN Worker与上传结构剪切模量预测接口
 - [ ] 独立ALIGNN运行环境及常驻预测Worker
 - [ ] MatterSim适配器
 - [ ] 弹性工作流迁移与测试

@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from te_platform.api.app import create_app
+from te_platform.workers.alignn_runner import AlignnWorkerPrediction
 
 
 POSCAR = b"""BaCrSi4O10
@@ -112,6 +114,22 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(cif.status_code, 200)
         self.assertAlmostEqual(cif.json()["inspection"]["cell_volume_a3"], 125.0)
+
+    @patch("te_platform.api.app.predict_alignn_shear")
+    def test_alignn_shear_endpoint_uses_controlled_worker(self, prediction_mock) -> None:
+        prediction_mock.return_value = AlignnWorkerPrediction(
+            prediction={"shear_modulus_gpa": 29.53, "device": "cpu"},
+            worker_seconds=3.2,
+            configuration={"python_executable": "test-python"},
+        )
+        response = self.client.post(
+            "/api/structures/alignn-shear",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["alignn"]["prediction"]["shear_modulus_gpa"], 29.53)
+        self.assertEqual(len(response.json()["structure_sha256"]), 64)
+        prediction_mock.assert_called_once()
 
 
 if __name__ == "__main__":

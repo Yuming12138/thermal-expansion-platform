@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-07-12
+
+- 增加受控外部ALIGNN Worker，隔离旧版Torch、DGL和JARVIS依赖；
+- 增加上传CIF/POSCAR后真实预测剪切模量G的API和界面入口；
+- 以BaCrSi4O10结构完成真实模型、HTTP上传接口和CPU回退验证。
+
 ## 0.3.0 - 2026-07-12
 
 - 增加可运行的FastAPI服务和浏览器材料数据库界面；

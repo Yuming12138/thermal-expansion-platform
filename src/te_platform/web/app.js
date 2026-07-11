@@ -171,6 +171,21 @@ async function initialize() {
       document.querySelector("#upload-result").textContent = error.message;
     }
   });
+  document.querySelector("#alignn-button").addEventListener("click", async () => {
+    const file = document.querySelector("#structure-file").files[0];
+    if (!file) {
+      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
+      return;
+    }
+    const body = new FormData();
+    body.append("file", file);
+    document.querySelector("#upload-result").textContent = "ALIGNN Worker计算中…";
+    try {
+      show("#upload-result", await api("/api/structures/alignn-shear", {method: "POST", body}));
+    } catch (error) {
+      document.querySelector("#upload-result").textContent = error.message;
+    }
+  });
 }
 
 initialize();
