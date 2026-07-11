@@ -6,6 +6,8 @@ from pathlib import Path
 OLD_IMPORT = "from ase.constraints import ExpCellFilter"
 OLD_THERMAL_COPY = "shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
 NEW_THERMAL_COPY = "if os.path.exists('thermal_properties.yaml'): shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
+OLD_THERMAL_COMMAND = "phonopy -t --dim"
+NEW_THERMAL_COMMAND = "phonopy -t --pretend-real --dim"
 NEW_IMPORT = """try:
     from ase.filters import ExpCellFilter
 except ImportError:
@@ -34,7 +36,7 @@ def make_qha_script_ase_compatible(source: str) -> str:
         indentation = line[: len(line) - len(line.lstrip())]
         line_ending = "\n" if line.endswith("\n") else ""
         patched_lines.append(f"{indentation}{NEW_THERMAL_COPY}{line_ending}")
-    return "".join(patched_lines)
+    return "".join(patched_lines).replace(OLD_THERMAL_COMMAND, NEW_THERMAL_COMMAND)
 
 
 def copy_compatible_qha_script(source_path: str | Path, target_path: str | Path) -> Path:
