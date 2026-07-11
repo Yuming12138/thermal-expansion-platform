@@ -25,9 +25,16 @@ def make_qha_script_ase_compatible(source: str) -> str:
         result = source.replace(OLD_IMPORT, NEW_IMPORT, 1)
     else:
         raise ValueError("QHA script does not contain the expected ExpCellFilter import")
-    if NEW_THERMAL_COPY not in result:
-        result = result.replace(OLD_THERMAL_COPY, NEW_THERMAL_COPY, 1)
-    return result
+    patched_lines: list[str] = []
+    for line in result.splitlines(keepends=True):
+        if line.strip() != OLD_THERMAL_COPY:
+            patched_lines.append(line)
+            continue
+
+        indentation = line[: len(line) - len(line.lstrip())]
+        line_ending = "\n" if line.endswith("\n") else ""
+        patched_lines.append(f"{indentation}{NEW_THERMAL_COPY}{line_ending}")
+    return "".join(patched_lines)
 
 
 def copy_compatible_qha_script(source_path: str | Path, target_path: str | Path) -> Path:

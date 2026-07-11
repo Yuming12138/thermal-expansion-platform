@@ -1,6 +1,11 @@
 import unittest
 
-from te_platform.precision.script_compat import make_qha_script_ase_compatible
+from te_platform.precision.script_compat import (
+    NEW_THERMAL_COPY,
+    OLD_IMPORT,
+    OLD_THERMAL_COPY,
+    make_qha_script_ase_compatible,
+)
 
 
 class ScriptCompatibilityTests(unittest.TestCase):
@@ -10,6 +15,21 @@ class ScriptCompatibilityTests(unittest.TestCase):
         )
         self.assertIn("from ase.filters import ExpCellFilter", patched)
         self.assertEqual(patched, make_qha_script_ase_compatible(patched))
+
+    def test_protects_every_thermal_properties_copy_idempotently(self) -> None:
+        source = (
+            f"{OLD_IMPORT}\n"
+            "def collect():\n"
+            f"    {OLD_THERMAL_COPY}\n"
+            "    do_other_work()\n"
+            f"    {OLD_THERMAL_COPY}\n"
+        )
+
+        patched = make_qha_script_ase_compatible(source)
+
+        self.assertEqual(patched.count(NEW_THERMAL_COPY), 2)
+        self.assertEqual(patched, make_qha_script_ase_compatible(patched))
+        compile(patched, "patched_qha_calcu.py", "exec")
 
 
 if __name__ == "__main__":
