@@ -99,6 +99,15 @@ def parse_precision_results(work_directory: str | Path) -> PrecisionResults:
         flags=re.IGNORECASE,
     ):
         warnings.append("VASPKIT reports non-zero unstrained elastic energy; re-optimization is recommended")
+    qha_log = root / "qha_calc.log"
+    if qha_log.is_file() and re.search(
+        r"imaginary (phonon )?frequencies|has imaginary phonon|虚频",
+        qha_log.read_text(encoding="utf-8", errors="replace"),
+        flags=re.IGNORECASE,
+    ):
+        warnings.append(
+            "Imaginary phonon frequencies were detected during QHA; treat alpha(T) as a qualitative result"
+        )
     return PrecisionResults(
         elastic_tensor_gpa=tuple(tuple(float(value) for value in row) for row in tensor),
         elastic_min_eigenvalue_gpa=float(np.min(eigenvalues)),
