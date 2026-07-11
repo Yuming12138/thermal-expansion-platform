@@ -4,6 +4,8 @@ from pathlib import Path
 
 
 OLD_IMPORT = "from ase.constraints import ExpCellFilter"
+OLD_THERMAL_COPY = "shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
+NEW_THERMAL_COPY = "if os.path.exists('thermal_properties.yaml'): shutil.copy('thermal_properties.yaml', os.path.join(thermal_properties_dir, f'thermal_properties_{i}.yaml'))"
 NEW_IMPORT = """try:
     from ase.filters import ExpCellFilter
 except ImportError:
@@ -18,10 +20,14 @@ if not hasattr(ase_constraints, "voigt_6_to_full_3x3_stress"):
 
 def make_qha_script_ase_compatible(source: str) -> str:
     if NEW_IMPORT in source:
-        return source
-    if OLD_IMPORT not in source:
+        result = source
+    elif OLD_IMPORT in source:
+        result = source.replace(OLD_IMPORT, NEW_IMPORT, 1)
+    else:
         raise ValueError("QHA script does not contain the expected ExpCellFilter import")
-    return source.replace(OLD_IMPORT, NEW_IMPORT, 1)
+    if NEW_THERMAL_COPY not in result:
+        result = result.replace(OLD_THERMAL_COPY, NEW_THERMAL_COPY, 1)
+    return result
 
 
 def copy_compatible_qha_script(source_path: str | Path, target_path: str | Path) -> Path:
