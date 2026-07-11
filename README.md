@@ -2,7 +2,7 @@
 
 英文仓库名：`thermal-expansion-platform`
 
-当前版本：`0.2.0`（ALIGNN快速筛选与6701条活跃数据库）
+当前版本：`0.3.0`（Web/API基础版、ALIGNN快速筛选与6701条活跃数据库）
 
 本项目把课题中的物性计算、剪切—键合比判别、材料数据管理、NTE/PTE复合设计和Agent工具调用整合为一套可追溯平台。
 
@@ -14,10 +14,11 @@
 - JSON/JSON.GZ数据导入、唯一性和结构完整性校验；
 - 剪切—键合比 `xi = G / E_tilde` 判别；
 - ALIGNN预测G、快速E_tilde计算及带误差区间的上传结构预筛；
-- 实测ALIGNN冷启动约3.45秒、常驻模型后单结构完整调用约0.16秒；
+- ALIGNN快速预筛链路及模型误差区间；运行时间取决于硬件与模型是否常驻，不作为对外性能承诺；
 - 两相ROM零热膨胀体积分数计算；
 - 计算任务状态机和受控Agent工具注册骨架；
 - 旧科研代码到新模块的迁移映射。
+- 可运行的FastAPI服务与浏览器界面：材料检索、G-Ẽ景观、SBR、ROM和CIF/POSCAR基础检查。
 
 ## 项目结构
 
@@ -54,6 +55,16 @@ python -m te_platform optimize-zte --alpha-pte 8.0 --alpha-nte -12.0
 .\scripts\tep.ps1 dataset-stats
 ```
 
+## 启动Web界面（PowerShell）
+
+```powershell
+uv sync
+.\scripts\run-web.ps1
+```
+
+随后在浏览器打开 <http://127.0.0.1:8000>。接口文档位于
+<http://127.0.0.1:8000/docs>，测试可用 `uv run python -m unittest discover -s tests -v`。
+
 ## 科学边界
 
 - 正式PTE/NTE分类边界使用 `xi_c = 2.84`；
@@ -64,8 +75,8 @@ python -m te_platform optimize-zte --alpha-pte 8.0 --alpha-nte -12.0
 
 ## 下一阶段
 
-1. 将现有MatterSim弹性与QHA流程迁移到统一模型适配器；
-2. 增加FastAPI服务和材料检索接口；
-3. 将完整ROM曲线优化和修正后的Schapery–HS模型迁入；
+1. 把上传结构连接到常驻ALIGNN + MatterSim快速预测Worker；
+2. 将现有MatterSim弹性与QHA流程迁移到统一模型适配器；
+3. 将完整ROM曲线优化和修正后的Schapery-HS模型迁入；
 4. 建立计算Worker、断点续算和结果质量标记；
-5. 开发Web界面和受控工具调用型Agent。
+5. 开发受控工具调用型Agent和科研报告导出。

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>热膨胀材料智能计算与设计平台</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Thermal Expansion Materials Platform</p>
+        <h1>热膨胀材料智能计算与设计平台</h1>
+      </div>
+      <span id="health-status" class="status">连接中</span>
+    </header>
+    <main>
+      <section class="stats" id="stats"></section>
+      <section class="grid two">
+        <article class="panel">
+          <h2>材料数据库</h2>
+          <div class="row">
+            <input id="search-input" placeholder="化学式、MP ID或材料名称">
+            <button id="search-button">检索</button>
+          </div>
+          <div id="material-results" class="table-wrap"></div>
+        </article>
+        <article class="panel">
+          <h2>材料详情</h2>
+          <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
+        </article>
+      </section>
+      <section class="panel">
+        <h2>G–Ẽ 热膨胀景观</h2>
+        <p class="muted">蓝色：较弱NTE候选；橙色：较强PTE候选。</p>
+        <canvas id="landscape" width="1100" height="360"></canvas>
+      </section>
+      <section class="grid three">
+        <article class="panel">
+          <h2>SBR判别</h2>
+          <form id="sbr-form">
+            <label>剪切模量 G (GPa)<input name="g" type="number" step="any" value="20.5" required></label>
+            <label>键合模量 Ẽ (GPa)<input name="e" type="number" step="any" value="8.0" required></label>
+            <button>判别 PTE / NTE</button>
+          </form>
+          <pre id="sbr-result"></pre>
+        </article>
+        <article class="panel">
+          <h2>快速筛选演示</h2>
+          <form id="fast-form">
+            <label>ALIGNN预测 G (GPa)<input name="g" type="number" step="any" value="20.5" required></label>
+            <label>内聚能 (eV/atom)<input name="ecoh" type="number" step="any" value="-4.2" required></label>
+            <label>晶胞体积 (Å³)<input name="volume" type="number" step="any" value="120" required></label>
+            <label>原子数<input name="atoms" type="number" step="1" value="12" required></label>
+            <label>平均配位数<input name="cn" type="number" step="any" value="3.5" required></label>
+            <button>计算快速判断</button>
+          </form>
+          <pre id="fast-result"></pre>
+        </article>
+        <article class="panel">
+          <h2>ZTE复合设计（ROM）</h2>
+          <form id="rom-form">
+            <label>PTE α (ppm/K)<input name="pte" type="number" step="any" value="8" required></label>
+            <label>NTE α (ppm/K)<input name="nte" type="number" step="any" value="-12" required></label>
+            <label>目标 α (ppm/K)<input name="target" type="number" step="any" value="0" required></label>
+            <button>优化体积分数</button>
+          </form>
+          <pre id="rom-result"></pre>
+        </article>
+      </section>
+      <section class="panel">
+        <h2>上传结构检查</h2>
+        <p class="muted">支持POSCAR和CIF的基本解析。下一阶段将直接提交至常驻ALIGNN + MatterSim快速预测Worker。</p>
+        <form id="upload-form" class="row">
+          <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
+          <button>检查结构</button>
+        </form>
+        <pre id="upload-result"></pre>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
