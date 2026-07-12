@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from te_platform.workers.mattersim_runner import DEFAULT_MATTERSIM_PYTHON
+from te_platform.config import compute_setting
 
 
 WORKER_SCRIPT = Path(__file__).with_name("structure_convert_worker.py")
@@ -28,7 +28,10 @@ def write_precision_poscar(
 
     source = work / "input.cif"
     source.write_bytes(content)
-    python = Path(os.environ.get("TEP_MATTERSIM_PYTHON", DEFAULT_MATTERSIM_PYTHON))
+    python_setting = compute_setting("TEP_MATTERSIM_PYTHON")
+    if not python_setting:
+        raise RuntimeError("CIF conversion is not configured: set TEP_MATTERSIM_PYTHON")
+    python = Path(python_setting).expanduser()
     if not python.is_file():
         raise RuntimeError(f"Missing MatterSim Python executable: {python}")
     try:

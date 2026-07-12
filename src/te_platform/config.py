@@ -11,6 +11,7 @@ DEFAULT_WORKSPACE_DATABASE_PATH = PROJECT_ROOT / "var" / "workspace.sqlite"
 DEFAULT_AGENT_BASE_URL = "https://api.cmsg666.xyz/v1"
 DEFAULT_AGENT_MODEL = "gpt-5.6-luna"
 DEFAULT_AGENT_ENV_PATH = PROJECT_ROOT / "var" / "config" / "agent.env"
+DEFAULT_COMPUTE_ENV_PATH = PROJECT_ROOT / "var" / "config" / "compute.env"
 DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
 DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
 DEFAULT_DATASET_PATH = (
@@ -77,6 +78,38 @@ def load_agent_env(path: Path | None = None) -> dict[str, str]:
         if key in allowed:
             values[key] = value.strip().strip('"').strip("'")
     return values
+
+
+def load_compute_env(path: Path | None = None) -> dict[str, str]:
+    env_path = path or DEFAULT_COMPUTE_ENV_PATH
+    if not env_path.is_file():
+        return {}
+    allowed = {
+        "TEP_ALIGNN_PYTHON",
+        "TEP_ALIGNN_SOURCE",
+        "TEP_ALIGNN_MODEL_DIR",
+        "TEP_MATTERSIM_PYTHON",
+        "TEP_MATTERSIM_MODEL",
+        "TEP_PRECISION_SOURCE_ROOT",
+        "TEP_WSL_DISTRO",
+        "TEP_PRECISION_CONDA_INIT",
+        "TEP_PRECISION_CONDA_ENV",
+        "TEP_VASPKIT_BIN_DIR",
+    }
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in allowed:
+            values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def compute_setting(name: str, default: str | None = None) -> str | None:
+    return os.environ.get(name, load_compute_env().get(name, default))
 
 
 def agent_settings() -> AgentSettings:

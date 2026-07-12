@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from te_platform.config import compute_setting
 
-DEFAULT_MATTERSIM_PYTHON = Path(r"D:\1.Program\1.Anaconda\envs\mattersim\python.exe")
 DEFAULT_MATTERSIM_MODEL = "mattersim-v1.0.0-5M"
 RESULT_PREFIX = "TEP_MATTERSIM_RESULT="
 WORKER_SCRIPT = Path(__file__).with_name("mattersim_worker.py")
@@ -28,8 +27,13 @@ def predict_mattersim_descriptors(
     *,
     timeout_seconds: float = 90.0,
 ) -> MatterSimPrediction:
-    python = Path(os.environ.get("TEP_MATTERSIM_PYTHON", DEFAULT_MATTERSIM_PYTHON))
-    model = os.environ.get("TEP_MATTERSIM_MODEL", DEFAULT_MATTERSIM_MODEL)
+    import os
+
+    python_setting = compute_setting("TEP_MATTERSIM_PYTHON")
+    if not python_setting:
+        raise RuntimeError("MatterSim is not configured: set TEP_MATTERSIM_PYTHON")
+    python = Path(python_setting).expanduser()
+    model = compute_setting("TEP_MATTERSIM_MODEL", DEFAULT_MATTERSIM_MODEL) or DEFAULT_MATTERSIM_MODEL
     if not python.is_file():
         raise RuntimeError(f"Missing MatterSim Python executable: {python}")
     started = time.perf_counter()

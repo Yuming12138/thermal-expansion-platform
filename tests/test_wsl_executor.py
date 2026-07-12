@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command
@@ -13,14 +14,21 @@ class WslExecutorTests(unittest.TestCase):
             tools = work / "workflow_scripts"
             tools.mkdir()
             (tools / "complete_properties_calc.sh").write_text("#!/bin/bash", encoding="utf-8")
-            command = build_precision_command(work, PrecisionTaskConfig(qha_points=11))
+            settings = {
+                "TEP_WSL_DISTRO": "Ubuntu-24.04",
+                "TEP_PRECISION_CONDA_INIT": "/opt/conda/etc/profile.d/conda.sh",
+                "TEP_PRECISION_CONDA_ENV": "mattersim",
+                "TEP_VASPKIT_BIN_DIR": "/opt/vaspkit/bin",
+            }
+            with patch.dict("os.environ", settings):
+                command = build_precision_command(work, PrecisionTaskConfig(qha_points=11))
+                elastic = build_precision_command(work, PrecisionTaskConfig(), mode="elastic")
+                qha = build_precision_command(work, PrecisionTaskConfig(), mode="qha")
             self.assertEqual(command[:5], ["wsl", "-d", "Ubuntu-24.04", "--", "bash"])
             self.assertIn("--qha-n 11", command[-1])
             self.assertNotIn("--elastic-only", command[-1])
             self.assertNotIn("--thermal-only", command[-1])
 
-            elastic = build_precision_command(work, PrecisionTaskConfig(), mode="elastic")
-            qha = build_precision_command(work, PrecisionTaskConfig(), mode="qha")
             self.assertIn("--elastic-only", elastic[-1])
             self.assertIn("--thermal-only", qha[-1])
 

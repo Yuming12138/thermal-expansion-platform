@@ -2,7 +2,7 @@
 
 英文仓库名：`thermal-expansion-platform`
 
-当前版本：`0.5.0`（6701条活跃数据库、快速筛选、精确任务、ZTE设计与受控Agent）
+当前版本：`0.8.0`（6701条活跃数据库、快速筛选、精确任务、ZTE设计与受控Agent）
 
 本项目把课题中的物性计算、剪切—键合比判别、材料数据管理、NTE/PTE复合设计和Agent工具调用整合为一套可追溯平台。
 
@@ -74,6 +74,32 @@ uv sync
 
 随后在浏览器打开 <http://127.0.0.1:8000>。接口文档位于
 <http://127.0.0.1:8000/docs>，测试可用 `uv run python -m unittest discover -s tests -v`。
+
+## 跨平台便携启动
+
+项目根目录提供三套启动器，它们使用同一个 `tep-web` 入口，并将 Python、虚拟环境和依赖缓存保存在项目内 `.runtime/`：
+
+```text
+start-windows.cmd      Windows 双击启动
+start-macos.command    macOS 启动
+start-linux.sh         Linux 启动
+```
+
+便携版详细说明见 [README-PORTABLE.md](README-PORTABLE.md)。
+
+构建不含个人配置的普通发布包：
+
+```powershell
+uv run python scripts\build-portable-release.py
+```
+
+仅向可信合作者发送时，可以显式构建包含当前 `var/config/agent.env` 的私有包：
+
+```powershell
+uv run python scripts\build-portable-release.py --include-local-agent-config
+```
+
+私有包名称带有 `collaborator-private`，不得上传到公开仓库或公共网盘。构建脚本默认不会包含 Agent 密钥。
 
 Web 服务默认使用两个完全分离的数据库：
 

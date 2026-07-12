@@ -39,3 +39,6 @@ FORCE_CONSTANTS
 # Frontend build outputs
 apps/web/node_modules/
 apps/web/dist/
+
+# Generated cross-platform portable release archives
+portable-release/

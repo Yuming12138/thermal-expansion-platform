@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from te_platform.config import compute_setting
 from te_platform.precision.script_compat import copy_compatible_qha_script
 
 
-SOURCE_ROOT = Path(r"D:\9.Project\10.recalcu_elastic_nte\auto_elastic_sh")
-WSL_DISTRO = "Ubuntu-24.04"
 ALLOWED_QHA_POINTS = frozenset({7, 9, 11})
 
 
@@ -41,9 +40,15 @@ def prepare_precision_task(work_directory: str | Path) -> Path:
     work = Path(work_directory)
     tools = work / "workflow_scripts"
     tools.mkdir(parents=True, exist_ok=True)
+    source_setting = compute_setting("TEP_PRECISION_SOURCE_ROOT")
+    if not source_setting:
+        raise RuntimeError(
+            "Precision workflows are not configured: set TEP_PRECISION_SOURCE_ROOT"
+        )
+    source_root = Path(source_setting).expanduser()
     for name in ("complete_properties_calc.sh", "elastic_calculator.py", "file_utils.py"):
-        shutil.copy2(SOURCE_ROOT / name, tools / name)
-    copy_compatible_qha_script(SOURCE_ROOT / "qha_calcu.py", tools / "qha_calcu.py")
+        shutil.copy2(source_root / name, tools / name)
+    copy_compatible_qha_script(source_root / "qha_calcu.py", tools / "qha_calcu.py")
     return tools
 
 
@@ -63,11 +68,25 @@ def build_precision_command(
         "elastic": " --elastic-only",
         "qha": " --thermal-only",
     }[mode]
+    distro = compute_setting("TEP_WSL_DISTRO", "Ubuntu-24.04") or "Ubuntu-24.04"
+    conda_init = compute_setting("TEP_PRECISION_CONDA_INIT")
+    conda_environment = compute_setting("TEP_PRECISION_CONDA_ENV", "mattersim") or "mattersim"
+    vaspkit_bin = compute_setting("TEP_VASPKIT_BIN_DIR")
+    missing = [
+        name
+        for name, value in (
+            ("TEP_PRECISION_CONDA_INIT", conda_init),
+            ("TEP_VASPKIT_BIN_DIR", vaspkit_bin),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError("Precision WSL environment is not configured: " + ", ".join(missing))
     command = (
-        "source /home/gmchen/anaconda3/etc/profile.d/conda.sh && "
-        "export PATH=\"$HOME/1.software/vaspkit.1.5.1/bin:$PATH\" && "
-        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))}{mode_flag} --device cpu --parallel {config.parallel_workers} "
+        f"source {shlex.quote(conda_init)} && "
+        f"export PATH={shlex.quote(vaspkit_bin)}:\"$PATH\" && "
+        f"conda run -n {shlex.quote(conda_environment)} bash {shlex.quote(windows_to_wsl(script))}{mode_flag} --device cpu --parallel {config.parallel_workers} "
         f"--qha-n {config.qha_points} --qha-mesh {config.qha_mesh} "
         f"--qha-scale {config.qha_scale} {shlex.quote(windows_to_wsl(work / 'POSCAR'))}"
     )
-    return ["wsl", "-d", WSL_DISTRO, "--", "bash", "-lc", command]
+    return ["wsl", "-d", distro, "--", "bash", "-lc", command]

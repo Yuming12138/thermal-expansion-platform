@@ -1,49 +1,46 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from te_platform.config import compute_setting
 
-DEFAULT_ALIGNN_PYTHON = Path(r"D:\1.Program\1.Anaconda\envs\alignn\python.exe")
-DEFAULT_ALIGNN_SOURCE = Path(r"D:\9.Project\12.High_through_screening\alignn-main")
-DEFAULT_ALIGNN_MODEL = Path(
-    r"D:\9.Project\12.High_through_screening\jv_shear_modulus_gv_alignn"
-)
 RESULT_PREFIX = "TEP_ALIGNN_RESULT="
 WORKER_SCRIPT = Path(__file__).with_name("alignn_worker.py")
 
 
 @dataclass(frozen=True)
 class AlignnWorkerConfiguration:
-    python_executable: Path
-    source_root: Path
-    model_dir: Path
+    python_executable: Path | None
+    source_root: Path | None
+    model_dir: Path | None
 
     @classmethod
     def from_environment(cls) -> "AlignnWorkerConfiguration":
         return cls(
-            python_executable=Path(
-                os.environ.get("TEP_ALIGNN_PYTHON", DEFAULT_ALIGNN_PYTHON)
-            ),
-            source_root=Path(
-                os.environ.get("TEP_ALIGNN_SOURCE", DEFAULT_ALIGNN_SOURCE)
-            ),
-            model_dir=Path(
-                os.environ.get("TEP_ALIGNN_MODEL_DIR", DEFAULT_ALIGNN_MODEL)
-            ),
+            python_executable=_optional_path(compute_setting("TEP_ALIGNN_PYTHON")),
+            source_root=_optional_path(compute_setting("TEP_ALIGNN_SOURCE")),
+            model_dir=_optional_path(compute_setting("TEP_ALIGNN_MODEL_DIR")),
         )
 
     def issues(self) -> tuple[str, ...]:
+        issues = []
         checks = (
-            (self.python_executable, "ALIGNN Python executable"),
-            (self.source_root, "ALIGNN source directory"),
-            (self.model_dir / "config.json", "ALIGNN model configuration"),
+            (self.python_executable, "TEP_ALIGNN_PYTHON", "ALIGNN Python executable"),
+            (self.source_root, "TEP_ALIGNN_SOURCE", "ALIGNN source directory"),
+            (self.model_dir, "TEP_ALIGNN_MODEL_DIR", "ALIGNN model directory"),
         )
-        return tuple(f"Missing {label}: {path}" for path, label in checks if not path.exists())
+        for path, setting, label in checks:
+            if path is None:
+                issues.append(f"Not configured: {setting}")
+            elif not path.exists():
+                issues.append(f"Missing {label}: {path}")
+        if self.model_dir is not None and not (self.model_dir / "config.json").is_file():
+            issues.append(f"Missing ALIGNN model configuration: {self.model_dir / 'config.json'}")
+        return tuple(issues)
 
 
 @dataclass(frozen=True)
@@ -65,6 +62,9 @@ def predict_alignn_shear(
     config = configuration or AlignnWorkerConfiguration.from_environment()
     if issues := config.issues():
         raise RuntimeError("; ".join(issues))
+    assert config.python_executable is not None
+    assert config.source_root is not None
+    assert config.model_dir is not None
     command = [
         str(config.python_executable),
         str(WORKER_SCRIPT),
@@ -75,6 +75,8 @@ def predict_alignn_shear(
         "--model-dir",
         str(config.model_dir.resolve()),
     ]
+    import os
+
     environment = os.environ.copy()
     environment["PYTHONUTF8"] = "1"
     started = time.perf_counter()
@@ -109,3 +111,7 @@ def predict_alignn_shear(
                 },
             )
     raise RuntimeError("ALIGNN worker returned no machine-readable result")
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value).expanduser() if value else None

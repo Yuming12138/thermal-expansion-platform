@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 tep = "te_platform.cli:main"
+tep-web = "te_platform.launcher:main"
 
 [build-system]
 requires = ["setuptools>=69"]
