@@ -73,7 +73,12 @@ class MaterialPairTests(unittest.TestCase):
             self.assertEqual(rejected_choices, [])
             self.assertAlmostEqual(result["nte_volume_fraction"], 0.5)
             self.assertAlmostEqual(result["rms_error_ppm_per_k"], 0.0)
-            self.assertEqual(result["temperatures_k"], [300.0, 600.0])
+            self.assertEqual(result["temperature_min_k"], 300.0)
+            self.assertEqual(result["temperature_max_k"], 600.0)
+            self.assertEqual(result["curve_temperature_min_k"], 0.0)
+            self.assertEqual(result["curve_temperature_max_k"], 600.0)
+            self.assertEqual(result["temperatures_k"], [0.0, 300.0, 600.0])
+            self.assertEqual(result["mixed_alpha_ppm_per_k"], [0.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":

@@ -689,8 +689,10 @@ function renderZteDesign(result) {
       ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K"],
       ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K"],
     ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
-    "；NTE：" + escapeHtml(result.nte_material.material_key) + "；有效温区：" +
-    numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) + " K</p>" +
+    "；NTE：" + escapeHtml(result.nte_material.material_key) + "；优化温区：" +
+    numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) +
+    " K；完整曲线：" + numeric(result.curve_temperature_min_k) + "–" +
+    numeric(result.curve_temperature_max_k) + " K</p>" +
     "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>";
   drawZteCurves(result);
 }

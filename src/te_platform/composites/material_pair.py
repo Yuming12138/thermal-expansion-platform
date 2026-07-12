@@ -141,7 +141,7 @@ def optimize_material_pair(
     overlap_max = min(float(pte["points"][-1][0]), float(nte["points"][-1][0]), temperature_max_k)
     if overlap_max <= overlap_min:
         raise ValueError("Selected materials have no overlapping curve points in the requested temperature range")
-    temperatures = sorted(
+    optimization_temperatures = sorted(
         {
             float(point[0])
             for curve in (pte["points"], nte["points"])
@@ -150,19 +150,50 @@ def optimize_material_pair(
         }
         | {overlap_min, overlap_max}
     )
-    if len(temperatures) < 2:
+    if len(optimization_temperatures) < 2:
         raise ValueError("At least two common temperature samples are required")
+    optimization_pte_alpha = [
+        _interpolate(pte["points"], temperature) * 1_000_000
+        for temperature in optimization_temperatures
+    ]
+    optimization_nte_alpha = [
+        _interpolate(nte["points"], temperature) * 1_000_000
+        for temperature in optimization_temperatures
+    ]
+    result = optimize_curve_rom(
+        optimization_pte_alpha, optimization_nte_alpha, target_alpha_ppm_per_k
+    )
+
+    curve_min = max(float(pte["points"][0][0]), float(nte["points"][0][0]))
+    curve_max = min(float(pte["points"][-1][0]), float(nte["points"][-1][0]))
+    temperatures = sorted(
+        {
+            float(point[0])
+            for curve in (pte["points"], nte["points"])
+            for point in curve
+            if curve_min <= float(point[0]) <= curve_max
+        }
+        | {curve_min, curve_max}
+    )
     pte_alpha = [_interpolate(pte["points"], temperature) * 1_000_000 for temperature in temperatures]
     nte_alpha = [_interpolate(nte["points"], temperature) * 1_000_000 for temperature in temperatures]
-    result = optimize_curve_rom(pte_alpha, nte_alpha, target_alpha_ppm_per_k)
+    mixed_alpha = [
+        (1.0 - result.nte_volume_fraction) * pte_value
+        + result.nte_volume_fraction * nte_value
+        for pte_value, nte_value in zip(pte_alpha, nte_alpha)
+    ]
+    result_data = result.to_dict()
+    result_data["mixed_alpha_ppm_per_k"] = mixed_alpha
     return {
         "pte_material": {key: pte[key] for key in ("material_key", "formula", "job_id", "source_path")},
         "nte_material": {key: nte[key] for key in ("material_key", "formula", "job_id", "source_path")},
         "temperature_min_k": overlap_min,
         "temperature_max_k": overlap_max,
+        "curve_temperature_min_k": curve_min,
+        "curve_temperature_max_k": curve_max,
         "temperatures_k": temperatures,
         "pte_alpha_ppm_per_k": pte_alpha,
         "nte_alpha_ppm_per_k": nte_alpha,
         "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
-        **result.to_dict(),
+        **result_data,
     }
