@@ -26,7 +26,9 @@ from te_platform.jobs.precision_runner import (
     precision_progress,
     refresh_precision_result,
     resume_precision_qha,
+    submit_elastic_job,
     submit_precision_job,
+    submit_qha_job,
 )
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
@@ -293,7 +295,35 @@ def create_app(database: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="The uploaded structure is empty")
         try:
             inspect_structure(file.filename or "POSCAR", content)
-            return submit_precision_job(db_path, content, PrecisionTaskConfig())
+            return submit_precision_job(
+                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+            )
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/precision/elastic-jobs")
+    async def submit_elastic(file: UploadFile = File(...)) -> dict[str, object]:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        try:
+            inspect_structure(file.filename or "POSCAR", content)
+            return submit_elastic_job(
+                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+            )
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/precision/qha-jobs")
+    async def submit_qha(file: UploadFile = File(...)) -> dict[str, object]:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        try:
+            inspect_structure(file.filename or "POSCAR", content)
+            return submit_qha_job(
+                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+            )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 

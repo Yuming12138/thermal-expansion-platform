@@ -5,11 +5,16 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from typing import Literal
 
 from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
-from te_platform.precision.results import parse_precision_results
+from te_platform.precision.results import parse_elastic_results, parse_precision_results, parse_qha_results
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
+from te_platform.screening.fast_sbr import calculate_bonding_modulus
+from te_platform.screening.sbr import classify_sbr
+from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
+from te_platform.workers.structure_converter import write_precision_poscar
 
 
 _QHA_DISPLACEMENT_PROGRESS = re.compile(
@@ -54,14 +59,60 @@ def _qha_displacement_progress(work: Path) -> dict[str, str | int | float] | Non
     }
 
 
-def submit_precision_job(database: str | Path, structure: bytes, config: PrecisionTaskConfig) -> dict[str, object]:
-    job = create_job(database, workflow="precision_elastic_qha", parameters={"config": config.__dict__})
+CalculationMode = Literal["combined", "elastic", "qha"]
+
+
+def submit_precision_job(
+    database: str | Path,
+    structure: bytes,
+    config: PrecisionTaskConfig,
+    filename: str = "POSCAR",
+) -> dict[str, object]:
+    return _submit_job(database, structure, config, filename=filename, mode="combined")
+
+
+def submit_elastic_job(
+    database: str | Path,
+    structure: bytes,
+    config: PrecisionTaskConfig,
+    filename: str = "POSCAR",
+) -> dict[str, object]:
+    return _submit_job(database, structure, config, filename=filename, mode="elastic")
+
+
+def submit_qha_job(
+    database: str | Path,
+    structure: bytes,
+    config: PrecisionTaskConfig,
+    filename: str = "POSCAR",
+) -> dict[str, object]:
+    return _submit_job(database, structure, config, filename=filename, mode="qha")
+
+
+def _submit_job(
+    database: str | Path,
+    structure: bytes,
+    config: PrecisionTaskConfig,
+    *,
+    filename: str,
+    mode: CalculationMode,
+) -> dict[str, object]:
+    workflow = {
+        "combined": "precision_elastic_qha",
+        "elastic": "precision_elastic",
+        "qha": "precision_qha",
+    }[mode]
+    job = create_job(
+        database,
+        workflow=workflow,
+        parameters={"config": config.__dict__, "mode": mode, "filename": filename},
+    )
     work = Path(database).parent / "runs" / job["id"]
     work.mkdir(parents=True, exist_ok=False)
-    (work / "POSCAR").write_bytes(structure)
+    write_precision_poscar(work, filename=filename, content=structure)
     prepare_precision_task(work)
     transition_job(database, job["id"], JobStatus.QUEUED)
-    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, False), daemon=True).start()
+    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, mode), daemon=True).start()
     return job
 
 
@@ -78,7 +129,7 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
             "config": config.__dict__,
             "parent_job_id": parent_job_id,
             "elastic_source_job_id": elastic_source_job_id,
-            "mode": "thermal_only",
+            "mode": "qha",
         },
     )
     work = Path(database).parent / "runs" / job["id"]
@@ -92,7 +143,7 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
         shutil.copy2(source_bm_log, elastic_work / "BM_SS.log")
     prepare_precision_task(work)
     transition_job(database, job["id"], JobStatus.QUEUED)
-    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, True), daemon=True).start()
+    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, "qha"), daemon=True).start()
     return job
 
 
@@ -117,18 +168,50 @@ def refresh_precision_result(database: str | Path, job_id: str) -> dict[str, obj
     """Reparse a succeeded task after result-parser or quality-rule updates."""
     if get_job(database, job_id)["status"] != JobStatus.SUCCEEDED.value:
         raise ValueError("Only a succeeded task can have its parsed result refreshed")
+    job = get_job(database, job_id)
     work = Path(database).parent / "runs" / job_id
-    result = parse_precision_results(work).to_dict()
+    mode = job["parameters"].get("mode", "combined")
+    result = _parse_completed_result(work, mode)
     return replace_completed_job_result(database, job_id, result)
 
 
-def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig, thermal_only: bool) -> None:
+def _parse_completed_result(work: Path, mode: str) -> dict[str, object]:
+    if mode == "qha":
+        return {"calculation_mode": "qha", **parse_qha_results(work).to_dict()}
+    if mode == "elastic":
+        elastic = parse_elastic_results(work)
+        mattersim = predict_mattersim_descriptors(work / "POSCAR")
+        descriptors = mattersim.descriptors
+        bonding = calculate_bonding_modulus(
+            float(descriptors["cohesive_energy_ev_per_atom"]),
+            float(descriptors["cell_volume_a3"]),
+            int(descriptors["atom_count"]),
+            float(descriptors["average_coordination_number"]),
+        )
+        sbr = classify_sbr(elastic.shear_modulus_hill_gpa, bonding.bonding_modulus_gpa)
+        return {
+            "calculation_mode": "elastic",
+            **elastic.to_dict(),
+            "mattersim": mattersim.to_dict(),
+            "bonding": bonding.to_dict(),
+            "sbr": sbr.to_dict(),
+        }
+    return {"calculation_mode": "combined", **parse_precision_results(work).to_dict()}
+
+
+def _run(
+    database: Path,
+    job_id: str,
+    work: Path,
+    config: PrecisionTaskConfig,
+    mode: CalculationMode,
+) -> None:
     transition_job(database, job_id, JobStatus.RUNNING)
     log = work / "workflow.log"
     try:
         with log.open("w", encoding="utf-8") as handle:
             completed = subprocess.run(
-                build_precision_command(work, config, thermal_only=thermal_only),
+                build_precision_command(work, config, mode=mode),
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 check=False,
@@ -136,7 +219,7 @@ def _run(database: Path, job_id: str, work: Path, config: PrecisionTaskConfig, t
         if completed.returncode != 0:
             transition_job(database, job_id, JobStatus.FAILED, error_message=f"Workflow failed; see {log}")
             return
-        result = parse_precision_results(work).to_dict()
+        result = _parse_completed_result(work, mode)
         transition_job(database, job_id, JobStatus.SUCCEEDED, result=result)
     except Exception as error:
         transition_job(database, job_id, JobStatus.FAILED, error_message=str(error))

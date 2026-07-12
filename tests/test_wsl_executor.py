@@ -16,6 +16,13 @@ class WslExecutorTests(unittest.TestCase):
             command = build_precision_command(work, PrecisionTaskConfig(qha_points=11))
             self.assertEqual(command[:5], ["wsl", "-d", "Ubuntu-24.04", "--", "bash"])
             self.assertIn("--qha-n 11", command[-1])
+            self.assertNotIn("--elastic-only", command[-1])
+            self.assertNotIn("--thermal-only", command[-1])
+
+            elastic = build_precision_command(work, PrecisionTaskConfig(), mode="elastic")
+            qha = build_precision_command(work, PrecisionTaskConfig(), mode="qha")
+            self.assertIn("--elastic-only", elastic[-1])
+            self.assertIn("--thermal-only", qha[-1])
 
 
 if __name__ == "__main__":

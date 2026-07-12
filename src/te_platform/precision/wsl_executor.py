@@ -4,6 +4,7 @@ import shutil
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from te_platform.precision.script_compat import copy_compatible_qha_script
 
@@ -50,18 +51,22 @@ def build_precision_command(
     work_directory: str | Path,
     config: PrecisionTaskConfig,
     *,
-    thermal_only: bool = False,
+    mode: Literal["combined", "elastic", "qha"] = "combined",
 ) -> list[str]:
     config.validate()
     work = Path(work_directory).resolve()
     script = work / "workflow_scripts" / "complete_properties_calc.sh"
     if not (work / "POSCAR").is_file() or not script.is_file():
         raise ValueError("Precision task requires POSCAR and prepared workflow scripts")
-    mode = " --thermal-only" if thermal_only else ""
+    mode_flag = {
+        "combined": "",
+        "elastic": " --elastic-only",
+        "qha": " --thermal-only",
+    }[mode]
     command = (
         "source /home/gmchen/anaconda3/etc/profile.d/conda.sh && "
         "export PATH=\"$HOME/1.software/vaspkit.1.5.1/bin:$PATH\" && "
-        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))}{mode} --device cpu --parallel {config.parallel_workers} "
+        f"conda run -n mattersim bash {shlex.quote(windows_to_wsl(script))}{mode_flag} --device cpu --parallel {config.parallel_workers} "
         f"--qha-n {config.qha_points} --qha-mesh {config.qha_mesh} "
         f"--qha-scale {config.qha_scale} {shlex.quote(windows_to_wsl(work / 'POSCAR'))}"
     )

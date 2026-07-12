@@ -30,6 +30,21 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .landscape-wrap { position: relative; }
 #landscape { width: 100%; max-width: 100%; height: auto; display: block; border: 1px solid #ebf0f5; border-radius: 8px; background: #fcfdff; }
 .landscape-tooltip { position: absolute; z-index: 3; max-width: 260px; pointer-events: none; padding: 7px 9px; border-radius: 6px; background: rgba(20,34,56,.94); color: #fff; font-size: .75rem; line-height: 1.45; box-shadow: 0 4px 14px rgba(20,34,56,.2); }
+.prediction-workbench { margin-bottom: 16px; }
+.structure-summary { margin: 10px 0 14px; min-height: 22px; }
+.prediction-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.prediction-actions button { min-height: 82px; display: grid; place-content: center; gap: 5px; text-align: center; }
+.prediction-actions button strong { font-size: .96rem; }
+.prediction-actions button span { font-size: .75rem; opacity: .78; }
+.prediction-actions button:disabled { cursor: wait; opacity: .62; }
+.prediction-result { min-height: 74px; margin-top: 14px; padding: 12px; border-radius: 8px; background: #f5f8fb; }
+.prediction-result h3 { margin: 0 0 10px; color: #24384d; }
+.prediction-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.prediction-metrics div { padding: 8px; border-radius: 7px; background: #fff; border: 1px solid #e4ebf2; }
+.prediction-metrics span { display: block; color: #667789; font-size: .72rem; }
+.prediction-metrics strong { display: block; margin-top: 4px; color: #1c536d; font-size: .9rem; overflow-wrap: anywhere; }
+.tensor-table { margin-top: 12px; font-variant-numeric: tabular-nums; }
+.prediction-thermal-curve { width: 100%; height: auto; display: block; margin-top: 12px; border: 1px solid #e4ebf2; border-radius: 8px; background: #fff; }
 .thermal-curve { width: 100%; max-width: 100%; margin-top: 12px; border: 1px solid #ebf0f5; border-radius: 8px; background: #fcfdff; }
 .curve-note { margin: 8px 0 0; color: #667789; font-size: .76rem; line-height: 1.45; }
 .property-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 14px 0; }
@@ -37,5 +52,5 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .property-grid dt { color: #667789; font-size: .73rem; }
 .property-grid dd { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 600; font-size: .84rem; }
 summary { cursor: pointer; color: #1d6b83; font-size: .86rem; }
-@media (max-width: 950px) { .stats, .grid.two, .grid.three { grid-template-columns: 1fr; } header { align-items: flex-start; gap: 12px; flex-direction: column; } }
+@media (max-width: 950px) { .stats, .grid.two, .grid.three, .prediction-actions, .prediction-metrics { grid-template-columns: 1fr; } header { align-items: flex-start; gap: 12px; flex-direction: column; } }
 @media (max-width: 560px) { main { padding: 14px; } header { padding: 18px; } .panel, .stat { padding: 14px; } .row { align-items: stretch; flex-direction: column; } .property-grid { grid-template-columns: 1fr; } }

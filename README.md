@@ -16,13 +16,14 @@
 - ALIGNN预测G、快速E_tilde计算及带误差区间的上传结构预筛；
 - ALIGNN快速预筛链路及模型误差区间；运行时间取决于硬件与模型是否常驻，不作为对外性能承诺；
 - 两相ROM零热膨胀体积分数计算；
+- 分级结构预测入口：快速模式运行 ALIGNN G + MatterSim/CrystalNN Ẽ，精准模式独立计算完整弹性张量并使用 Hill G 完成 SBR，QHA 模式独立输出并保存 `alpha(T)`；
 - 受控 MatterSim 弹性张量与 QHA 任务：固定 WSL/Conda/MatterSim/VASPKIT/Phonopy 命令、任务状态机、日志、弹性正定性和质量门控；
 - 失败后仅重跑 QHA 的恢复任务：复用已完成的弹性张量，不重复应变计算，并支持嵌套恢复链路；
 - QHA 位移级进度读取与虚频、非正定弹性张量、未应变弹性能异常等质量警告；
 - 单温点及温区 `alpha(T)` 曲线 ZTE ROM，输出体积分数和质量分数；
 - 受控 Agent 工具注册、白名单调用和严格科学请求格式；
 - 旧科研代码到新模块的迁移映射。
-- 可运行的 FastAPI 服务与浏览器界面：材料检索、G-Ẽ 景观、SBR、单温点/温区 ROM、CIF/POSCAR 结构检查、快速筛选、精确任务和受控 Agent。
+- 可运行的 FastAPI 服务与浏览器界面：材料检索、论文 Fig. 1d 景观、CIF/POSCAR 统一上传、三级预测、单温点/温区 ROM 和受控 Agent。
 - 独立 Python 进程执行的受控 ALIGNN 剪切模量预测接口，以及 MatterSim + CrystalNN + SBR 的上传结构快速筛选；模型、源码、Python环境均可通过环境变量配置。
 
 ## 项目结构

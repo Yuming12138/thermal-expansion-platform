@@ -132,9 +132,9 @@ function renderPrecisionThermalExpansion(result) {
     "<p class='curve-note'>任务 " + escapeHtml(result.job_id) + " · " + escapeHtml(warnings) + "</p>";
 }
 
-function drawPrecisionThermalExpansion(result) {
+function drawPrecisionThermalExpansion(result, canvasSelector = "#thermal-curve") {
   if (!result || !result.points || result.points.length < 2) return;
-  const canvas = document.querySelector("#thermal-curve");
+  const canvas = document.querySelector(canvasSelector);
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const points = result.points
@@ -385,6 +385,167 @@ function setupLandscapeInteraction() {
   canvas.addEventListener("mouseleave", () => { tooltip.hidden = true; });
 }
 
+function uploadedStructure() {
+  return document.querySelector("#structure-file").files[0] || null;
+}
+
+function structureBody(file) {
+  const body = new FormData();
+  body.append("file", file);
+  return body;
+}
+
+function setPredictionButtonsDisabled(disabled) {
+  ["#fast-screen-button", "#elastic-button", "#qha-button"].forEach(selector => {
+    document.querySelector(selector).disabled = disabled;
+  });
+}
+
+function classificationText(value) {
+  return {
+    high_probability_nte: "高概率 NTE",
+    nte: "NTE 候选",
+    pte: "PTE",
+    boundary: "分界附近",
+  }[value] || value || "—";
+}
+
+function metricCards(items) {
+  return "<div class='prediction-metrics'>" + items.map(item =>
+    "<div><span>" + escapeHtml(item[0]) + "</span><strong>" + escapeHtml(item[1]) + "</strong></div>"
+  ).join("") + "</div>";
+}
+
+function selectPredictedLandscapePoint(filename, shear, bonding, classification, source) {
+  selectedLandscapePoint = {
+    material_key: filename,
+    x_gpa: Number(bonding),
+    g_gpa: Number(shear),
+    classification: String(classification).includes("pte") && !String(classification).includes("nte") ? "PTE" : "NTE",
+    source,
+    year: null,
+    selected: true,
+  };
+  document.querySelector("#landscape-selection").textContent =
+    "当前预测：" + filename + " · Ẽ=" + Number(bonding).toFixed(3) +
+    " GPa · G=" + Number(shear).toFixed(3) + " GPa";
+  drawLandscape();
+}
+
+function renderFastPrediction(file, payload) {
+  const result = payload.fast_sbr;
+  const sbr = result.sbr;
+  const bonding = result.bonding;
+  document.querySelector("#prediction-result").innerHTML =
+    "<h3>快速预测结果</h3>" + metricCards([
+      ["ALIGNN 剪切模量 G", numeric(result.predicted_shear_modulus_gpa) + " GPa"],
+      ["MatterSim 键合模量 Ẽ", numeric(bonding.bonding_modulus_gpa) + " GPa"],
+      ["剪切—键合比 ξ", Number(sbr.xi).toFixed(4)],
+      ["预测结论", classificationText(sbr.classification)],
+    ]) + "<p class='curve-note'>置信等级：" + escapeHtml(result.decision_quality) +
+    "；建议：" + escapeHtml(result.recommended_next_step) + "</p>";
+  selectPredictedLandscapePoint(
+    file.name,
+    result.predicted_shear_modulus_gpa,
+    bonding.bonding_modulus_gpa,
+    sbr.classification,
+    "快速预测",
+  );
+}
+
+function tensorTable(tensor) {
+  if (!Array.isArray(tensor) || tensor.length !== 6) return "";
+  return "<table class='tensor-table'><tbody>" + tensor.map(row =>
+    "<tr>" + row.map(value => "<td>" + Number(value).toFixed(3) + "</td>").join("") + "</tr>"
+  ).join("") + "</tbody></table>";
+}
+
+function renderElasticPrediction(file, result) {
+  const sbr = result.sbr;
+  const bonding = result.bonding;
+  document.querySelector("#prediction-result").innerHTML =
+    "<h3>精准弹性预测结果</h3>" + metricCards([
+      ["Hill 剪切模量 G", numeric(result.shear_modulus_hill_gpa) + " GPa"],
+      ["MatterSim 键合模量 Ẽ", numeric(bonding.bonding_modulus_gpa) + " GPa"],
+      ["剪切—键合比 ξ", Number(sbr.xi).toFixed(4)],
+      ["预测结论", classificationText(sbr.classification)],
+    ]) + "<h3>完整弹性张量 Cᵢⱼ (GPa)</h3>" + tensorTable(result.elastic_tensor_gpa) +
+    (result.quality_warnings?.length ? "<p class='curve-note'>质量提示：" +
+      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "");
+  selectPredictedLandscapePoint(
+    file.name,
+    result.shear_modulus_hill_gpa,
+    bonding.bonding_modulus_gpa,
+    sbr.classification,
+    "精准弹性预测",
+  );
+}
+
+function renderQhaPrediction(result) {
+  document.querySelector("#prediction-result").innerHTML =
+    "<h3>QHA 热膨胀结果</h3>" + metricCards([
+      ["300 K 热膨胀系数", numeric(result.alpha_300k_ppm_per_k) + " ppm/K"],
+      ["温度点数", String(result.thermal_expansion_curve?.length || 0)],
+      ["计算模式", "MatterSim QHA"],
+      ["结果状态", "计算完成"],
+    ]) + "<canvas id='prediction-thermal-curve' class='prediction-thermal-curve' width='900' height='360'></canvas>" +
+    (result.quality_warnings?.length ? "<p class='curve-note'>质量提示：" +
+      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "");
+  drawPrecisionThermalExpansion(
+    {points: result.thermal_expansion_curve.map(point => ({temperature_k: point[0], alpha_ppm_per_k: point[1] * 1_000_000}))},
+    "#prediction-thermal-curve",
+  );
+}
+
+function renderJobProgress(job, label) {
+  const progress = job.progress || {};
+  const progressText = Number.isFinite(Number(progress.percent)) ? " · " + progress.percent + "%" : "";
+  document.querySelector("#prediction-result").innerHTML =
+    "<h3>" + escapeHtml(label) + "</h3><p>任务 " + escapeHtml(job.id) +
+    " · " + escapeHtml(job.status) + progressText + "</p>";
+}
+
+async function pollPredictionJob(jobId, mode, file) {
+  try {
+    const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
+    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "QHA 计算中");
+    if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
+      window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
+      return;
+    }
+    setPredictionButtonsDisabled(false);
+    if (job.status !== "SUCCEEDED") {
+      document.querySelector("#prediction-result").innerHTML =
+        "<h3>计算失败</h3><p>" + escapeHtml(job.error_message || "请查看任务日志。") + "</p>";
+      return;
+    }
+    if (mode === "elastic") renderElasticPrediction(file, job.result);
+    else renderQhaPrediction(job.result);
+  } catch (error) {
+    setPredictionButtonsDisabled(false);
+    document.querySelector("#prediction-result").textContent = error.message;
+  }
+}
+
+async function submitPredictionJob(endpoint, mode) {
+  const file = uploadedStructure();
+  if (!file) {
+    document.querySelector("#prediction-result").textContent = "请先选择 CIF 或 POSCAR 文件。";
+    return;
+  }
+  setPredictionButtonsDisabled(true);
+  document.querySelector("#prediction-result").textContent = mode === "elastic"
+    ? "正在提交完整弹性张量计算…" : "正在提交 MatterSim QHA 计算…";
+  try {
+    const job = await api(endpoint, {method: "POST", body: structureBody(file)});
+    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "QHA 任务已提交");
+    window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
+  } catch (error) {
+    setPredictionButtonsDisabled(false);
+    document.querySelector("#prediction-result").textContent = error.message;
+  }
+}
+
 function postForm(formId, path, target, bodyBuilder) {
   document.querySelector(formId).addEventListener("submit", async event => {
     event.preventDefault();
@@ -416,92 +577,47 @@ async function initialize() {
   }
   setupLandscapeInteraction();
   document.querySelector("#search-button").addEventListener("click", searchMaterials);
-  postForm("#sbr-form", "/api/sbr/classify", "#sbr-result", form => ({
-    shear_modulus_gpa: Number(form.get("g")),
-    bonding_modulus_gpa: Number(form.get("e")),
-  }));
-  postForm("#fast-form", "/api/sbr/fast-screen", "#fast-result", form => ({
-    predicted_shear_modulus_gpa: Number(form.get("g")),
-    cohesive_energy_ev_per_atom: Number(form.get("ecoh")),
-    cell_volume_a3: Number(form.get("volume")),
-    atom_count: Number(form.get("atoms")),
-    average_coordination_number: Number(form.get("cn")),
-  }));
   postForm("#rom-form", "/api/composites/rom", "#rom-result", form => ({
     alpha_pte: Number(form.get("pte")),
     alpha_nte: Number(form.get("nte")),
     target_alpha: Number(form.get("target")),
   }));
-  document.querySelector("#upload-form").addEventListener("submit", async event => {
-    event.preventDefault();
-    const file = document.querySelector("#structure-file").files[0];
+  document.querySelector("#structure-file").addEventListener("change", async () => {
+    const file = uploadedStructure();
     if (!file) return;
-    const body = new FormData();
-    body.append("file", file);
+    document.querySelector("#structure-summary").textContent = "正在检查结构…";
     try {
-      show("#upload-result", await api("/api/structures/inspect", {method: "POST", body}));
+      const result = await api("/api/structures/inspect", {method: "POST", body: structureBody(file)});
+      const inspection = result.inspection;
+      document.querySelector("#structure-summary").textContent =
+        file.name + " · " + inspection.format.toUpperCase() + " · " +
+        (inspection.atom_count ?? "待解析") + " atoms · " +
+        (Number.isFinite(Number(inspection.cell_volume_a3)) ? Number(inspection.cell_volume_a3).toFixed(3) + " Å³" : "体积待解析");
+      document.querySelector("#prediction-result").textContent = "结构检查完成，请选择计算层级。";
     } catch (error) {
-      document.querySelector("#upload-result").textContent = error.message;
-    }
-  });
-  document.querySelector("#alignn-button").addEventListener("click", async () => {
-    const file = document.querySelector("#structure-file").files[0];
-    if (!file) {
-      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
-      return;
-    }
-    const body = new FormData();
-    body.append("file", file);
-    document.querySelector("#upload-result").textContent = "ALIGNN Worker计算中…";
-    try {
-      show("#upload-result", await api("/api/structures/alignn-shear", {method: "POST", body}));
-    } catch (error) {
-      document.querySelector("#upload-result").textContent = error.message;
+      document.querySelector("#structure-summary").textContent = error.message;
     }
   });
   document.querySelector("#fast-screen-button").addEventListener("click", async () => {
-    const file = document.querySelector("#structure-file").files[0];
+    const file = uploadedStructure();
     if (!file) {
-      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
+      document.querySelector("#prediction-result").textContent = "请先选择 CIF 或 POSCAR 文件。";
       return;
     }
-    const body = new FormData();
-    body.append("file", file);
-    document.querySelector("#upload-result").textContent = "正在计算 ALIGNN、MatterSim 与 CrystalNN…";
+    setPredictionButtonsDisabled(true);
+    document.querySelector("#prediction-result").textContent = "正在运行 ALIGNN、MatterSim 与 CrystalNN…";
     try {
-      show("#upload-result", await api("/api/structures/fast-screen", {method: "POST", body}));
+      renderFastPrediction(file, await api("/api/structures/fast-screen", {method: "POST", body: structureBody(file)}));
     } catch (error) {
-      document.querySelector("#upload-result").textContent = error.message;
+      document.querySelector("#prediction-result").textContent = error.message;
+    } finally {
+      setPredictionButtonsDisabled(false);
     }
   });
-  document.querySelector("#precision-button").addEventListener("click", async () => {
-    const file = document.querySelector("#structure-file").files[0];
-    if (!file) {
-      document.querySelector("#upload-result").textContent = "请先选择POSCAR或CIF文件。";
-      return;
-    }
-    const body = new FormData();
-    body.append("file", file);
-    document.querySelector("#upload-result").textContent = "精确任务已提交，正在等待后台Worker…";
-    try {
-      const job = await api("/api/precision/jobs", {method: "POST", body});
-      show("#upload-result", job);
-      const poll = async () => {
-        const latest = await api("/api/precision/jobs/" + encodeURIComponent(job.id));
-        show("#upload-result", latest);
-        if (["PENDING", "QUEUED", "RUNNING"].includes(latest.status)) {
-          window.setTimeout(() => poll().catch(error => {
-            document.querySelector("#upload-result").textContent = error.message;
-          }), 3000);
-        }
-      };
-      window.setTimeout(() => poll().catch(error => {
-        document.querySelector("#upload-result").textContent = error.message;
-      }), 1000);
-    } catch (error) {
-      document.querySelector("#upload-result").textContent = error.message;
-    }
-  });
+  document.querySelector("#elastic-button").addEventListener("click", () =>
+    submitPredictionJob("/api/precision/elastic-jobs", "elastic"));
+  document.querySelector("#qha-button").addEventListener("click", () =>
+    submitPredictionJob("/api/precision/qha-jobs", "qha"));
   document.querySelector("#agent-form").addEventListener("submit", async event => {
     event.preventDefault();
     const message = document.querySelector("#agent-message").value;

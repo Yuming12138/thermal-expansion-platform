@@ -10,7 +10,9 @@ from te_platform.db.schema import connect_database, initialize_database
 from te_platform.jobs.states import JobStatus, validate_transition
 
 
-ALLOWED_WORKFLOWS = frozenset({"precision_elastic_qha"})
+ALLOWED_WORKFLOWS = frozenset(
+    {"precision_elastic_qha", "precision_elastic", "precision_qha"}
+)
 
 
 def _timestamp() -> str:

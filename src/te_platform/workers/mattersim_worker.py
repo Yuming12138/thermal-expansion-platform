@@ -37,6 +37,7 @@ def main() -> int:
             "cohesive_energy_ev_per_atom": energy_ev / len(atoms),
             "total_energy_ev": energy_ev,
             "atom_count": len(atoms),
+            "cell_volume_a3": float(atoms.get_volume()),
             "average_coordination_number": sum(coordination) / len(coordination),
             "model_name": args.model,
             "device": "cpu",

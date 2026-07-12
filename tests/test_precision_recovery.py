@@ -22,7 +22,7 @@ class PrecisionRecoveryTests(unittest.TestCase):
             child = create_job(
                 database,
                 workflow="precision_elastic_qha",
-                parameters={"config": config, "parent_job_id": original["id"], "mode": "thermal_only"},
+                parameters={"config": config, "parent_job_id": original["id"], "mode": "qha"},
             )
             child_work = database.parent / "runs" / child["id"]
             child_work.mkdir(parents=True)

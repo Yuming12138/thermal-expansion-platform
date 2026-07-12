@@ -202,6 +202,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "job-123")
 
+    @patch("te_platform.api.app.submit_elastic_job")
+    def test_elastic_job_submission_endpoint(self, submission_mock) -> None:
+        submission_mock.return_value = {"id": "elastic-123", "status": "PENDING"}
+        response = self.client.post(
+            "/api/precision/elastic-jobs",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "elastic-123")
+
+    @patch("te_platform.api.app.submit_qha_job")
+    def test_qha_job_submission_endpoint(self, submission_mock) -> None:
+        submission_mock.return_value = {"id": "qha-123", "status": "PENDING"}
+        response = self.client.post(
+            "/api/precision/qha-jobs",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "qha-123")
+
     @patch("te_platform.api.app.refresh_precision_result")
     def test_precision_result_refresh_endpoint(self, refresh_mock) -> None:
         refresh_mock.return_value = {

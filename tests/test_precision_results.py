@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from te_platform.precision.results import parse_precision_results, parse_thermal_expansion_file
+from te_platform.precision.results import (
+    parse_elastic_results,
+    parse_precision_results,
+    parse_qha_results,
+    parse_thermal_expansion_file,
+)
 
 
 class PrecisionResultsTests(unittest.TestCase):
@@ -43,6 +48,25 @@ class PrecisionResultsTests(unittest.TestCase):
             path = Path(temp) / "thermal_expansion.dat"
             path.write_text("0 0\n300 -1.23e-5\n", encoding="utf-8")
             self.assertEqual(parse_thermal_expansion_file(path), ((0.0, 0.0), (300.0, -1.23e-5)))
+
+    def test_parses_elastic_only_and_qha_only_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            elastic = root / "elastic"
+            thermal = root / "qha_calculation" / "thermal_properties"
+            elastic.mkdir()
+            thermal.mkdir(parents=True)
+            (elastic / "ELASTIC_TENSOR").write_text(
+                "\n".join(" ".join("100" if row == column else "0" for column in range(6)) for row in range(6)),
+                encoding="utf-8",
+            )
+            (thermal / "thermal_expansion.dat").write_text("0 0\n300 -2e-6\n", encoding="utf-8")
+
+            elastic_result = parse_elastic_results(root)
+            qha_result = parse_qha_results(root)
+
+            self.assertAlmostEqual(elastic_result.shear_modulus_hill_gpa, 75.7142857143)
+            self.assertAlmostEqual(qha_result.alpha_300k_ppm_per_k, -2.0)
 
 
 if __name__ == "__main__":
