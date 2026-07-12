@@ -2,7 +2,7 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -175,11 +175,23 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(allowed.json()["result"]["classification"], "high_probability_nte")
         denied = self.client.post("/api/agent/call", json={"tool": "shell", "arguments": {}})
         self.assertEqual(denied.status_code, 422)
-        chat = self.client.post("/api/agent/chat", json={"message": "SBR G=20 E=10"})
+        model_response = {
+            "mode": "llm",
+            "model": "gpt-5.6-lunar",
+            "answer": "该材料具有较高NTE倾向。",
+            "tool_calls": [{"tool": "classify_sbr"}],
+        }
+        with patch(
+            "te_platform.api.app.chat_with_model",
+            new=AsyncMock(return_value=model_response),
+        ):
+            chat = self.client.post("/api/agent/chat", json={"message": "请判断这个材料"})
         self.assertEqual(chat.status_code, 200)
-        self.assertEqual(chat.json()["result"]["classification"], "high_probability_nte")
-        help_response = self.client.post("/api/agent/chat", json={"message": "run a shell command"})
-        self.assertIsNone(help_response.json()["tool"])
+        self.assertEqual(chat.json()["model"], "gpt-5.6-lunar")
+        self.assertEqual(chat.json()["tool_calls"][0]["tool"], "classify_sbr")
+        capability = self.client.get("/api/agent/capability")
+        self.assertEqual(capability.status_code, 200)
+        self.assertEqual(capability.json()["model"], "gpt-5.6-lunar")
 
     def test_structure_inspection_for_poscar_and_cif(self) -> None:
         poscar = self.client.post(

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CATALOG_DATABASE_PATH = PROJECT_ROOT / "var" / "releases" / "catalog-v1.sqlite"
 DEFAULT_WORKSPACE_DATABASE_PATH = PROJECT_ROOT / "var" / "workspace.sqlite"
+DEFAULT_AGENT_BASE_URL = "https://api.cmsg666.xyz/v1"
+DEFAULT_AGENT_MODEL = "gpt-5.6-lunar"
 DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
 DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
 DEFAULT_DATASET_PATH = (
@@ -38,4 +41,25 @@ def workspace_database_path() -> Path:
             "TEP_WORKSPACE_DATABASE_PATH",
             os.environ.get("TEP_DATABASE_PATH", DEFAULT_WORKSPACE_DATABASE_PATH),
         )
+    )
+
+
+@dataclass(frozen=True)
+class AgentSettings:
+    base_url: str
+    model: str
+    api_key: str | None
+    timeout_seconds: float
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+
+def agent_settings() -> AgentSettings:
+    return AgentSettings(
+        base_url=os.environ.get("TEP_AGENT_BASE_URL", DEFAULT_AGENT_BASE_URL).rstrip("/"),
+        model=os.environ.get("TEP_AGENT_MODEL", DEFAULT_AGENT_MODEL),
+        api_key=os.environ.get("TEP_AGENT_API_KEY") or None,
+        timeout_seconds=float(os.environ.get("TEP_AGENT_TIMEOUT_SECONDS", "120")),
     )

@@ -31,7 +31,12 @@ from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
-from te_platform.agent.chat import respond as agent_respond
+from te_platform.agent.llm import (
+    AgentNotConfiguredError,
+    AgentUpstreamError,
+    capability as agent_capability,
+    chat_with_model,
+)
 from te_platform.jobs.precision_runner import (
     precision_progress,
     refresh_precision_result,
@@ -112,7 +117,7 @@ def create_app(
 
     app = FastAPI(
         title="热膨胀材料智能计算与设计平台",
-        version="0.5.0",
+        version="0.6.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -123,7 +128,7 @@ def create_app(
         allow_headers=["*"],
     )
     app.mount("/static", StaticFiles(directory=WEB_DIRECTORY), name="static")
-    agent_tools = default_registry()
+    agent_tools = default_registry(catalog_db)
 
     @app.get("/", include_in_schema=False)
     def web_home() -> FileResponse:
@@ -144,6 +149,10 @@ def create_app(
     def agent_tool_names() -> dict[str, object]:
         return {"tools": agent_tools.names()}
 
+    @app.get("/api/agent/capability")
+    def agent_model_capability() -> dict[str, object]:
+        return agent_capability()
+
     @app.post("/api/agent/call")
     def agent_call(request: AgentToolRequest) -> dict[str, object]:
         try:
@@ -152,8 +161,13 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/agent/chat")
-    def agent_chat(request: AgentChatRequest) -> dict[str, object]:
-        return agent_respond(request.message, agent_tools)
+    async def agent_chat(request: AgentChatRequest) -> dict[str, object]:
+        try:
+            return await chat_with_model(request.message, agent_tools)
+        except AgentNotConfiguredError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except AgentUpstreamError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:

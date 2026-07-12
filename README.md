@@ -36,7 +36,7 @@ docs/                  架构、数据契约和迁移说明
 tests/                 核心算法与导入测试
 apps/web/              后续Web前端
 environments/          独立计算环境定义
-var/                   本地数据库、任务和结果，不进入Git
+var/                   便携数据目录：数据库、上传、任务、结果和本机加密配置，不进入Git
 ```
 
 ## 快速开始（PowerShell）
@@ -80,6 +80,9 @@ Web 服务默认使用两个完全分离的数据库：
 ```text
 var/releases/catalog-v1.sqlite   只读材料目录、结构、属性和历史曲线
 var/workspace.sqlite             用户上传、预测任务和计算结果
+var/uploads/                     用户上传的结构
+var/runs/                        精确计算任务与结果
+var/secrets/agent-key.dpapi      当前Windows用户加密的Agent密钥
 ```
 
 可通过 `TEP_CATALOG_DATABASE_PATH` 和 `TEP_WORKSPACE_DATABASE_PATH` 修改位置。启动时不会再从原始科研目录自动导入数据；缺少 `catalog-v1.sqlite` 会直接报告配置错误。
@@ -96,6 +99,10 @@ uv run python -m te_platform build-release-catalog `
 ```
 
 生成的 `catalog-v1.sqlite` 已内置 NTE/PTE 材料、POSCAR、属性和完整热膨胀曲线，接收方不需要原始科研数据目录。构建器会删除开发期计算任务，将绝对路径替换为 `catalog://...` 逻辑来源，并生成包含文件哈希与计数的 `.manifest.json`。平台只读打开目录库，用户上传和新计算结果写入独立的 `workspace.sqlite`。详见 [发布目录数据库说明](docs/release-catalog.md)。
+
+平台默认采用便携模式，所有运行数据都保存在项目内 `var/`，不会固定写入用户 C 盘目录。整个目录可以复制到其他磁盘或电脑；目录库随程序一起复制，Agent 密钥因 Windows DPAPI 绑定当前用户，需要在新电脑重新配置。
+
+配置 AI Agent：运行 `scripts\configure-agent.ps1`，在隐藏输入框中粘贴密钥，然后重新运行 `scripts\run-web.ps1`。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-lunar`，只允许调用材料检索、材料详情、SBR 与 ZTE 曲线设计等白名单工具，不会执行任意 shell 命令，也不会自动提交昂贵计算任务。
 
 ## 科学边界
 

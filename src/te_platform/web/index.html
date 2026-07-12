@@ -81,13 +81,14 @@
         <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
       </section>
       <section class="panel">
-        <h2>受控 Agent</h2>
-        <p class="muted">示例：SBR G=20 E=10；ZTE PTE=8 NTE=-12。仅调用平台注册的科学工具。</p>
+        <h2>热膨胀材料 Agent</h2>
+        <p class="muted">可用自然语言检索 NTE/PTE 数据、读取真实 QHA 曲线、解释 SBR，并调用曲线 ROM 设计 ZTE 配比。Agent 仅能调用白名单科学工具，不会执行任意系统命令。</p>
+        <div id="agent-status" class="prediction-result muted">正在检查 AI 助手配置…</div>
         <form id="agent-form" class="row">
-          <input id="agent-message" placeholder="输入受控科学请求" required>
+          <input id="agent-message" placeholder="例如：查找含 Ag 的 NTE 材料，并解释热膨胀曲线" required>
           <button>发送</button>
         </form>
-        <pre id="agent-result"></pre>
+        <div id="agent-result" class="prediction-result muted">尚未开始对话。</div>
       </section>
     </main>
     <script src="/static/app.js"></script>

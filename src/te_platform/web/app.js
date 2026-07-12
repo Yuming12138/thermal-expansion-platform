@@ -827,16 +827,30 @@ async function initialize() {
   document.querySelector("#agent-form").addEventListener("submit", async event => {
     event.preventDefault();
     const message = document.querySelector("#agent-message").value;
+    const resultElement = document.querySelector("#agent-result");
+    resultElement.textContent = "Agent 正在查询数据库并分析…";
     try {
-      show("#agent-result", await api("/api/agent/chat", {
+      const result = await api("/api/agent/chat", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({message}),
-      }));
+      });
+      const toolSummary = (result.tool_calls || []).map(item => item.tool).join("、");
+      resultElement.textContent = result.answer || "Agent 未返回文本回答。";
+      if (toolSummary) resultElement.textContent += "\n\n已调用工具：" + toolSummary;
     } catch (error) {
-      document.querySelector("#agent-result").textContent = error.message;
+      resultElement.textContent = error.message;
     }
   });
+
+  try {
+    const capability = await api("/api/agent/capability");
+    document.querySelector("#agent-status").textContent = capability.configured
+      ? `已连接 ${capability.model} · 白名单工具调用已启用`
+      : `尚未配置 AI 密钥 · 运行 scripts/configure-agent.ps1 后重启平台`;
+  } catch (error) {
+    document.querySelector("#agent-status").textContent = error.message;
+  }
 }
 
 initialize();
