@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from te_platform.agent.actions import create_action_request
 from te_platform.agent.registry import ToolRegistry
+from te_platform.agent.uploads import inspect_agent_structure
 from te_platform.catalog.queries import material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.material_pair import (
@@ -11,11 +13,17 @@ from te_platform.composites.material_pair import (
     query_thermal_expansion_catalog,
 )
 from te_platform.config import DEFAULT_PTE_RELEASE_SLUG, DEFAULT_RELEASE_SLUG
+from te_platform.jobs.precision_runner import precision_progress
+from te_platform.jobs.repository import get_job
+from te_platform.precision.wsl_executor import PrecisionTaskConfig
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 
 
-def default_registry(catalog_database: Path | None = None) -> ToolRegistry:
+def default_registry(
+    catalog_database: Path | None = None,
+    workspace_database: Path | None = None,
+) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
         "classify_sbr",
@@ -146,6 +154,94 @@ def default_registry(catalog_database: Path | None = None) -> ToolRegistry:
                     "target_alpha_ppm_per_k": {"type": "number", "default": 0},
                 },
                 "required": ["pte_material_key", "nte_material_key"],
+                "additionalProperties": False,
+            },
+        )
+    if workspace_database is not None:
+        registry.register(
+            "inspect_uploaded_structure",
+            lambda structure_id: inspect_agent_structure(workspace_database, structure_id),
+            description="检查对话中已上传的CIF/POSCAR结构，返回格式、原子数和晶胞体积。",
+            parameters={
+                "type": "object",
+                "properties": {"structure_id": {"type": "string"}},
+                "required": ["structure_id"],
+                "additionalProperties": False,
+            },
+        )
+
+        def request_qha_calculation(
+            structure_id: str,
+            qha_points: int = 11,
+            qha_mesh: int = 30,
+            qha_scale: float = 0.003,
+            parallel_workers: int = 1,
+        ):
+            structure = inspect_agent_structure(workspace_database, structure_id)
+            config = PrecisionTaskConfig(
+                qha_points=qha_points,
+                qha_mesh=qha_mesh,
+                qha_scale=qha_scale,
+                parallel_workers=parallel_workers,
+            )
+            config.validate()
+            action = create_action_request(
+                workspace_database,
+                action="submit_qha_calculation",
+                summary=(
+                    f"对上传结构 {structure_id[:12]}… 提交 MatterSim QHA 热膨胀计算；"
+                    f"qha_points={qha_points}, mesh={qha_mesh}, scale={qha_scale}, "
+                    f"parallel_workers={parallel_workers}"
+                ),
+                arguments={
+                    "structure_id": structure_id,
+                    "config": config.__dict__,
+                    "filename": structure["stored_filename"],
+                },
+            )
+            return {
+                "approval_required": True,
+                "approval_id": action["id"],
+                "action": action["action"],
+                "summary": action["summary"],
+                "status": action["status"],
+                "structure": structure,
+            }
+
+        registry.register(
+            "request_qha_calculation",
+            request_qha_calculation,
+            description=(
+                "为已上传结构创建MatterSim QHA计算审批请求。此工具不会直接启动计算；"
+                "必须由用户在界面中明确批准后，平台才会提交后台任务。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "structure_id": {"type": "string"},
+                    "qha_points": {"type": "integer", "enum": [7, 9, 11], "default": 11},
+                    "qha_mesh": {"type": "integer", "minimum": 10, "maximum": 60, "default": 30},
+                    "qha_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01, "default": 0.003},
+                    "parallel_workers": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+                },
+                "required": ["structure_id"],
+                "additionalProperties": False,
+            },
+        )
+
+        def calculation_job_status(job_id: str):
+            job = get_job(workspace_database, job_id)
+            job["progress"] = precision_progress(workspace_database, job_id)
+            return job
+
+        registry.register(
+            "get_calculation_job",
+            calculation_job_status,
+            description="查询已提交弹性或QHA任务的状态、进度、错误和结构化结果。",
+            parameters={
+                "type": "object",
+                "properties": {"job_id": {"type": "string"}},
+                "required": ["job_id"],
                 "additionalProperties": False,
             },
         )

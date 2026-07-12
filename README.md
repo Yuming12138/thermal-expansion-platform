@@ -102,7 +102,9 @@ uv run python -m te_platform build-release-catalog `
 
 平台默认采用便携模式，所有运行数据都保存在项目内 `var/`，不会固定写入用户 C 盘目录。整个目录可以复制到其他磁盘或电脑；目录库随程序一起复制。发布或分享前应删除包含本机密钥的 `var/config/agent.env`，由接收方配置自己的 Agent。
 
-配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-luna`，只允许调用材料检索、材料详情、SBR 与 ZTE 曲线设计等白名单工具，不会执行任意 shell 命令，也不会自动提交昂贵计算任务。
+配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-luna`，只允许调用材料检索、材料详情、真实曲线全库查询、SBR、ZTE 设计、结构检查与计算任务等领域白名单工具，不会执行任意 shell 命令。
+
+Agent 对话框支持直接附加 CIF/POSCAR。模型可以自主检查结构并提出 QHA 计算计划，但不能自行批准昂贵计算：平台会持久化一个 `PENDING_APPROVAL` 动作，只有用户点击“确认并提交”后才启动后台任务。任务运行期间对话框会显示进度，成功后直接绘制完整热膨胀曲线。该控制层与计算层分离方式参考了 `openai/codex` 的公开工具路由和审批设计。
 
 ## 科学边界
 

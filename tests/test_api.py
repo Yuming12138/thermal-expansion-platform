@@ -202,6 +202,64 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(capability.status_code, 200)
         self.assertEqual(capability.json()["model"], "gpt-5.6-luna")
 
+    def test_agent_structure_qha_request_requires_explicit_approval(self) -> None:
+        upload = self.client.post(
+            "/api/agent/structures",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(upload.status_code, 200)
+        structure_id = upload.json()["structure_id"]
+        request = self.client.post(
+            "/api/agent/call",
+            json={
+                "tool": "request_qha_calculation",
+                "arguments": {"structure_id": structure_id, "qha_points": 7},
+            },
+        )
+        self.assertEqual(request.status_code, 200)
+        approval = request.json()["result"]
+        self.assertTrue(approval["approval_required"])
+        self.assertEqual(approval["status"], "PENDING_APPROVAL")
+
+        fake_job = {
+            "id": "agent-qha-123",
+            "workflow": "precision_qha",
+            "status": "PENDING",
+        }
+        with patch("te_platform.api.app.submit_qha_job", return_value=fake_job) as submit_mock:
+            approved = self.client.post(
+                f"/api/agent/approvals/{approval['approval_id']}/approve"
+            )
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["approval"]["status"], "EXECUTED")
+        self.assertEqual(approved.json()["job"]["id"], "agent-qha-123")
+        self.assertEqual(submit_mock.call_args.args[0], self.workspace_database)
+        self.assertEqual(submit_mock.call_args.args[2].qha_points, 7)
+
+        duplicate = self.client.post(
+            f"/api/agent/approvals/{approval['approval_id']}/approve"
+        )
+        self.assertEqual(duplicate.status_code, 422)
+
+    def test_agent_qha_request_can_be_rejected_without_starting_job(self) -> None:
+        upload = self.client.post(
+            "/api/agent/structures",
+            files={"file": ("sample.cif", CIF, "text/plain")},
+        )
+        structure_id = upload.json()["structure_id"]
+        request = self.client.post(
+            "/api/agent/call",
+            json={
+                "tool": "request_qha_calculation",
+                "arguments": {"structure_id": structure_id},
+            },
+        ).json()["result"]
+        rejected = self.client.post(
+            f"/api/agent/approvals/{request['approval_id']}/reject"
+        )
+        self.assertEqual(rejected.status_code, 200)
+        self.assertEqual(rejected.json()["approval"]["status"], "REJECTED")
+
     def test_structure_inspection_for_poscar_and_cif(self) -> None:
         poscar = self.client.post(
             "/api/structures/inspect",

@@ -7,7 +7,7 @@ from typing import Iterator
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -126,6 +126,21 @@ CREATE TABLE IF NOT EXISTS composite_designs (
     FOREIGN KEY (pte_material_id) REFERENCES materials(id),
     FOREIGN KEY (nte_material_id) REFERENCES materials(id)
 );
+
+CREATE TABLE IF NOT EXISTS agent_action_requests (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    result_json TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_action_status_created
+ON agent_action_requests(status, created_at);
 """
 
 

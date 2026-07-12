@@ -22,6 +22,7 @@ let fig1dReference = null;
 let selectedLandscapePoint = null;
 let landscapeHitPoints = [];
 let agentHistory = [];
+let agentAttachments = [];
 const LANDSCAPE_MARKER_SIZE = 3.6;
 
 const propertyText = property => {
@@ -844,6 +845,141 @@ async function initialize() {
     return bubble;
   }
 
+  function renderAgentAttachment() {
+    const container = document.querySelector("#agent-attachment");
+    if (!agentAttachments.length) {
+      container.hidden = true;
+      document.querySelector("#agent-attachment-name").textContent = "";
+      return;
+    }
+    const attachment = agentAttachments[0];
+    document.querySelector("#agent-attachment-name").textContent =
+      `${attachment.filename} · ${attachment.inspection.atom_count ?? "?"} atoms`;
+    container.hidden = false;
+  }
+
+  document.querySelector("#agent-attachment-clear").addEventListener("click", () => {
+    agentAttachments = [];
+    document.querySelector("#agent-file").value = "";
+    renderAgentAttachment();
+  });
+
+  document.querySelector("#agent-file").addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const uploadNotice = appendAgentMessage("assistant", "正在检查并附加结构…", "pending");
+    const body = new FormData();
+    body.append("file", file);
+    try {
+      const uploaded = await api("/api/agent/structures", {method: "POST", body});
+      agentAttachments = [uploaded];
+      renderAgentAttachment();
+      uploadNotice.classList.remove("pending");
+      uploadNotice.textContent =
+        `已附加 ${file.name}，结构格式 ${uploaded.inspection.format.toUpperCase()}，` +
+        `${uploaded.inspection.atom_count ?? "?"} 个原子。你可以直接要求我计算热膨胀。`;
+    } catch (error) {
+      uploadNotice.classList.remove("pending");
+      uploadNotice.textContent = error.message;
+      agentAttachments = [];
+      renderAgentAttachment();
+    }
+  });
+
+  async function pollAgentCalculation(jobId, bubble) {
+    try {
+      const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
+      const percent = Number.isFinite(Number(job.progress?.percent))
+        ? ` · ${job.progress.percent}%` : "";
+      bubble.textContent = `QHA 任务 ${job.id}\n状态：${job.status}${percent}`;
+      if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
+        window.setTimeout(() => pollAgentCalculation(jobId, bubble), 3000);
+        return;
+      }
+      if (job.status !== "SUCCEEDED") {
+        bubble.textContent += `\n${job.error_message || "计算失败，请检查任务日志。"}`;
+        return;
+      }
+      const result = job.result;
+      const canvasId = "agent-job-curve-" + job.id;
+      bubble.classList.add("wide");
+      bubble.innerHTML =
+        "<strong>QHA 热膨胀计算完成</strong>" +
+        "<p>300 K：" + numeric(result.alpha_300k_ppm_per_k) + " ppm/K · " +
+        escapeHtml(String(result.thermal_expansion_curve?.length || 0)) + " 个温度点</p>" +
+        "<canvas id='" + canvasId + "' class='agent-job-curve' width='720' height='300'></canvas>";
+      drawPrecisionThermalExpansion(
+        {points: result.thermal_expansion_curve.map(point => ({
+          temperature_k: point[0],
+          alpha_ppm_per_k: point[1] * 1_000_000,
+        }))},
+        "#" + canvasId,
+      );
+    } catch (error) {
+      bubble.textContent = error.message;
+    }
+  }
+
+  function appendAgentApproval(approval) {
+    const bubble = appendAgentMessage("assistant", "", "wide");
+    const card = document.createElement("div");
+    card.className = "agent-approval-card";
+    const title = document.createElement("strong");
+    title.textContent = "需要确认：提交 QHA 计算";
+    const summary = document.createElement("div");
+    summary.textContent = approval.summary;
+    const actions = document.createElement("div");
+    actions.className = "agent-approval-actions";
+    const approveButton = document.createElement("button");
+    approveButton.type = "button";
+    approveButton.textContent = "确认并提交";
+    const rejectButton = document.createElement("button");
+    rejectButton.type = "button";
+    rejectButton.className = "reject";
+    rejectButton.textContent = "取消";
+    actions.append(approveButton, rejectButton);
+    card.append(title, summary, actions);
+    bubble.appendChild(card);
+
+    approveButton.addEventListener("click", async () => {
+      approveButton.disabled = true;
+      rejectButton.disabled = true;
+      approveButton.textContent = "正在提交…";
+      try {
+        const result = await api(
+          "/api/agent/approvals/" + encodeURIComponent(approval.approval_id) + "/approve",
+          {method: "POST"},
+        );
+        bubble.textContent = `已批准并提交 QHA 任务：${result.job.id}`;
+        agentHistory.push({
+          role: "assistant",
+          content: `用户已批准QHA计算，任务job_id=${result.job.id}，后续可查询任务进度。`,
+        });
+        agentHistory = agentHistory.slice(-12);
+        window.setTimeout(() => pollAgentCalculation(result.job.id, bubble), 800);
+      } catch (error) {
+        approveButton.disabled = false;
+        rejectButton.disabled = false;
+        approveButton.textContent = "确认并提交";
+        summary.textContent = error.message;
+      }
+    });
+
+    rejectButton.addEventListener("click", async () => {
+      approveButton.disabled = true;
+      rejectButton.disabled = true;
+      try {
+        await api(
+          "/api/agent/approvals/" + encodeURIComponent(approval.approval_id) + "/reject",
+          {method: "POST"},
+        );
+        bubble.textContent = "已取消本次 QHA 计算请求。";
+      } catch (error) {
+        summary.textContent = error.message;
+      }
+    });
+  }
+
   document.querySelector("#agent-form").addEventListener("submit", async event => {
     event.preventDefault();
     const input = document.querySelector("#agent-message");
@@ -858,7 +994,11 @@ async function initialize() {
       const result = await api("/api/agent/chat", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({message, history: agentHistory}),
+        body: JSON.stringify({
+          message,
+          history: agentHistory,
+          attachments: agentAttachments.map(item => item.structure_id),
+        }),
       });
       const toolSummary = (result.tool_calls || []).map(item => item.tool).join("、");
       const answer = result.answer || "Agent 未返回文本回答。";
@@ -870,6 +1010,10 @@ async function initialize() {
         toolElement.textContent = "已调用：" + toolSummary;
         pending.appendChild(toolElement);
       }
+      (result.tool_calls || [])
+        .map(item => item.result)
+        .filter(item => item?.approval_required)
+        .forEach(appendAgentApproval);
       agentHistory.push(
         {role: "user", content: message},
         {role: "assistant", content: answer},

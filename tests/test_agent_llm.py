@@ -21,6 +21,7 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(request.content)
             self.assertEqual(payload["model"], "test-model")
             if request_count == 1:
+                self.assertIn("structure-123", json.dumps(payload["messages"]))
                 return httpx.Response(
                     200,
                     json={
@@ -66,6 +67,7 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
                     {"role": "user", "content": "上一轮问题"},
                     {"role": "assistant", "content": "上一轮回答"},
                 ],
+                attachments=[{"structure_id": "structure-123", "filename": "sample.cif"}],
                 settings=settings,
                 client=client,
             )

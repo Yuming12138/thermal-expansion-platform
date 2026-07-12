@@ -96,7 +96,15 @@
         <div id="agent-messages" class="agent-messages" aria-live="polite">
           <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析 QHA 曲线、解释 SBR，并设计 ZTE 配比。</div>
         </div>
+        <div id="agent-attachment" class="agent-attachment" hidden>
+          <span id="agent-attachment-name"></span>
+          <button id="agent-attachment-clear" type="button" aria-label="移除已上传结构">×</button>
+        </div>
         <form id="agent-form" class="agent-composer">
+          <label class="agent-attach-button" title="上传 CIF 或 POSCAR">
+            <input id="agent-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR">
+            ＋结构
+          </label>
           <textarea id="agent-message" rows="2" maxlength="500" placeholder="询问热膨胀材料问题…" required></textarea>
           <button id="agent-send" type="submit">发送</button>
         </form>

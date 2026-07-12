@@ -32,6 +32,17 @@ from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
+from te_platform.agent.actions import (
+    claim_action_request,
+    complete_action_request,
+    fail_action_request,
+    reject_action_request,
+)
+from te_platform.agent.uploads import (
+    find_agent_structure,
+    inspect_agent_structure,
+    store_agent_structure,
+)
 from te_platform.agent.llm import (
     AgentNotConfiguredError,
     AgentUpstreamError,
@@ -102,6 +113,7 @@ class AgentHistoryMessage(BaseModel):
 class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
     history: list[AgentHistoryMessage] = Field(default_factory=list, max_length=12)
+    attachments: list[str] = Field(default_factory=list, max_length=3)
 
 
 def create_app(
@@ -124,7 +136,7 @@ def create_app(
 
     app = FastAPI(
         title="热膨胀材料智能计算与设计平台",
-        version="0.6.0",
+        version="0.7.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -135,7 +147,7 @@ def create_app(
         allow_headers=["*"],
     )
     app.mount("/static", StaticFiles(directory=WEB_DIRECTORY), name="static")
-    agent_tools = default_registry(catalog_db)
+    agent_tools = default_registry(catalog_db, workspace_db)
 
     @app.get("/", include_in_schema=False)
     def web_home() -> FileResponse:
@@ -170,15 +182,81 @@ def create_app(
     @app.post("/api/agent/chat")
     async def agent_chat(request: AgentChatRequest) -> dict[str, object]:
         try:
+            attachments = [
+                inspect_agent_structure(workspace_db, structure_id)
+                for structure_id in request.attachments
+            ]
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        try:
             return await chat_with_model(
                 request.message,
                 agent_tools,
                 history=[item.model_dump() for item in request.history],
+                attachments=attachments,
             )
         except AgentNotConfiguredError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except AgentUpstreamError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post("/api/agent/structures")
+    async def agent_structure_upload(file: UploadFile = File(...)) -> dict[str, object]:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="A structure filename is required")
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        if len(content) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Structure file exceeds 5 MB")
+        try:
+            return store_agent_structure(
+                workspace_db,
+                filename=file.filename,
+                content=content,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/agent/approvals/{action_id}/approve")
+    def approve_agent_action(action_id: str) -> dict[str, object]:
+        claimed = False
+        try:
+            action = claim_action_request(workspace_db, action_id)
+            claimed = True
+            if action["action"] != "submit_qha_calculation":
+                raise ValueError(f"Unsupported Agent action: {action['action']}")
+            arguments = action["arguments"]
+            structure_path = find_agent_structure(
+                workspace_db, str(arguments["structure_id"])
+            )
+            config = PrecisionTaskConfig(**arguments["config"])
+            job = submit_qha_job(
+                workspace_db,
+                structure_path.read_bytes(),
+                config,
+                filename=structure_path.name,
+            )
+            completed = complete_action_request(
+                workspace_db,
+                action_id,
+                {"job_id": job["id"], "workflow": job["workflow"]},
+            )
+            return {"approval": completed, "job": job}
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            if claimed:
+                try:
+                    fail_action_request(workspace_db, action_id, str(error))
+                except ValueError:
+                    pass
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/agent/approvals/{action_id}/reject")
+    def reject_agent_action(action_id: str) -> dict[str, object]:
+        try:
+            return {"approval": reject_action_request(workspace_db, action_id)}
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:
