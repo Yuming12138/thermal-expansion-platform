@@ -58,14 +58,27 @@
         <p id="landscape-selection" class="curve-note">尚未选择材料。</p>
       </section>
       <section class="panel">
-        <h2>ZTE复合设计（ROM）</h2>
-        <form id="rom-form" class="grid three">
-          <label>PTE α (ppm/K)<input name="pte" type="number" step="any" value="8" required></label>
-          <label>NTE α (ppm/K)<input name="nte" type="number" step="any" value="-12" required></label>
-          <label>目标 α (ppm/K)<input name="target" type="number" step="any" value="0" required></label>
-          <button>优化体积分数</button>
-        </form>
-        <pre id="rom-result"></pre>
+        <h2>ZTE 复合材料曲线设计</h2>
+        <p class="muted">从独立 PTE/NTE 数据集中选择两种材料，在目标温区内优化一个固定体积分数，使混合热膨胀曲线尽可能接近目标值。</p>
+        <div class="composite-pickers">
+          <div>
+            <label>PTE 材料搜索</label>
+            <div class="row"><input id="pte-search" placeholder="化学式或材料名称"><button id="pte-search-button" type="button">搜索</button></div>
+            <select id="pte-material" class="material-select" aria-label="PTE材料"></select>
+          </div>
+          <div>
+            <label>NTE 材料搜索</label>
+            <div class="row"><input id="nte-search" placeholder="化学式或MP ID"><button id="nte-search-button" type="button">搜索</button></div>
+            <select id="nte-material" class="material-select" aria-label="NTE材料"></select>
+          </div>
+        </div>
+        <div class="composite-window">
+          <label>最低温度 (K)<input id="zte-t-min" type="number" value="300" min="0" step="10"></label>
+          <label>最高温度 (K)<input id="zte-t-max" type="number" value="800" min="10" step="10"></label>
+          <label>目标 α (ppm/K)<input id="zte-target" type="number" value="0" step="any"></label>
+          <button id="zte-design-button" type="button">优化 PTE/NTE 配比</button>
+        </div>
+        <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
       </section>
       <section class="panel">
         <h2>受控 Agent</h2>

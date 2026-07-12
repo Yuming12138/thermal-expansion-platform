@@ -114,6 +114,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(curve.status_code, 200)
         self.assertAlmostEqual(curve.json()["nte_volume_fraction"], 0.4)
 
+    @patch("te_platform.api.app.optimize_material_pair")
+    @patch("te_platform.api.app.curve_materials")
+    def test_curve_material_search_and_design_endpoints(self, materials_mock, optimize_mock) -> None:
+        materials_mock.return_value = [{"material_key": "1.CaO", "alpha_300k_ppm_per_k": 12.0}]
+        optimize_mock.return_value = {
+            "nte_volume_fraction": 0.4,
+            "temperatures_k": [300.0, 600.0],
+            "mixed_alpha_ppm_per_k": [0.0, 0.2],
+        }
+        choices = self.client.get("/api/composites/materials", params={"role": "pte"})
+        design = self.client.post(
+            "/api/composites/curve-design",
+            json={
+                "pte_material_key": "1.CaO",
+                "nte_material_key": "NTE-mp-1",
+                "temperature_min_k": 300,
+                "temperature_max_k": 600,
+            },
+        )
+        self.assertEqual(choices.status_code, 200)
+        self.assertEqual(choices.json()[0]["material_key"], "1.CaO")
+        self.assertEqual(materials_mock.call_args.args[1:], ("pte-reference-185-v1", "", 30))
+        self.assertEqual(materials_mock.call_args.kwargs, {"alpha_sign": 1})
+        self.assertEqual(design.status_code, 200)
+        self.assertAlmostEqual(design.json()["nte_volume_fraction"], 0.4)
+
     def test_agent_tools_are_allowlisted(self) -> None:
         tools = self.client.get("/api/agent/tools")
         self.assertEqual(tools.status_code, 200)

@@ -10,6 +10,7 @@
 
 - 独立Git仓库和模块化Python包；
 - 6702条原始NTE候选材料快照及6701条力学质量清洗活跃版本；
+- 独立的185条PTE参考材料版本 `pte-reference-185-v1`，每条均保存POSCAR和0–990 K完整QHA热膨胀曲线；
 - SQLite数据模型、数据集版本和来源记录；
 - JSON/JSON.GZ数据导入、唯一性和结构完整性校验；
 - 剪切—键合比 `xi = G / E_tilde` 判别；
@@ -20,7 +21,7 @@
 - 受控 MatterSim 弹性张量与 QHA 任务：固定 WSL/Conda/MatterSim/VASPKIT/Phonopy 命令、任务状态机、日志、弹性正定性和质量门控；
 - 失败后仅重跑 QHA 的恢复任务：复用已完成的弹性张量，不重复应变计算，并支持嵌套恢复链路；
 - QHA 位移级进度读取与虚频、非正定弹性张量、未应变弹性能异常等质量警告；
-- 单温点及温区 `alpha(T)` 曲线 ZTE ROM，输出体积分数和质量分数；
+- 基于真实PTE/NTE `alpha(T)` 曲线的温区ZTE设计：检索两相材料、指定温区与目标热膨胀系数，优化固定体积分数并绘制PTE、NTE和混合曲线；
 - 受控 Agent 工具注册、白名单调用和严格科学请求格式；
 - 旧科研代码到新模块的迁移映射。
 - 可运行的 FastAPI 服务与浏览器界面：材料检索、论文 Fig. 1d 景观、CIF/POSCAR 统一上传、三级预测、单温点/温区 ROM 和受控 Agent。
@@ -47,6 +48,9 @@ Set-Location 'D:\9.Project\9.NTE&PTE_dataset\14.thermal_expansion_platform'
 $env:PYTHONPATH = (Join-Path (Get-Location) 'src')
 python -m te_platform init-db
 python -m te_platform import-dataset
+python -m te_platform import-pte-reference `
+  --source-root 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\PTE_materials' `
+  --summary-csv 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\plot_alpha_M\PTE_materials_summary_alpha_neg_300K_v3.csv'
 python -m te_platform dataset-stats
 python -m te_platform search-materials --query Zr --limit 10
 python -m te_platform material-detail 'CsNO3-mp-561851'
@@ -77,6 +81,8 @@ uv sync
 - `xi < 2.5`仅表示高通量预筛中的高概率NTE候选；
 - SBR用于热膨胀符号分类，不等价于精确预测完整 `alpha(T)`；
 - 当前活跃数据库包含6701条记录，不代表全部材料均可直接合成；
+- ZTE页面使用独立的185条PTE参考集与6701条NTE候选集；PTE界面仅显示化学式，但内部保留原目录编号用于曲线溯源；NTE选择项要求真实曲线在300 K为负。
+- 当前复合模型输出体积分数；若要换算质量分数，需要进一步接入两相密度。用户上传曲线或结构作为复合相属于后续扩展入口。
 - MatterSim、Phonopy、VASPKIT等属于外部依赖，不作为本仓库自有源码。
 
 ## 运行与结果边界

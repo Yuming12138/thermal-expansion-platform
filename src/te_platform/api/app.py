@@ -15,7 +15,9 @@ from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import material_detail, material_landscape, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.curve_rom import optimize_curve_rom
+from te_platform.composites.material_pair import curve_materials, optimize_material_pair
 from te_platform.config import DEFAULT_RELEASE_SLUG, database_path
+from te_platform.config import DEFAULT_PTE_RELEASE_SLUG
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
@@ -63,6 +65,14 @@ class CurveROMRequest(BaseModel):
     target_alpha: float = 0.0
     pte_density: float | None = Field(default=None, gt=0)
     nte_density: float | None = Field(default=None, gt=0)
+
+
+class MaterialPairCurveRequest(BaseModel):
+    pte_material_key: str = Field(min_length=1)
+    nte_material_key: str = Field(min_length=1)
+    temperature_min_k: float = Field(default=300.0, ge=0)
+    temperature_max_k: float = Field(default=800.0, gt=0)
+    target_alpha_ppm_per_k: float = 0.0
 
 
 class AgentToolRequest(BaseModel):
@@ -188,6 +198,45 @@ def create_app(database: Path | None = None) -> FastAPI:
                 pte_density=request.pte_density,
                 nte_density=request.nte_density,
             ).to_dict()
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/api/composites/materials")
+    def composite_materials(
+        role: str,
+        query: str = "",
+        limit: int = Query(default=30, ge=1, le=100),
+    ) -> list[dict[str, object]]:
+        release_slug = {
+            "pte": DEFAULT_PTE_RELEASE_SLUG,
+            "nte": DEFAULT_RELEASE_SLUG,
+        }.get(role.lower())
+        if release_slug is None:
+            raise HTTPException(status_code=422, detail="role must be 'pte' or 'nte'")
+        try:
+            return curve_materials(
+                db_path,
+                release_slug,
+                query,
+                limit,
+                alpha_sign=1 if role.lower() == "pte" else -1,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/composites/curve-design")
+    def composite_curve_design(request: MaterialPairCurveRequest) -> dict[str, object]:
+        try:
+            return optimize_material_pair(
+                db_path,
+                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
+                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_material_key=request.pte_material_key,
+                nte_material_key=request.nte_material_key,
+                temperature_min_k=request.temperature_min_k,
+                temperature_max_k=request.temperature_max_k,
+                target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+            )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 

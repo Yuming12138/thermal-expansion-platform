@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 from te_platform.catalog.importer import import_dataset
 from te_platform.catalog.qha_curve_importer import import_historical_qha_curves
+from te_platform.catalog.pte_importer import import_pte_reference
 from te_platform.catalog.queries import material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.config import (
@@ -46,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _database_argument(qha_importer)
     qha_importer.add_argument("roots", type=Path, nargs="+")
+
+    pte_importer = subparsers.add_parser(
+        "import-pte-reference", help="Import a curated PTE release with complete QHA curves"
+    )
+    _database_argument(pte_importer)
+    pte_importer.add_argument("--source-root", type=Path, required=True)
+    pte_importer.add_argument("--summary-csv", type=Path, required=True)
+    pte_importer.add_argument("--replace", action="store_true")
 
     stats = subparsers.add_parser("dataset-stats", help="Show imported dataset statistics")
     _database_argument(stats)
@@ -152,6 +161,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "import-qha-curves":
         _json_output(import_historical_qha_curves(args.db, args.roots).to_dict())
+        return 0
+    if args.command == "import-pte-reference":
+        _json_output(
+            import_pte_reference(
+                args.db,
+                args.source_root,
+                args.summary_csv,
+                replace=args.replace,
+            ).to_dict()
+        )
         return 0
     if args.command == "dataset-stats":
         _json_output(_dataset_stats(args.db, args.release))

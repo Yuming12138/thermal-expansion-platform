@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = PROJECT_ROOT / "var" / "dev.db"
 DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
+DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
 DEFAULT_DATASET_PATH = (
     PROJECT_ROOT
     / "datasets"

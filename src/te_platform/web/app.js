@@ -546,20 +546,149 @@ async function submitPredictionJob(endpoint, mode) {
   }
 }
 
-function postForm(formId, path, target, bodyBuilder) {
-  document.querySelector(formId).addEventListener("submit", async event => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    try {
-      show(target, await api(path, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(bodyBuilder(form)),
-      }));
-    } catch (error) {
-      document.querySelector(target).textContent = error.message;
-    }
+async function loadCompositeMaterials(role) {
+  const search = document.querySelector("#" + role + "-search").value;
+  const select = document.querySelector("#" + role + "-material");
+  const materials = await api(
+    "/api/composites/materials?role=" + role + "&limit=50&query=" + encodeURIComponent(search)
+  );
+  select.innerHTML = materials.map(material =>
+    "<option value='" + escapeHtml(material.material_key) + "'>" +
+    escapeHtml(role === "pte" ? (material.formula || material.material_key) : material.material_key) +
+    " · α₃₀₀=" + numeric(material.alpha_300k_ppm_per_k) + " ppm/K</option>"
+  ).join("");
+  if (!materials.length) {
+    select.innerHTML = "<option value=''>没有匹配且带完整曲线的材料</option>";
+  }
+  return materials;
+}
+
+function drawZteCurves(result) {
+  const canvas = document.querySelector("#zte-curve");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const margin = {left: 64, right: 24, top: 24, bottom: 50};
+  const temperatures = result.temperatures_k.map(Number);
+  const pte = result.pte_alpha_ppm_per_k.map(Number);
+  const nte = result.nte_alpha_ppm_per_k.map(Number);
+  const mixed = result.mixed_alpha_ppm_per_k.map(Number);
+  const target = Number(result.target_alpha_ppm_per_k);
+  const allY = [...pte, ...nte, ...mixed, target];
+  const xMin = Math.min(...temperatures);
+  const xMax = Math.max(...temperatures);
+  const rawYMin = Math.min(...allY);
+  const rawYMax = Math.max(...allY);
+  const yPad = Math.max((rawYMax - rawYMin) * .12, 1);
+  const yMin = rawYMin - yPad;
+  const yMax = rawYMax + yPad;
+  const x = value => margin.left + (value - xMin) / (xMax - xMin || 1) * (width - margin.left - margin.right);
+  const y = value => height - margin.bottom - (value - yMin) / (yMax - yMin || 1) * (height - margin.top - margin.bottom);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#aebdca";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, height - margin.bottom);
+  ctx.lineTo(width - margin.right, height - margin.bottom);
+  ctx.stroke();
+  ctx.setLineDash([6, 5]);
+  ctx.strokeStyle = "#2b3642";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, y(target));
+  ctx.lineTo(width - margin.right, y(target));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const drawLine = (values, color, widthValue) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = widthValue;
+    ctx.beginPath();
+    values.forEach((value, index) => index
+      ? ctx.lineTo(x(temperatures[index]), y(value))
+      : ctx.moveTo(x(temperatures[index]), y(value)));
+    ctx.stroke();
+  };
+  drawLine(pte, "#fd3827", 1.8);
+  drawLine(nte, "#4477aa", 1.8);
+  drawLine(mixed, "#16836a", 3.0);
+  ctx.fillStyle = "#516476";
+  ctx.font = "12px Segoe UI";
+  ctx.textAlign = "center";
+  for (let index = 0; index <= 4; index++) {
+    const value = xMin + index / 4 * (xMax - xMin);
+    ctx.fillText(value.toFixed(0), x(value), height - 26);
+  }
+  ctx.textAlign = "right";
+  for (let index = 0; index <= 4; index++) {
+    const value = yMin + index / 4 * (yMax - yMin);
+    ctx.fillText(value.toFixed(1), margin.left - 8, y(value) + 4);
+  }
+  ctx.textAlign = "center";
+  ctx.fillText("温度 (K)", margin.left + (width - margin.left - margin.right) / 2, height - 6);
+  ctx.save();
+  ctx.translate(15, margin.top + (height - margin.top - margin.bottom) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("α (ppm/K)", 0, 0);
+  ctx.restore();
+  ctx.textAlign = "left";
+  const legendY = 18;
+  [["PTE", "#fd3827"], ["NTE", "#4477aa"], ["混合", "#16836a"]].forEach((item, index) => {
+    const startX = margin.left + index * 78;
+    ctx.strokeStyle = item[1];
+    ctx.lineWidth = item[0] === "混合" ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(startX, legendY);
+    ctx.lineTo(startX + 20, legendY);
+    ctx.stroke();
+    ctx.fillStyle = "#516476";
+    ctx.fillText(item[0], startX + 25, legendY + 4);
   });
+}
+
+function renderZteDesign(result) {
+  const ntePercent = Number(result.nte_volume_fraction) * 100;
+  const ptePercent = 100 - ntePercent;
+  document.querySelector("#zte-result").innerHTML =
+    "<h3>曲线配比优化结果</h3>" + metricCards([
+      ["PTE 体积分数", ptePercent.toFixed(2) + "%"],
+      ["NTE 体积分数", ntePercent.toFixed(2) + "%"],
+      ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K"],
+      ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K"],
+    ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
+    "；NTE：" + escapeHtml(result.nte_material.material_key) + "；有效温区：" +
+    numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) + " K</p>" +
+    "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>";
+  drawZteCurves(result);
+}
+
+async function designZteComposite() {
+  const pteKey = document.querySelector("#pte-material").value;
+  const nteKey = document.querySelector("#nte-material").value;
+  if (!pteKey || !nteKey) {
+    document.querySelector("#zte-result").textContent = "请先选择 PTE 和 NTE 材料。";
+    return;
+  }
+  document.querySelector("#zte-design-button").disabled = true;
+  document.querySelector("#zte-result").textContent = "正在读取两条真实 QHA 曲线并优化配比…";
+  try {
+    const result = await api("/api/composites/curve-design", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        pte_material_key: pteKey,
+        nte_material_key: nteKey,
+        temperature_min_k: Number(document.querySelector("#zte-t-min").value),
+        temperature_max_k: Number(document.querySelector("#zte-t-max").value),
+        target_alpha_ppm_per_k: Number(document.querySelector("#zte-target").value),
+      }),
+    });
+    renderZteDesign(result);
+  } catch (error) {
+    document.querySelector("#zte-result").textContent = error.message;
+  } finally {
+    document.querySelector("#zte-design-button").disabled = false;
+  }
 }
 
 async function initialize() {
@@ -577,11 +706,14 @@ async function initialize() {
   }
   setupLandscapeInteraction();
   document.querySelector("#search-button").addEventListener("click", searchMaterials);
-  postForm("#rom-form", "/api/composites/rom", "#rom-result", form => ({
-    alpha_pte: Number(form.get("pte")),
-    alpha_nte: Number(form.get("nte")),
-    target_alpha: Number(form.get("target")),
-  }));
+  document.querySelector("#pte-search-button").addEventListener("click", () =>
+    loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
+  document.querySelector("#nte-search-button").addEventListener("click", () =>
+    loadCompositeMaterials("nte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
+  document.querySelector("#zte-design-button").addEventListener("click", designZteComposite);
+  Promise.all([loadCompositeMaterials("pte"), loadCompositeMaterials("nte")])
+    .then(() => { document.querySelector("#zte-result").textContent = "请选择材料和目标温区，然后优化配比。"; })
+    .catch(error => { document.querySelector("#zte-result").textContent = error.message; });
   document.querySelector("#structure-file").addEventListener("change", async () => {
     const file = uploadedStructure();
     if (!file) return;
