@@ -5,7 +5,11 @@ from pathlib import Path
 from te_platform.agent.registry import ToolRegistry
 from te_platform.catalog.queries import material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
-from te_platform.composites.material_pair import curve_materials, optimize_material_pair
+from te_platform.composites.material_pair import (
+    curve_materials,
+    optimize_material_pair,
+    query_thermal_expansion_catalog,
+)
 from te_platform.config import DEFAULT_PTE_RELEASE_SLUG, DEFAULT_RELEASE_SLUG
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
@@ -94,6 +98,32 @@ def default_registry(catalog_database: Path | None = None) -> ToolRegistry:
                     "material_key": {"type": "string"},
                 },
                 "required": ["role", "material_key"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "query_thermal_expansion_catalog",
+            lambda role="all", **kwargs: query_thermal_expansion_catalog(
+                catalog_database,
+                tuple(releases.values()) if role == "all" else releases[role],
+                **kwargs,
+            ),
+            description=(
+                "在NTE、PTE或全部目录的所有真实QHA曲线上计算任意温度的alpha，"
+                "然后进行全库筛选和严格排序。遇到最大、最小、排名、前N名、温度条件比较时应优先使用此工具，"
+                "不要用search_catalog的有限候选代替全库统计。ascending返回最负值优先。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "enum": ["nte", "pte", "all"], "default": "all"},
+                    "temperature_k": {"type": "number", "minimum": 0, "default": 300},
+                    "query": {"type": "string", "default": ""},
+                    "alpha_min_ppm_per_k": {"type": ["number", "null"]},
+                    "alpha_max_ppm_per_k": {"type": ["number", "null"]},
+                    "sort_order": {"type": "string", "enum": ["ascending", "descending"], "default": "ascending"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                },
                 "additionalProperties": False,
             },
         )

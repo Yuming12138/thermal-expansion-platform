@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,117 @@ def curve_materials(
     return _release_materials_with_curves(
         database, release_slug, query=query, limit=limit, alpha_sign=alpha_sign
     )
+
+
+def query_thermal_expansion_catalog(
+    database: str | Path,
+    release_slugs: str | tuple[str, ...],
+    *,
+    temperature_k: float = 300.0,
+    query: str = "",
+    alpha_min_ppm_per_k: float | None = None,
+    alpha_max_ppm_per_k: float | None = None,
+    sort_order: str = "ascending",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Evaluate stored curves at one temperature, then filter and rank the full scope."""
+    if temperature_k < 0:
+        raise ValueError("temperature_k must be non-negative")
+    if sort_order not in {"ascending", "descending"}:
+        raise ValueError("sort_order must be 'ascending' or 'descending'")
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    slugs = (release_slugs,) if isinstance(release_slugs, str) else release_slugs
+    if not slugs:
+        raise ValueError("At least one release slug is required")
+    placeholders = ",".join("?" for _ in slugs)
+    pattern = f"%{query.strip()}%"
+    with connect_readonly_database(database) as connection:
+        membership_count = connection.execute(
+            f"""SELECT COUNT(*)
+            FROM dataset_releases dr
+            JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+            WHERE dr.slug IN ({placeholders})""",
+            slugs,
+        ).fetchone()[0]
+        rows = connection.execute(
+            f"""WITH ranked_curves AS (
+                SELECT j.material_id, c.points_json, c.source_path,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY j.material_id
+                           ORDER BY j.updated_at DESC, j.id DESC
+                       ) AS curve_rank
+                FROM calculation_jobs j
+                JOIN precision_thermal_expansion_curves c ON c.job_id = j.id
+                WHERE j.status = 'SUCCEEDED'
+            )
+            SELECT dr.slug AS release_slug, m.material_key, m.formula,
+                   rc.points_json, rc.source_path
+            FROM dataset_releases dr
+            JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+            JOIN materials m ON m.id = dm.material_id
+            JOIN ranked_curves rc ON rc.material_id = m.id AND rc.curve_rank = 1
+            WHERE dr.slug IN ({placeholders})
+              AND (? = '%%' OR m.material_key LIKE ? OR m.formula LIKE ?)
+            ORDER BY m.material_key""",
+            (*slugs, pattern, pattern, pattern),
+        ).fetchall()
+
+    evaluated: list[dict[str, Any]] = []
+    outside_curve_range = 0
+    invalid_curves = 0
+    for row in rows:
+        try:
+            points = json.loads(row["points_json"])
+            alpha = _interpolate(points, temperature_k)
+        except (json.JSONDecodeError, IndexError, TypeError, ValueError, ZeroDivisionError):
+            invalid_curves += 1
+            continue
+        if alpha is None:
+            outside_curve_range += 1
+            continue
+        alpha_ppm = alpha * 1_000_000
+        if not math.isfinite(alpha_ppm):
+            invalid_curves += 1
+            continue
+        if alpha_min_ppm_per_k is not None and alpha_ppm < alpha_min_ppm_per_k:
+            continue
+        if alpha_max_ppm_per_k is not None and alpha_ppm > alpha_max_ppm_per_k:
+            continue
+        evaluated.append(
+            {
+                "release_slug": row["release_slug"],
+                "material_key": row["material_key"],
+                "formula": row["formula"],
+                "temperature_k": float(temperature_k),
+                "alpha_ppm_per_k": alpha_ppm,
+                "curve_temperature_min_k": float(points[0][0]),
+                "curve_temperature_max_k": float(points[-1][0]),
+                "curve_point_count": len(points),
+                "source_path": row["source_path"],
+            }
+        )
+    evaluated.sort(
+        key=lambda item: (item["alpha_ppm_per_k"], item["material_key"]),
+        reverse=sort_order == "descending",
+    )
+    results = evaluated[:limit]
+    for rank, item in enumerate(results, start=1):
+        item["rank"] = rank
+    return {
+        "temperature_k": float(temperature_k),
+        "sort_order": sort_order,
+        "query": query,
+        "release_slugs": list(slugs),
+        "scope_material_count": int(membership_count),
+        "stored_curve_count": len(rows),
+        "evaluated_material_count": len(evaluated),
+        "outside_curve_range_count": outside_curve_range,
+        "invalid_curve_count": invalid_curves,
+        "returned_count": len(results),
+        "ranking_is_complete_for_evaluated_scope": True,
+        "results": results,
+    }
 
 
 def _interpolate(points: list[list[float]], target: float) -> float | None:

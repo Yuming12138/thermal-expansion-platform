@@ -2,7 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from te_platform.composites.material_pair import curve_materials, optimize_material_pair
+from te_platform.composites.material_pair import (
+    curve_materials,
+    optimize_material_pair,
+    query_thermal_expansion_catalog,
+)
 from te_platform.db.schema import connect_database, initialize_database
 from te_platform.jobs.repository import import_historical_thermal_expansion_curve
 
@@ -79,6 +83,32 @@ class MaterialPairTests(unittest.TestCase):
             self.assertEqual(result["curve_temperature_max_k"], 600.0)
             self.assertEqual(result["temperatures_k"], [0.0, 300.0, 600.0])
             self.assertEqual(result["mixed_alpha_ppm_per_k"], [0.0, 0.0, 0.0])
+
+    def test_queries_and_ranks_complete_curve_scope_at_arbitrary_temperature(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "platform.db"
+            initialize_database(database)
+            self._insert_curve_material(
+                database, "nte", "NTE-a", ((0.0, 0.0), (300.0, -20e-6), (600.0, -10e-6))
+            )
+            self._insert_curve_material(
+                database, "nte", "NTE-b", ((0.0, 0.0), (300.0, -40e-6), (600.0, -30e-6))
+            )
+            self._insert_curve_material(
+                database, "nte", "NTE-c", ((400.0, -50e-6), (600.0, -30e-6))
+            )
+
+            result = query_thermal_expansion_catalog(
+                database, "nte", temperature_k=300, sort_order="ascending", limit=2
+            )
+
+            self.assertEqual(result["scope_material_count"], 3)
+            self.assertEqual(result["stored_curve_count"], 3)
+            self.assertEqual(result["evaluated_material_count"], 2)
+            self.assertEqual(result["outside_curve_range_count"], 1)
+            self.assertTrue(result["ranking_is_complete_for_evaluated_scope"])
+            self.assertEqual(result["results"][0]["material_key"], "NTE-b")
+            self.assertAlmostEqual(result["results"][0]["alpha_ppm_per_k"], -40.0)
 
 
 if __name__ == "__main__":

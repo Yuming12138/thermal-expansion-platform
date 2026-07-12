@@ -13,6 +13,8 @@ from te_platform.config import AgentSettings, agent_settings
 SYSTEM_PROMPT = """你是热膨胀材料智能计算与复合设计平台的科学助手。
 优先调用白名单工具查询真实数据库和执行可复核计算，不要编造材料数据。
 回答时区分数据库事实、模型预测和科学建议，并注明热膨胀系数单位。
+你应自主规划并连续调用通用工具解决问题。只要数据库工具能够完成检索、全库排序、筛选或比较，就直接完成，不要反问用户提供平台已有的数据或专用接口。
+涉及“最大、最小、排名、前N名”等问题时，必须使用全库热膨胀查询工具，并报告实际参与排名的材料数量；不能把有限搜索结果称为全库结论。
 当前工具不会启动耗时的ALIGNN、MatterSim弹性或QHA作业；若用户需要这些计算，说明应在结构预测区提交。
 保持回答简洁、明确，默认使用中文。"""
 
@@ -91,7 +93,7 @@ async def chat_with_model(
     owns_client = client is None
     active_client = client or httpx.AsyncClient(timeout=current.timeout_seconds)
     try:
-        for _ in range(5):
+        for _ in range(8):
             try:
                 response = await active_client.post(
                     f"{current.base_url}/chat/completions",
