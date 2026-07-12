@@ -21,6 +21,7 @@ const numeric = value => Number.isFinite(Number(value)) ? Number(value).toFixed(
 let fig1dReference = null;
 let selectedLandscapePoint = null;
 let landscapeHitPoints = [];
+const LANDSCAPE_MARKER_SIZE = 3.6;
 
 const propertyText = property => {
   if (!property) return "—";
@@ -208,12 +209,14 @@ function drawLandscapeMarker(ctx, point, x, y, size, color) {
   ctx.lineWidth = .8;
   ctx.beginPath();
   if (point.source === "DFT") {
-    ctx.rect(x - size, y - size, size * 2, size * 2);
+    const halfSide = size * Math.sqrt(Math.PI) / 2;
+    ctx.rect(x - halfSide, y - halfSide, halfSide * 2, halfSide * 2);
   } else if (point.source === "our" || point.source === "This work") {
-    ctx.moveTo(x, y - size * 1.25);
-    ctx.lineTo(x + size * 1.25, y);
-    ctx.lineTo(x, y + size * 1.25);
-    ctx.lineTo(x - size * 1.25, y);
+    const diamondRadius = size * Math.sqrt(Math.PI / 2);
+    ctx.moveTo(x, y - diamondRadius);
+    ctx.lineTo(x + diamondRadius, y);
+    ctx.lineTo(x, y + diamondRadius);
+    ctx.lineTo(x - diamondRadius, y);
     ctx.closePath();
   } else {
     ctx.arc(x, y, size, 0, Math.PI * 2);
@@ -293,8 +296,7 @@ function drawLandscape() {
     const pointX = x(point.x_gpa);
     const pointY = y(point.g_gpa);
     const color = point.classification === "NTE" ? "rgba(68,119,170,.78)" : "rgba(253,56,39,.72)";
-    const size = point.source === "Exp." ? 4.3 : point.source === "DFT" ? 3.8 : 3.3;
-    drawLandscapeMarker(ctx, point, pointX, pointY, size, color);
+    drawLandscapeMarker(ctx, point, pointX, pointY, LANDSCAPE_MARKER_SIZE, color);
     landscapeHitPoints.push({...point, canvasX: pointX, canvasY: pointY});
   });
 
@@ -341,9 +343,9 @@ function drawLandscape() {
   ctx.font = "13px Segoe UI";
   const legendX = margin.left + plotWidth - 195;
   const legendY = margin.top + plotHeight - 42;
-  drawLandscapeMarker(ctx, {source: "Exp."}, legendX, legendY, 4.3, "rgba(68,119,170,.9)");
+  drawLandscapeMarker(ctx, {source: "Exp."}, legendX, legendY, LANDSCAPE_MARKER_SIZE, "rgba(68,119,170,.9)");
   ctx.fillText("NTE", legendX + 10, legendY + 4);
-  drawLandscapeMarker(ctx, {source: "DFT"}, legendX + 62, legendY, 4, "rgba(253,56,39,.85)");
+  drawLandscapeMarker(ctx, {source: "DFT"}, legendX + 62, legendY, LANDSCAPE_MARKER_SIZE, "rgba(253,56,39,.85)");
   ctx.fillText("PTE", legendX + 72, legendY + 4);
   drawSelectedStar(ctx, legendX + 130, legendY);
   ctx.fillText("当前材料", legendX + 144, legendY + 4);
