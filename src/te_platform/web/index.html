@@ -31,9 +31,13 @@
         </article>
       </section>
       <section class="panel">
-        <h2>G–Ẽ 热膨胀景观</h2>
-        <p class="muted">双对数坐标。蓝色：SBR 判为 NTE；橙色：SBR 判为 PTE。</p>
-        <canvas id="landscape" width="1100" height="360"></canvas>
+        <h2>论文 Fig. 1d：G–Ẽ 热膨胀景观</h2>
+        <p class="muted">论文原始散点与渐变背景。悬停查看材料；打开材料详情后，所选材料会以红色星标叠加。</p>
+        <div class="landscape-wrap">
+          <canvas id="landscape" width="1100" height="600" role="img" aria-label="论文 Fig. 1d 双对数热膨胀分类图"></canvas>
+          <div id="landscape-tooltip" class="landscape-tooltip" hidden></div>
+        </div>
+        <p id="landscape-selection" class="curve-note">尚未选择材料。</p>
       </section>
       <section class="grid three">
         <article class="panel">

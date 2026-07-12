@@ -57,6 +57,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(dataset.status_code, 200)
         self.assertEqual(dataset.json()["counts"]["materials"], 6701)
 
+        fig1d = self.client.get("/static/fig1d-reference.json")
+        self.assertEqual(fig1d.status_code, 200)
+        self.assertEqual(len(fig1d.json()["points"]), 354)
+        self.assertAlmostEqual(fig1d.json()["axis"]["boundary_c"], 2.84151)
+
     def test_material_search_detail_and_landscape(self) -> None:
         materials = self.client.get("/api/materials", params={"query": "BaCrSi4O10"})
         self.assertEqual(materials.status_code, 200)
