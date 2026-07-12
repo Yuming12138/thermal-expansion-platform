@@ -1,9 +1,45 @@
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 from typing import Any
 
 from te_platform.db.schema import connect_database
+
+
+def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
+    if job is None:
+        return None
+    result = json.loads(job["result_json"]) if job["result_json"] else {}
+    curve = json.loads(job["points_json"]) if job["points_json"] else result.get("thermal_expansion_curve")
+    if not isinstance(curve, list):
+        return None
+    points: list[dict[str, float]] = []
+    for point in curve:
+        if not isinstance(point, list | tuple) or len(point) < 2:
+            continue
+        try:
+            temperature_k, alpha_per_k = float(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(temperature_k) and math.isfinite(alpha_per_k):
+            points.append(
+                {
+                    "temperature_k": temperature_k,
+                    "alpha_ppm_per_k": alpha_per_k * 1_000_000,
+                }
+            )
+    if len(points) < 2:
+        return None
+    return {
+        "job_id": job["id"],
+        "model_name": job["model_name"],
+        "updated_at": job["updated_at"],
+        "points": points,
+        "quality_warnings": result.get("quality_warnings", []),
+        "source_path": job["source_path"] or result.get("thermal_expansion_source_path"),
+    }
 
 
 def dataset_summary(
@@ -126,6 +162,19 @@ def material_detail(
             """,
             (material["release_id"], material["id"]),
         ).fetchall()
+        precision_job = connection.execute(
+            """
+            SELECT j.id, j.model_name, j.result_json, j.updated_at,
+                   c.points_json, c.source_path
+            FROM calculation_jobs j
+            LEFT JOIN precision_thermal_expansion_curves c ON c.job_id = j.id
+            WHERE j.material_id = ? AND j.status = 'SUCCEEDED'
+              AND (c.points_json IS NOT NULL OR j.result_json IS NOT NULL)
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (material["id"],),
+        ).fetchone()
         structures = connection.execute(
             """
             SELECT format, content_sha256, LENGTH(content) AS content_characters
@@ -161,6 +210,7 @@ def material_detail(
             "external_id": material["external_id"],
         },
         "properties": property_map,
+        "precision_thermal_expansion": _precision_thermal_expansion(precision_job),
         "structures": [dict(row) for row in structures],
         "quality_flags": [dict(row) for row in flags],
     }

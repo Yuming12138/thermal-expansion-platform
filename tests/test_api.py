@@ -66,6 +66,7 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/materials/{material_key}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["material"]["material_key"], material_key)
+        self.assertIsNone(detail.json()["precision_thermal_expansion"])
 
         landscape = self.client.get("/api/materials/landscape", params={"limit": 10})
         self.assertEqual(landscape.status_code, 200)

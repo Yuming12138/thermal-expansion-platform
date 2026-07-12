@@ -14,6 +14,7 @@ class PrecisionResults:
     elastic_min_eigenvalue_gpa: float
     elastic_positive_definite: bool
     thermal_expansion_curve: tuple[tuple[float, float], ...]
+    thermal_expansion_source_path: str
     alpha_300k_per_k: float | None
     alpha_300k_ppm_per_k: float | None
     quality_warnings: tuple[str, ...]
@@ -113,6 +114,7 @@ def parse_precision_results(work_directory: str | Path) -> PrecisionResults:
         elastic_min_eigenvalue_gpa=float(np.min(eigenvalues)),
         elastic_positive_definite=bool(float(np.min(eigenvalues)) > 0),
         thermal_expansion_curve=points,
+        thermal_expansion_source_path=str(thermal_path.resolve()),
         alpha_300k_per_k=alpha_300,
         alpha_300k_ppm_per_k=alpha_300 * 1_000_000 if alpha_300 is not None else None,
         quality_warnings=tuple(warnings),

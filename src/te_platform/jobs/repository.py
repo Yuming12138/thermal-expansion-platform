@@ -58,6 +58,59 @@ def get_job(database: str | Path, job_id: str) -> dict[str, Any]:
     return result
 
 
+def _persist_thermal_expansion_curve(connection: Any, job_id: str, result: dict[str, Any]) -> None:
+    """Store a complete QHA alpha(T) sequence independently of summary values."""
+    curve = result.get("thermal_expansion_curve")
+    if not isinstance(curve, list | tuple) or len(curve) < 2:
+        return
+    points: list[list[float]] = []
+    for point in curve:
+        if not isinstance(point, list | tuple) or len(point) < 2:
+            return
+        try:
+            temperature, alpha = float(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            return
+        points.append([temperature, alpha])
+    connection.execute(
+        """INSERT INTO precision_thermal_expansion_curves
+        (job_id, points_json, unit, source_path, parsed_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(job_id) DO UPDATE SET
+            points_json = excluded.points_json,
+            unit = excluded.unit,
+            source_path = excluded.source_path,
+            parsed_at = excluded.parsed_at""",
+        (
+            job_id,
+            json.dumps(points, ensure_ascii=False, separators=(",", ":")),
+            "1/K",
+            result.get("thermal_expansion_source_path"),
+            _timestamp(),
+        ),
+    )
+
+
+def associate_job_with_material(
+    database: str | Path, job_id: str, material_key: str
+) -> dict[str, Any]:
+    """Associate an existing calculation with one catalogued material by its stable key."""
+    initialize_database(database)
+    with connect_database(database) as connection:
+        material = connection.execute(
+            "SELECT id FROM materials WHERE material_key = ?", (material_key,)
+        ).fetchone()
+        if material is None:
+            raise ValueError(f"Unknown material key: {material_key}")
+        updated = connection.execute(
+            "UPDATE calculation_jobs SET material_id = ?, updated_at = ? WHERE id = ?",
+            (material["id"], _timestamp(), job_id),
+        )
+        if updated.rowcount != 1:
+            raise ValueError(f"Unknown calculation job: {job_id}")
+    return get_job(database, job_id)
+
+
 def transition_job(
     database: str | Path,
     job_id: str,
@@ -81,6 +134,8 @@ def transition_job(
                 job_id,
             ),
         )
+        if target is JobStatus.SUCCEEDED and result is not None:
+            _persist_thermal_expansion_curve(connection, job_id, result)
     return get_job(database, job_id)
 
 
@@ -98,4 +153,5 @@ def replace_completed_job_result(
             WHERE id = ?""",
             (json.dumps(result, ensure_ascii=False, sort_keys=True), _timestamp(), job_id),
         )
+        _persist_thermal_expansion_curve(connection, job_id, result)
     return get_job(database, job_id)

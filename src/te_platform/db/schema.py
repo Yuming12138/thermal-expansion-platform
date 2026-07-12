@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS calculation_jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (material_id) REFERENCES materials(id)
+);
+
+-- The full alpha(T) sequence is a first-class scientific result rather than
+-- merely a visualisation artifact.  Keeping it independently queryable also
+-- means that importing an existing QHA directory never loses its raw curve.
+CREATE TABLE IF NOT EXISTS precision_thermal_expansion_curves (
+    job_id TEXT PRIMARY KEY,
+    points_json TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    source_path TEXT,
+    parsed_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES calculation_jobs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS composite_designs (

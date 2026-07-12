@@ -79,8 +79,84 @@ async function loadDetail(key) {
     "<p><strong>" + escapeHtml(data.material.material_key) + "</strong> · " +
     escapeHtml(data.material.external_id || "无外部ID") + "</p><p class='muted'>结构：" +
     escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
-    "</dl><details><summary>查看全部数据字段</summary><pre>" +
+    "</dl>" + renderPrecisionThermalExpansion(data.precision_thermal_expansion) +
+    "<details><summary>查看全部数据字段</summary><pre>" +
     escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
+  drawPrecisionThermalExpansion(data.precision_thermal_expansion);
+}
+
+function renderPrecisionThermalExpansion(result) {
+  if (!result || !result.points || result.points.length < 2) {
+    return "<p class='muted'>暂无已关联的精确 QHA 热膨胀曲线。</p>";
+  }
+  const warnings = Array.isArray(result.quality_warnings) && result.quality_warnings.length
+    ? "质量提示：" + result.quality_warnings.join("；")
+    : "该曲线来自已关联的精确 QHA 任务。";
+  return "<h3>精确 QHA 热膨胀曲线</h3><canvas id='thermal-curve' class='thermal-curve' width='520' height='250'></canvas>" +
+    "<p class='curve-note'>任务 " + escapeHtml(result.job_id) + " · " + escapeHtml(warnings) + "</p>";
+}
+
+function drawPrecisionThermalExpansion(result) {
+  if (!result || !result.points || result.points.length < 2) return;
+  const canvas = document.querySelector("#thermal-curve");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const points = result.points
+    .filter(point => Number.isFinite(Number(point.temperature_k)) && Number.isFinite(Number(point.alpha_ppm_per_k)))
+    .map(point => ({...point, temperature_k: Number(point.temperature_k), alpha_ppm_per_k: Number(point.alpha_ppm_per_k)}));
+  if (points.length < 2) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  const margin = {left: 54, right: 18, top: 18, bottom: 42};
+  const xValues = points.map(point => point.temperature_k);
+  const yValues = [...points.map(point => point.alpha_ppm_per_k), 0];
+  const xSpan = Math.max(...xValues) - Math.min(...xValues) || 1;
+  const ySpan = Math.max(...yValues) - Math.min(...yValues) || 1;
+  const xMin = Math.max(0, Math.min(...xValues) - xSpan * .12);
+  const xMax = Math.max(...xValues) + xSpan * .12;
+  const yMin = Math.min(...yValues) - ySpan * .16;
+  const yMax = Math.max(...yValues) + ySpan * .16;
+  const x = value => margin.left + (value - xMin) / (xMax - xMin) * (width - margin.left - margin.right);
+  const y = value => height - margin.bottom - (value - yMin) / (yMax - yMin) * (height - margin.top - margin.bottom);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#b9c9d7";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, height - margin.bottom);
+  ctx.lineTo(width - margin.right, height - margin.bottom);
+  ctx.stroke();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#d8e1ea";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, y(0));
+  ctx.lineTo(width - margin.right, y(0));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "#1d6b83";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((point, index) => index ? ctx.lineTo(x(point.temperature_k), y(point.alpha_ppm_per_k)) : ctx.moveTo(x(point.temperature_k), y(point.alpha_ppm_per_k)));
+  ctx.stroke();
+  ctx.fillStyle = "#1d6b83";
+  points.forEach(point => {
+    ctx.beginPath();
+    ctx.arc(x(point.temperature_k), y(point.alpha_ppm_per_k), 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.fillStyle = "#516476";
+  ctx.font = "12px Segoe UI";
+  for (let index = 0; index <= 4; index++) {
+    const xValue = xMin + index / 4 * (xMax - xMin);
+    const yValue = yMin + index / 4 * (yMax - yMin);
+    ctx.fillText(xValue.toFixed(0), x(xValue) - 8, height - 23);
+    ctx.fillText(yValue.toFixed(1), 4, y(yValue) + 4);
+  }
+  ctx.fillText("T (K)", width - 42, height - 7);
+  ctx.save();
+  ctx.translate(13, 100);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("α (ppm/K)", 0, 0);
+  ctx.restore();
 }
 
 function drawLandscape(points) {
@@ -91,8 +167,14 @@ function drawLandscape(points) {
   const margin = 44;
   ctx.clearRect(0, 0, width, height);
   const valid = points.filter(p => p.G_GPa > 0 && p.E_tilde_GPa > 0);
-  const maxG = Math.max(...valid.map(p => p.G_GPa));
-  const maxE = Math.max(...valid.map(p => p.E_tilde_GPa));
+  const gLogs = valid.map(p => Math.log10(p.G_GPa));
+  const eLogs = valid.map(p => Math.log10(p.E_tilde_GPa));
+  const minG = Math.floor(Math.min(...gLogs));
+  const maxG = Math.ceil(Math.max(...gLogs));
+  const minE = Math.floor(Math.min(...eLogs));
+  const maxE = Math.ceil(Math.max(...eLogs));
+  const x = value => margin + (Math.log10(value) - minE) / Math.max(1, maxE - minE) * (width - margin - 24);
+  const y = value => height - margin - (Math.log10(value) - minG) / Math.max(1, maxG - minG) * (height - margin - 24);
   ctx.strokeStyle = "#b9c9d7";
   ctx.beginPath();
   ctx.moveTo(margin, 12);
@@ -100,20 +182,26 @@ function drawLandscape(points) {
   ctx.lineTo(width - 12, height - margin);
   ctx.stroke();
   valid.forEach(p => {
-    const x = margin + (p.E_tilde_GPa / maxE) * (width - margin - 24);
-    const y = height - margin - (p.G_GPa / maxG) * (height - margin - 24);
+    const pointX = x(p.E_tilde_GPa);
+    const pointY = y(p.G_GPa);
     ctx.fillStyle = p.G_GPa / p.E_tilde_GPa < 2.84 ? "rgba(36,119,181,.45)" : "rgba(215,111,50,.5)";
     ctx.beginPath();
-    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.arc(pointX, pointY, 2.2, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.fillStyle = "#516476";
   ctx.font = "13px Segoe UI";
-  ctx.fillText("Ẽ (GPa)", width - 86, height - 14);
+  for (let exponent = minE; exponent <= maxE; exponent++) {
+    ctx.fillText("1e" + exponent, x(10 ** exponent) - 10, height - 25);
+  }
+  for (let exponent = minG; exponent <= maxG; exponent++) {
+    ctx.fillText("1e" + exponent, 5, y(10 ** exponent) + 4);
+  }
+  ctx.fillText("Ẽ (GPa, log)", width - 116, height - 8);
   ctx.save();
   ctx.translate(15, 82);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText("G (GPa)", 0, 0);
+  ctx.fillText("G (GPa, log)", 0, 0);
   ctx.restore();
 }
 
