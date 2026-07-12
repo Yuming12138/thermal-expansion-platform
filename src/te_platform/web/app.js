@@ -25,6 +25,21 @@ let agentHistory = [];
 let agentAttachments = [];
 const LANDSCAPE_MARKER_SIZE = 3.6;
 
+function prepareHiDpiCanvas(canvas) {
+  const width = Math.max(1, canvas.clientWidth);
+  const height = Math.max(1, canvas.clientHeight);
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+  const backingWidth = Math.round(width * dpr);
+  const backingHeight = Math.round(height * dpr);
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {ctx, width, height};
+}
+
 const propertyText = property => {
   if (!property) return "—";
   const value = Number.isFinite(Number(property.value)) ? numeric(property.value) : String(property.value ?? "—");
@@ -138,13 +153,12 @@ function drawPrecisionThermalExpansion(result, canvasSelector = "#thermal-curve"
   if (!result || !result.points || result.points.length < 2) return;
   const canvas = document.querySelector(canvasSelector);
   if (!canvas) return;
-  const ctx = canvas.getContext("2d");
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => drawPrecisionThermalExpansion(result, canvasSelector);
   const points = result.points
     .filter(point => Number.isFinite(Number(point.temperature_k)) && Number.isFinite(Number(point.alpha_ppm_per_k)))
     .map(point => ({...point, temperature_k: Number(point.temperature_k), alpha_ppm_per_k: Number(point.alpha_ppm_per_k)}));
   if (points.length < 2) return;
-  const width = canvas.width;
-  const height = canvas.height;
   const margin = {left: 54, right: 18, top: 18, bottom: 42};
   const xValues = points.map(point => point.temperature_k);
   const yValues = [...points.map(point => point.alpha_ppm_per_k), 0];
@@ -249,9 +263,8 @@ function drawSelectedStar(ctx, x, y) {
 function drawLandscape() {
   if (!fig1dReference) return;
   const canvas = document.querySelector("#landscape");
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = drawLandscape;
   const margin = {left: 72, right: 22, top: 18, bottom: 64};
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
@@ -334,7 +347,7 @@ function drawLandscape() {
     ctx.fillText(value === 1 ? "10⁰" : value === 10 ? "10¹" : "10²", margin.left - 10, y(value) + 5);
   });
   ctx.textAlign = "center";
-  ctx.fillText("Ẽ = 160.217|E_coh|/(AAV·CN) (GPa)", margin.left + plotWidth / 2, height - 9);
+  ctx.fillText("Ẽ (GPa)", margin.left + plotWidth / 2, height - 9);
   ctx.save();
   ctx.translate(18, margin.top + plotHeight / 2);
   ctx.rotate(-Math.PI / 2);
@@ -359,8 +372,8 @@ function setupLandscapeInteraction() {
   const wrap = document.querySelector(".landscape-wrap");
   canvas.addEventListener("mousemove", event => {
     const rect = canvas.getBoundingClientRect();
-    const canvasX = (event.clientX - rect.left) * canvas.width / rect.width;
-    const canvasY = (event.clientY - rect.top) * canvas.height / rect.height;
+    const canvasX = event.clientX - rect.left - canvas.clientLeft;
+    const canvasY = event.clientY - rect.top - canvas.clientTop;
     let nearest = null;
     let nearestDistance = Infinity;
     landscapeHitPoints.forEach(point => {
@@ -570,9 +583,8 @@ async function loadCompositeMaterials(role) {
 function drawZteCurves(result) {
   const canvas = document.querySelector("#zte-curve");
   if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => drawZteCurves(result);
   const margin = {left: 64, right: 24, top: 24, bottom: 50};
   const temperatures = result.temperatures_k.map(Number);
   const pte = result.pte_alpha_ppm_per_k.map(Number);
@@ -1077,5 +1089,13 @@ async function initialize() {
     document.querySelector("#agent-status-dot").classList.add("offline");
   }
 }
+
+let canvasResizeTimer = null;
+window.addEventListener("resize", () => {
+  window.clearTimeout(canvasResizeTimer);
+  canvasResizeTimer = window.setTimeout(() => {
+    document.querySelectorAll("canvas").forEach(canvas => canvas.teRedraw?.());
+  }, 120);
+});
 
 initialize();
