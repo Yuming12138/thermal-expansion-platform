@@ -5,15 +5,21 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
-$SecretsDirectory = Join-Path $RepositoryRoot 'var\secrets'
-$SecretPath = Join-Path $SecretsDirectory 'agent-key.dpapi'
+$ConfigDirectory = Join-Path $RepositoryRoot 'var\config'
+$ConfigPath = Join-Path $ConfigDirectory 'agent.env'
 
-New-Item -ItemType Directory -Path $SecretsDirectory -Force | Out-Null
-$Host.UI.RawUI.WindowTitle = 'TE Platform Agent Setup'
-$SecureKey = Read-Host 'Paste the Agent API key (input is hidden), then press Enter' -AsSecureString
-$EncryptedKey = ConvertFrom-SecureString -SecureString $SecureKey
-[System.IO.File]::WriteAllText($SecretPath, $EncryptedKey, [System.Text.UTF8Encoding]::new($false))
+New-Item -ItemType Directory -Path $ConfigDirectory -Force | Out-Null
+if (-not (Test-Path -LiteralPath $ConfigPath)) {
+    $Template = @(
+        'TEP_AGENT_BASE_URL=https://api.cmsg666.xyz/v1'
+        'TEP_AGENT_MODEL=gpt-5.6-lunar'
+        'TEP_AGENT_API_KEY='
+    ) -join [Environment]::NewLine
+    [System.IO.File]::WriteAllText($ConfigPath, $Template, [System.Text.UTF8Encoding]::new($false))
+}
 
-Write-Host 'Agent API key saved with Windows DPAPI encryption in var\secrets.'
-Write-Host 'The encrypted value is usable only by this Windows user.'
-Write-Host 'You can close this window and tell Codex that setup is complete.'
+$Editor = Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $ConfigPath + '"') -PassThru
+Write-Host 'The local Agent configuration file is open in Notepad.'
+Write-Host 'Paste the key after TEP_AGENT_API_KEY=, save the file, and close Notepad.'
+Write-Host 'This plaintext file is local and excluded from Git. Do not share it.'
+Wait-Process -Id $Editor.Id

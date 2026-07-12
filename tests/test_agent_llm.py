@@ -1,11 +1,13 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import httpx
 
 from te_platform.agent.llm import capability, chat_with_model
 from te_platform.agent.registry import ToolRegistry
-from te_platform.config import AgentSettings
+from te_platform.config import AgentSettings, load_agent_env
 
 
 class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
@@ -79,3 +81,18 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["configured"])
         self.assertNotIn("api_key", result)
         self.assertNotIn("local-test-key", json.dumps(result))
+
+    def test_loads_only_allowlisted_agent_environment_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            env_path = Path(temporary_directory) / "agent.env"
+            env_path.write_text(
+                "# local config\n"
+                "TEP_AGENT_MODEL=test-model\n"
+                "TEP_AGENT_API_KEY='hidden-value'\n"
+                "UNRELATED_VALUE=ignored\n",
+                encoding="utf-8",
+            )
+            values = load_agent_env(env_path)
+        self.assertEqual(values["TEP_AGENT_MODEL"], "test-model")
+        self.assertEqual(values["TEP_AGENT_API_KEY"], "hidden-value")
+        self.assertNotIn("UNRELATED_VALUE", values)
