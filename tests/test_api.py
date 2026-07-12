@@ -85,6 +85,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(fig1d.json()["points"]), 354)
         self.assertAlmostEqual(fig1d.json()["axis"]["boundary_c"], 2.84151)
 
+        viewer_library = self.client.get("/static/vendor/3Dmol-2.5.5.min.js")
+        self.assertEqual(viewer_library.status_code, 200)
+        self.assertGreater(len(viewer_library.content), 500_000)
+
     def test_material_search_detail_and_landscape(self) -> None:
         materials = self.client.get("/api/materials", params={"query": "BaCrSi4O10"})
         self.assertEqual(materials.status_code, 200)
@@ -94,6 +98,14 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/materials/{material_key}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["material"]["material_key"], material_key)
+        structure = detail.json()["structures"][0]
+        self.assertEqual(structure["format"], "POSCAR")
+        self.assertGreater(len(structure["content"]), 100)
+        self.assertEqual(len(structure["content_sha256"]), 64)
+        structure_view = detail.json()["structure_view"]
+        self.assertEqual(structure_view["source"], "pymatgen.CrystalNN")
+        self.assertGreater(structure_view["central_count"], 0)
+        self.assertGreater(structure_view["bond_count"], 0)
         curve = detail.json()["precision_thermal_expansion"]
         self.assertIsNotNone(curve)
         self.assertGreaterEqual(len(curve["points"]), 2)

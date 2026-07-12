@@ -24,6 +24,7 @@ form { display: grid; gap: 10px; }
 label { display: grid; gap: 4px; color: #526577; font-size: .82rem; }
 pre { min-height: 56px; white-space: pre-wrap; overflow-wrap: anywhere; background: #f5f8fb; padding: 10px; border-radius: 7px; font-size: .78rem; }
 .table-wrap { max-height: 340px; overflow: auto; margin-top: 13px; }
+.material-workspace { grid-template-columns: 1fr; }
 table { width: 100%; border-collapse: collapse; font-size: .82rem; }
 th, td { border-bottom: 1px solid #ebf0f5; padding: 8px 5px; text-align: left; }
 td button { padding: 4px 7px; font-size: .75rem; }
@@ -63,6 +64,48 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .zte-slider-scale { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: #667789; font-size: .74rem; }
 .zte-slider-scale strong { color: #1c536d; }
 .thermal-curve { width: 100%; max-width: 100%; margin-top: 12px; border: 1px solid #ebf0f5; border-radius: 8px; background: #fcfdff; }
+.detail-panel .property-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.material-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; margin: 16px 0 18px; }
+.material-visual-grid .structure-panel { margin: 0; }
+.thermal-panel { min-width: 0; display: flex; flex-direction: column; padding: 14px; border: 1px solid #dce3eb; border-radius: 11px; background: #fff; box-shadow: 0 8px 26px rgba(35,55,75,.07); }
+.thermal-heading { min-height: 52px; margin-bottom: 10px; }
+.thermal-heading h3 { margin: 0; }
+.thermal-heading .curve-note { margin-top: 6px; }
+.thermal-panel .thermal-curve { height: 520px; flex: none; margin-top: 0; }
+.thermal-empty { min-height: 520px; display: grid; place-content: center; gap: 8px; padding: 28px; border: 1px dashed #cbd8e3; border-radius: 8px; background: #f8fbfd; text-align: center; }
+.thermal-empty p { margin: 0; }
+.thermal-empty span { max-width: 360px; color: #8a99a6; font-size: .76rem; line-height: 1.5; }
+.structure-panel { margin: 16px 0 18px; padding: 14px; border: 1px solid #dce3eb; border-radius: 11px; background: #fff; box-shadow: 0 8px 26px rgba(35,55,75,.07); }
+.structure-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.structure-heading h3 { margin: 0; }
+.structure-summary-badge { flex: 0 0 auto; padding: 5px 8px; border-radius: 999px; background: #e3f0f4; color: #245c70; font-size: .72rem; font-weight: 700; }
+.structure-stage { position: relative; }
+.structure-viewer { position: relative; width: 100%; height: 520px; overflow: hidden; border: 1px solid #e0e4ea; border-radius: 8px; background: #fff; cursor: grab; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
+.structure-viewer:active { cursor: grabbing; }
+.structure-viewer canvas { outline: none; }
+.structure-viewer-tools { position: absolute; z-index: 4; top: 14px; right: 14px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #d9dee6; border-radius: 7px; background: rgba(255,255,255,.94); box-shadow: 0 5px 16px rgba(39,52,68,.12); backdrop-filter: blur(6px); }
+.structure-viewer-tools button { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 0; border-bottom: 1px solid #e5e8ed; border-radius: 0; background: transparent; color: #354353; box-shadow: none; }
+.structure-viewer-tools button:last-child { border-bottom: 0; }
+.structure-viewer-tools button:hover { background: #edf3fb; color: #2864d7; }
+.structure-viewer-tools svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.structure-settings { position: absolute; z-index: 5; top: 60px; right: 64px; width: 190px; padding: 13px; border: 1px solid #d9e0e8; border-radius: 8px; background: rgba(255,255,255,.97); box-shadow: 0 8px 24px rgba(35,50,68,.16); }
+.structure-settings strong { display: block; margin-bottom: 8px; color: #2d3b4a; font-size: .8rem; }
+.structure-settings label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; color: #536577; font-size: .73rem; }
+.structure-settings select { width: 92px; min-height: 30px; padding: 4px 6px; font-size: .72rem; }
+.structure-checkbox input { margin: 0; }
+.structure-axis { position: absolute; z-index: 3; left: 22px; bottom: 22px; width: 58px; height: 58px; color: #445366; font-size: .65rem; font-weight: 700; pointer-events: none; }
+.structure-axis span { position: absolute; display: block; width: 32px; border-top: 4px solid currentColor; transform-origin: left center; }
+.structure-axis span::after { content: ""; position: absolute; right: -1px; top: -6px; border: 4px solid transparent; border-left: 7px solid currentColor; }
+.structure-axis .axis-x { left: 24px; top: 31px; color: #d42d2d; transform: rotate(-8deg); }
+.structure-axis .axis-y { left: 24px; top: 31px; color: #258b3c; transform: rotate(94deg); }
+.structure-axis .axis-z { left: 24px; top: 31px; color: #285bcc; transform: rotate(218deg); }
+.structure-axis span { text-indent: 37px; line-height: 0; }
+.structure-element-legend { position: absolute; z-index: 3; right: 20px; bottom: 18px; display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 110px); pointer-events: none; }
+.structure-element-legend span { display: grid; place-items: center; min-width: 42px; height: 42px; padding: 0 10px; border: 1px solid rgba(52,63,77,.12); border-radius: 999px; background: var(--element-color); color: #202733; font-size: .82rem; font-weight: 700; box-shadow: 0 2px 7px rgba(30,42,57,.12); }
+.structure-atom-info { min-height: 20px; margin: 8px 2px 0; color: #52687a; font-size: .76rem; }
+.structure-error { display: grid; place-items: center; height: 100%; margin: 0; padding: 20px; color: #9a4b44; text-align: center; }
+.structure-panel:fullscreen { padding: 24px; background: #f9fbfd; }
+.structure-panel:fullscreen .structure-viewer { height: calc(100vh - 125px); }
 .curve-note { margin: 8px 0 0; color: #667789; font-size: .76rem; line-height: 1.45; }
 .property-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 14px 0; }
 .property-grid div { background: #f5f8fb; border-radius: 7px; padding: 8px; }
@@ -108,5 +151,5 @@ summary { cursor: pointer; color: #1d6b83; font-size: .86rem; }
 .agent-approval-actions button { padding: 6px 9px; font-size: .74rem; }
 .agent-approval-actions .reject { color: #667789; background: #e8eef3; }
 .agent-job-curve { width: 100%; height: auto; display: block; margin-top: 9px; border: 1px solid #dce7ef; border-radius: 7px; background: #fff; }
-@media (max-width: 950px) { .stats, .grid.two, .grid.three, .prediction-actions, .prediction-metrics, .composite-pickers, .composite-window { grid-template-columns: 1fr; } header { align-items: flex-start; gap: 12px; flex-direction: column; } }
-@media (max-width: 560px) { main { padding: 14px 14px 92px; } header { padding: 18px; } .panel, .stat { padding: 14px; } .row { align-items: stretch; flex-direction: column; } .property-grid { grid-template-columns: 1fr; } .agent-widget { right: 10px; bottom: 10px; width: calc(100vw - 20px); height: min(620px, calc(100vh - 20px)); } .agent-widget.collapsed { height: 62px; } .agent-header { min-height: 62px; } }
+@media (max-width: 950px) { .stats, .grid.two, .grid.three, .prediction-actions, .prediction-metrics, .composite-pickers, .composite-window, .material-visual-grid { grid-template-columns: 1fr; } .detail-panel .property-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { align-items: flex-start; gap: 12px; flex-direction: column; } }
+@media (max-width: 560px) { main { padding: 14px 14px 92px; } header { padding: 18px; } .panel, .stat { padding: 14px; } .row { align-items: stretch; flex-direction: column; } .property-grid, .detail-panel .property-grid { grid-template-columns: 1fr; } .structure-heading { flex-direction: column; } .structure-viewer { height: 360px; } .thermal-empty { min-height: 300px; } .structure-viewer-tools { top: 9px; right: 9px; } .structure-viewer-tools button { width: 38px; height: 38px; } .structure-settings { top: 50px; right: 54px; } .structure-element-legend span { min-width: 36px; height: 36px; } .agent-widget { right: 10px; bottom: 10px; width: calc(100vw - 20px); height: min(620px, calc(100vh - 20px)); } .agent-widget.collapsed { height: 62px; } .agent-header { min-height: 62px; } }

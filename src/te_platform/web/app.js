@@ -23,6 +23,8 @@ let selectedLandscapePoint = null;
 let landscapeHitPoints = [];
 let agentHistory = [];
 let agentAttachments = [];
+let materialStructureViewer = null;
+let structureFullscreenHandlerInstalled = false;
 const LANDSCAPE_MARKER_SIZE = 3.6;
 
 function prepareHiDpiCanvas(canvas) {
@@ -101,11 +103,452 @@ async function loadDetail(key) {
     "<p><strong>" + escapeHtml(data.material.material_key) + "</strong> · " +
     escapeHtml(data.material.external_id || "无外部ID") + "</p><p class='muted'>结构：" +
     escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
-    "</dl>" + renderPrecisionThermalExpansion(data.precision_thermal_expansion) +
+    "</dl><div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
+    renderPrecisionThermalExpansion(data.precision_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
     escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
+  drawMaterialStructure(data.material, data.structures?.[0], data.structure_view);
   drawPrecisionThermalExpansion(data.precision_thermal_expansion);
   selectLandscapeMaterial(data);
+}
+
+function renderStructureViewer(structures) {
+  const structure = structures?.find(item => item.content) || null;
+  if (!structure) {
+    return "<h3>三维晶体结构</h3><p class='muted'>暂无可用于三维显示的结构文件。</p>";
+  }
+  return "<section class='structure-panel' id='structure-panel'>" +
+    "<div class='structure-heading'><div><h3>三维晶体结构</h3>" +
+    "<p class='curve-note'>左键拖拽旋转 · 滚轮缩放 · 中键或 Ctrl+拖拽平移</p></div>" +
+    "<span id='material-structure-summary' class='structure-summary-badge'>正在加载…</span></div>" +
+    "<div class='structure-stage'>" +
+    "<div id='structure-viewer' class='structure-viewer' role='img' aria-label='可旋转缩放的三维晶体结构'></div>" +
+    "<div class='structure-viewer-tools' role='toolbar' aria-label='三维结构工具'>" +
+    structureToolButton("structure-fullscreen", "全屏", "fullscreen") +
+    structureToolButton("structure-settings-button", "显示设置", "settings") +
+    structureToolButton("structure-reset", "重置视角", "reset") +
+    structureToolButton("structure-snapshot", "保存图片", "camera") +
+    "</div>" +
+    "<div id='structure-settings' class='structure-settings' hidden>" +
+    "<strong>显示设置</strong>" +
+    "<label>原子样式<select id='structure-style'><option value='ball-stick'>球棍</option>" +
+    "<option value='spacefill'>空间填充</option><option value='stick'>键线</option></select></label>" +
+    "<label>显示范围<select id='structure-supercell'><option value='periodic'>周期邻居（推荐）</option>" +
+    "<option value='1'>1×1×1 原胞</option>" +
+    "<option value='2'>2×2×2</option><option value='3'>3×3×3</option></select></label>" +
+    "<label class='structure-checkbox'><input id='structure-unit-cell' type='checkbox' checked>显示晶胞边框</label>" +
+    "</div>" +
+    "<div class='structure-axis' aria-label='坐标轴方向'><span class='axis-x'>X</span>" +
+    "<span class='axis-y'>Y</span><span class='axis-z'>Z</span></div>" +
+    "<div id='structure-element-legend' class='structure-element-legend' aria-label='元素图例'></div>" +
+    "</div>" +
+    "<p id='structure-atom-info' class='structure-atom-info'>点击原子可查看元素和笛卡尔坐标。</p>" +
+    "</section>";
+}
+
+function structureToolButton(id, label, icon) {
+  const paths = {
+    fullscreen: "<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>",
+    settings: "<path d='M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M8 14v6'/>",
+    reset: "<path d='M5 8V3m0 0h5M5 3l4 4a7 7 0 1 1-2 9'/>",
+    camera: "<path d='M4 8h3l2-3h6l2 3h3v11H4z'/><circle cx='12' cy='13' r='3'/>",
+  };
+  return "<button id='" + id + "' type='button' title='" + label + "' aria-label='" + label + "'>" +
+    "<svg viewBox='0 0 24 24' aria-hidden='true'>" + paths[icon] + "</svg></button>";
+}
+
+const structureElementColors = {
+  H: "#f1f1f1", He: "#d9ffff", Li: "#cc80ff", Be: "#c2ff00", B: "#ffb5b5",
+  C: "#666a73", N: "#5475d1", O: "#e84a3c", F: "#9fb4dc", Ne: "#b3e3f5",
+  Na: "#ab5cf2", Mg: "#8aff00", Al: "#b8a1a1", Si: "#d6ad8b", P: "#e58a37",
+  S: "#e1c229", Cl: "#58a65c", Ar: "#80d1e3", K: "#8f40d4", Ca: "#3dff00",
+  Sc: "#bfc4c7", Ti: "#9ba3a8", V: "#8f99a6", Cr: "#7f8aa6", Mn: "#9c7ac7",
+  Fe: "#c97845", Co: "#d989a4", Ni: "#65a56f", Cu: "#c9864e", Zn: "#8299b5",
+  Ga: "#b48270", Ge: "#7094a1", As: "#bd80e3", Se: "#d89b34", Br: "#a85845",
+  Kr: "#5cb8d1", Rb: "#7830b5", Sr: "#38e600", Y: "#a9c7c7", Zr: "#91a8a8",
+  Nb: "#779999", Mo: "#659a9a", Tc: "#4e8f8f", Ru: "#3b7d8f", Rh: "#397b7f",
+  Pd: "#8c8c9b", Ag: "#b9bec8", Cd: "#d3c36b", In: "#a67573", Sn: "#668080",
+  Sb: "#9e63b5", Te: "#c88a2e", I: "#864e9e", Xe: "#429eb0", Cs: "#57178f",
+  Ba: "#24c92e", La: "#70d4ff", Ce: "#70d4ff", W: "#426696", Pt: "#aaa6a0",
+  Au: "#e0ae25", Hg: "#b8b8cf", Pb: "#575961", Bi: "#9e4fb5",
+};
+
+const structureCovalentRadii = {
+  H: .31, He: .28, Li: 1.28, Be: .96, B: .84, C: .76, N: .71, O: .66, F: .57, Ne: .58,
+  Na: 1.66, Mg: 1.41, Al: 1.21, Si: 1.11, P: 1.07, S: 1.05, Cl: 1.02, Ar: 1.06,
+  K: 2.03, Ca: 1.76, Sc: 1.70, Ti: 1.60, V: 1.53, Cr: 1.39, Mn: 1.39, Fe: 1.32,
+  Co: 1.26, Ni: 1.24, Cu: 1.32, Zn: 1.22, Ga: 1.22, Ge: 1.20, As: 1.19, Se: 1.20,
+  Br: 1.20, Kr: 1.16, Rb: 2.20, Sr: 1.95, Y: 1.90, Zr: 1.75, Nb: 1.64, Mo: 1.54,
+  Tc: 1.47, Ru: 1.46, Rh: 1.42, Pd: 1.39, Ag: 1.45, Cd: 1.44, In: 1.42, Sn: 1.39,
+  Sb: 1.39, Te: 1.38, I: 1.39, Xe: 1.40, Cs: 2.44, Ba: 2.15, La: 2.07, Ce: 2.04,
+  Pr: 2.03, Nd: 2.01, Sm: 1.98, Eu: 1.98, Gd: 1.96, Tb: 1.94, Dy: 1.92, Ho: 1.92,
+  Er: 1.89, Tm: 1.90, Yb: 1.87, Lu: 1.87, Hf: 1.75, Ta: 1.70, W: 1.62, Re: 1.51,
+  Os: 1.44, Ir: 1.41, Pt: 1.36, Au: 1.36, Hg: 1.32, Tl: 1.45, Pb: 1.46, Bi: 1.48,
+};
+
+function parsePoscar(content) {
+  const lines = String(content).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length < 8) throw new Error("POSCAR 内容不完整");
+  const rawScale = Number(lines[1]);
+  const rawLattice = lines.slice(2, 5).map(line => line.split(/\s+/).slice(0, 3).map(Number));
+  if (!Number.isFinite(rawScale) || rawLattice.some(row => row.length !== 3 || row.some(value => !Number.isFinite(value)))) {
+    throw new Error("POSCAR 晶格参数无效");
+  }
+  const rawVolume = Math.abs(matrixDeterminant3(rawLattice));
+  const scale = rawScale < 0 ? Math.cbrt(Math.abs(rawScale) / rawVolume) : rawScale;
+  const lattice = rawLattice.map(row => row.map(value => value * scale));
+  let cursor = 5;
+  const firstTokens = lines[cursor].split(/\s+/);
+  let elements;
+  let counts;
+  if (firstTokens.every(token => /^\d+$/.test(token))) {
+    counts = firstTokens.map(Number);
+    const titleElements = lines[0].match(/[A-Z][a-z]?/g) || [];
+    elements = titleElements.length === counts.length ? titleElements : counts.map((_, index) => "X" + (index + 1));
+    cursor += 1;
+  } else {
+    elements = firstTokens;
+    counts = lines[cursor + 1].split(/\s+/).map(Number);
+    cursor += 2;
+  }
+  if (elements.length !== counts.length || counts.some(value => !Number.isInteger(value) || value < 0)) {
+    throw new Error("POSCAR 元素或原子计数无效");
+  }
+  if (/^s/i.test(lines[cursor])) cursor += 1;
+  const direct = /^d/i.test(lines[cursor]);
+  const cartesian = /^[ck]/i.test(lines[cursor]);
+  if (!direct && !cartesian) throw new Error("POSCAR 坐标类型无法识别");
+  cursor += 1;
+  const atomTotal = counts.reduce((sum, value) => sum + value, 0);
+  if (lines.length < cursor + atomTotal) throw new Error("POSCAR 原子坐标数量不足");
+  const inverseLattice = matrixInverse3(lattice);
+  const expandedElements = elements.flatMap((element, index) => Array(counts[index]).fill(element));
+  const atoms = expandedElements.map((element, index) => {
+    const values = lines[cursor + index].split(/\s+/).slice(0, 3).map(Number);
+    if (values.some(value => !Number.isFinite(value))) throw new Error("POSCAR 原子坐标无效");
+    const inputCart = direct ? fractionalToCartesian(values, lattice) : values.map(value => value * scale);
+    const inputFractional = direct ? values : vectorMatrixMultiply(inputCart, inverseLattice);
+    const fractional = inputFractional.map(value => ((value % 1) + 1) % 1);
+    return {element, fractional, cart: fractionalToCartesian(fractional, lattice)};
+  });
+  return {atoms, lattice};
+}
+
+function matrixDeterminant3(matrix) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = matrix;
+  return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+
+function matrixInverse3(matrix) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = matrix;
+  const determinant = matrixDeterminant3(matrix);
+  if (Math.abs(determinant) < 1e-12) throw new Error("POSCAR 晶格矩阵不可逆");
+  return [
+    [(e * i - f * h) / determinant, (c * h - b * i) / determinant, (b * f - c * e) / determinant],
+    [(f * g - d * i) / determinant, (a * i - c * g) / determinant, (c * d - a * f) / determinant],
+    [(d * h - e * g) / determinant, (b * g - a * h) / determinant, (a * e - b * d) / determinant],
+  ];
+}
+
+function vectorMatrixMultiply(vector, matrix) {
+  return [0, 1, 2].map(column => vector.reduce((sum, value, row) => sum + value * matrix[row][column], 0));
+}
+
+function fractionalToCartesian(fractional, lattice) {
+  return [0, 1, 2].map(column => fractional.reduce(
+    (sum, value, row) => sum + value * lattice[row][column], 0
+  ));
+}
+
+function translatedCartesian(atom, translation, lattice) {
+  const offset = fractionalToCartesian(translation, lattice);
+  return atom.cart.map((value, index) => value + offset[index]);
+}
+
+function atomsAreBonded(left, right) {
+  const dx = left.x - right.x;
+  const dy = left.y - right.y;
+  const dz = left.z - right.z;
+  const distance = Math.hypot(dx, dy, dz);
+  if (distance < .1) return false;
+  const leftRadius = structureCovalentRadii[left.elem] || .9;
+  const rightRadius = structureCovalentRadii[right.elem] || .9;
+  return distance <= (leftRadius + rightRadius) * 1.25 + .15;
+}
+
+function buildPeriodicStructure(parsed) {
+  const atomMap = new Map();
+  const addAtom = (atomIndex, translation) => {
+    const key = atomIndex + ":" + translation.join(",");
+    if (atomMap.has(key)) return;
+    const source = parsed.atoms[atomIndex];
+    const [x, y, z] = translatedCartesian(source, translation, parsed.lattice);
+    atomMap.set(key, {
+      elem: source.element, x, y, z,
+      chain: translation.every(value => value === 0) ? "C" : "P",
+      color: parseInt((structureElementColors[source.element] || "#7f91ab").slice(1), 16),
+      bonds: [], bondOrder: [],
+    });
+  };
+  parsed.atoms.forEach((_, index) => addAtom(index, [0, 0, 0]));
+  parsed.atoms.forEach((center, centerIndex) => {
+    const centerCart = {elem: center.element, x: center.cart[0], y: center.cart[1], z: center.cart[2]};
+    parsed.atoms.forEach((neighbor, neighborIndex) => {
+      for (let a = -1; a <= 1; a += 1) for (let b = -1; b <= 1; b += 1) for (let c = -1; c <= 1; c += 1) {
+        if (a === 0 && b === 0 && c === 0) continue;
+        const [x, y, z] = translatedCartesian(neighbor, [a, b, c], parsed.lattice);
+        if (atomsAreBonded(centerCart, {elem: neighbor.element, x, y, z})) addAtom(neighborIndex, [a, b, c]);
+      }
+    });
+  });
+  const atoms = Array.from(atomMap.values());
+  for (let leftIndex = 0; leftIndex < atoms.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < atoms.length; rightIndex += 1) {
+      if (!atomsAreBonded(atoms[leftIndex], atoms[rightIndex])) continue;
+      atoms[leftIndex].bonds.push(rightIndex);
+      atoms[leftIndex].bondOrder.push(1);
+      atoms[rightIndex].bonds.push(leftIndex);
+      atoms[rightIndex].bondOrder.push(1);
+    }
+  }
+  return {atoms, centralCount: parsed.atoms.length, periodicCount: atoms.length - parsed.atoms.length};
+}
+
+function addStructureUnitCell(viewer, lattice) {
+  const corners = [];
+  for (let a = 0; a <= 1; a += 1) for (let b = 0; b <= 1; b += 1) for (let c = 0; c <= 1; c += 1) {
+    const [x, y, z] = fractionalToCartesian([a, b, c], lattice);
+    corners.push({a, b, c, x, y, z});
+  }
+  corners.forEach(corner => {
+    [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(delta => {
+      const end = corners.find(candidate =>
+        candidate.a === corner.a + delta[0] && candidate.b === corner.b + delta[1] && candidate.c === corner.c + delta[2]
+      );
+      if (end) viewer.addLine({start: corner, end, color: "#77879b", linewidth: 1});
+    });
+  });
+}
+
+function structureViewModelAtoms(structureView) {
+  return structureView.atoms.map(atom => ({
+    elem: atom.element,
+    x: Number(atom.x),
+    y: Number(atom.y),
+    z: Number(atom.z),
+    chain: atom.central ? "C" : "P",
+    color: parseInt((structureElementColors[atom.element] || "#7f91ab").slice(1), 16),
+    bonds: atom.bonds.map(Number),
+    bondOrder: atom.bonds.map(() => 1),
+    properties: {
+      siteIndex: atom.site_index,
+      periodicImage: atom.image,
+      sceneSource: structureView.source,
+    },
+  }));
+}
+
+function drawMaterialStructure(material, structure, structureView = null) {
+  const container = document.querySelector("#structure-viewer");
+  if (!container || !structure?.content) return;
+  const summary = document.querySelector("#material-structure-summary");
+  const atomInfo = document.querySelector("#structure-atom-info");
+  if (!window.$3Dmol) {
+    container.innerHTML = "<p class='structure-error'>三维渲染组件未能加载。</p>";
+    summary.textContent = "组件不可用";
+    return;
+  }
+
+  const state = {style: "ball-stick", display: "periodic", unitCell: true};
+  let parsedStructure;
+  try {
+    parsedStructure = parsePoscar(structure.content);
+  } catch (error) {
+    console.warn("自定义 POSCAR 解析失败，将使用基础查看模式。", error);
+  }
+  const baseAtomCount = Number(structureView?.central_count) || parsedStructure?.atoms.length || 0;
+  if (baseAtomCount > 300) {
+    state.display = "1";
+    document.querySelector("#structure-supercell").value = "1";
+    atomInfo.textContent = "该结构原胞超过 300 个原子，默认使用原胞模式以避免周期邻居搜索造成卡顿。";
+  }
+  const styleSpec = (color, periodicImage = false) => ({
+    "ball-stick": {
+      sphere: {radius: periodicImage ? .36 : .38, color, opacity: periodicImage ? .92 : 1},
+      stick: {radius: periodicImage ? .07 : .08, color, opacity: periodicImage ? .86 : .96},
+    },
+    spacefill: {sphere: {scale: periodicImage ? .62 : .70, color, opacity: periodicImage ? .78 : 1}},
+    stick: {stick: {radius: periodicImage ? .07 : .09, color, opacity: periodicImage ? .72 : .96}},
+  })[state.style];
+
+  const applyStructureStyle = (atoms, periodicMode = false) => {
+    const elements = Array.from(new Set(atoms.map(atom => atom.elem).filter(Boolean)));
+    elements.forEach(element => {
+      const color = structureElementColors[element] || "#7f91ab";
+      if (periodicMode) {
+        materialStructureViewer.setStyle({elem: element, chain: "C"}, styleSpec(color, false));
+        materialStructureViewer.setStyle({elem: element, chain: "P"}, styleSpec(color, true));
+      } else {
+        materialStructureViewer.setStyle({elem: element}, styleSpec(color, false));
+      }
+    });
+  };
+
+  try {
+    materialStructureViewer?.clear?.();
+    container.replaceChildren();
+    materialStructureViewer = window.$3Dmol.createViewer(container, {
+      backgroundColor: "#ffffff",
+      antialias: true,
+    });
+  } catch (error) {
+    container.innerHTML = "<p class='structure-error'>当前浏览器无法创建 WebGL 三维视图。</p>";
+    summary.textContent = "WebGL 不可用";
+    console.error(error);
+    return;
+  }
+
+  const applyDefaultStructureView = () => {
+    materialStructureViewer.setView?.([0, 0, 0, 0, 0, 0, 0, 1]);
+    materialStructureViewer.zoomTo();
+    materialStructureViewer.rotate(90, "z");
+    materialStructureViewer.rotate(10, "x");
+    materialStructureViewer.rotate(-8, "y");
+    materialStructureViewer.zoom(1.0);
+  };
+
+  const rebuild = () => {
+    try {
+      materialStructureViewer.clear();
+      let model;
+      let periodicCount = 0;
+      if (state.display === "periodic" && (structureView || parsedStructure)) {
+        const periodic = structureView
+          ? {
+              atoms: structureViewModelAtoms(structureView),
+              centralCount: Number(structureView.central_count),
+              periodicCount: Number(structureView.periodic_count),
+            }
+          : buildPeriodicStructure(parsedStructure);
+        model = materialStructureViewer.addModel();
+        model.addAtoms(periodic.atoms);
+        periodicCount = periodic.periodicCount;
+      } else {
+        model = materialStructureViewer.addModel(structure.content, "vasp");
+        const repeat = Number(state.display);
+        if (repeat > 1) {
+        materialStructureViewer.replicateUnitCell(
+            repeat, repeat, repeat, model, true
+        );
+        }
+      }
+      const atoms = materialStructureViewer.selectedAtoms({});
+      applyStructureStyle(atoms, state.display === "periodic" && Boolean(structureView || parsedStructure));
+      materialStructureViewer.setClickable({}, true, atom => {
+        atomInfo.innerHTML = "<strong>" + escapeHtml(atom.elem || "未知元素") + "</strong> · " +
+          "原子 #" + escapeHtml(Number(atom.index ?? 0) + 1) + " · 坐标 (" +
+          [atom.x, atom.y, atom.z].map(value => Number(value).toFixed(3)).join(", ") + ") Å";
+      });
+      if (state.unitCell) {
+        if (structureView?.lattice) addStructureUnitCell(materialStructureViewer, structureView.lattice);
+        else if (parsedStructure) addStructureUnitCell(materialStructureViewer, parsedStructure.lattice);
+        else materialStructureViewer.addUnitCell(model, {box: {color: "#7d8ba2", linewidth: 1}});
+      }
+      applyDefaultStructureView();
+      materialStructureViewer.render();
+      const atomCount = atoms.length;
+      summary.textContent = state.display === "periodic"
+        ? structure.format + " · 原胞 " + baseAtomCount + " + 周期邻居 " + periodicCount +
+          (structureView?.source ? " · CrystalNN" : "")
+        : structure.format + " · " + atomCount + " 原子" + (Number(state.display) > 1 ? " · " + state.display + "×超胞" : "");
+      atomInfo.textContent = state.display === "periodic"
+        ? "已补齐跨晶胞边界的周期配位；半透明原子为相邻晶胞镜像。点击原子可查看坐标。"
+        : "点击原子可查看元素和笛卡尔坐标。";
+      renderStructureElementLegend(atoms);
+    } catch (error) {
+      container.innerHTML = "<p class='structure-error'>结构解析失败：" + escapeHtml(error.message) + "</p>";
+      summary.textContent = "解析失败";
+      console.error(error);
+    }
+  };
+
+  document.querySelector("#structure-style").addEventListener("change", event => {
+    state.style = event.target.value;
+    applyStructureStyle(
+      materialStructureViewer.selectedAtoms({}),
+      state.display === "periodic" && Boolean(structureView || parsedStructure),
+    );
+    materialStructureViewer.render();
+  });
+  document.querySelector("#structure-supercell").addEventListener("change", event => {
+    const requested = event.target.value;
+    const repeat = Number(requested);
+    if (Number.isFinite(repeat) && baseAtomCount * repeat ** 3 > 3000) {
+      event.target.value = String(state.display);
+      atomInfo.textContent = "该材料生成此超胞后将超过 3000 个原子，已阻止以避免浏览器卡顿。";
+      return;
+    }
+    state.display = requested;
+    rebuild();
+  });
+  document.querySelector("#structure-unit-cell").addEventListener("change", event => {
+    state.unitCell = event.target.checked;
+    rebuild();
+  });
+  document.querySelector("#structure-reset").addEventListener("click", () => {
+    applyDefaultStructureView();
+    materialStructureViewer.render();
+  });
+  document.querySelector("#structure-snapshot").addEventListener("click", () => {
+    const link = document.createElement("a");
+    link.href = materialStructureViewer.pngURI();
+    link.download = String(material.material_key || "structure").replaceAll(/[^a-zA-Z0-9._-]/g, "_") + ".png";
+    link.click();
+  });
+  document.querySelector("#structure-fullscreen").addEventListener("click", async () => {
+    const panel = document.querySelector("#structure-panel");
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await panel.requestFullscreen();
+  });
+  document.querySelector("#structure-settings-button").addEventListener("click", event => {
+    const settings = document.querySelector("#structure-settings");
+    settings.hidden = !settings.hidden;
+    event.currentTarget.setAttribute("aria-expanded", String(!settings.hidden));
+  });
+  if (!structureFullscreenHandlerInstalled) {
+    document.addEventListener("fullscreenchange", () => {
+      window.setTimeout(() => {
+        materialStructureViewer?.resize();
+        materialStructureViewer?.render();
+      }, 80);
+    });
+    structureFullscreenHandlerInstalled = true;
+  }
+  rebuild();
+}
+
+function renderStructureElementLegend(atoms) {
+  const legend = document.querySelector("#structure-element-legend");
+  if (!legend) return;
+  const elements = new Map();
+  atoms.forEach(atom => {
+    if (!atom.elem || elements.has(atom.elem)) return;
+    const numericColor = Number(atom.color);
+    const fallback = {
+      H: "#e7e7e7", C: "#8a8a8a", N: "#5f74c9", O: "#e84a3c",
+      F: "#91a7d8", Si: "#d6ad8b", P: "#e58a37", S: "#e1c229",
+      Cl: "#58a65c", Ag: "#b9b9b9", Au: "#d6a900",
+    }[atom.elem] || "#7f91ab";
+    elements.set(
+      atom.elem,
+      Number.isFinite(numericColor)
+        ? "#" + numericColor.toString(16).padStart(6, "0").slice(-6)
+        : fallback,
+    );
+  });
+  legend.innerHTML = Array.from(elements, ([element, color]) =>
+    "<span style='--element-color:" + escapeHtml(color) + "'>" + escapeHtml(element) + "</span>"
+  ).join("");
 }
 
 function selectLandscapeMaterial(data) {
@@ -140,13 +583,18 @@ function selectLandscapeMaterial(data) {
 
 function renderPrecisionThermalExpansion(result) {
   if (!result || !result.points || result.points.length < 2) {
-    return "<p class='muted'>暂无已关联的精确 QHA 热膨胀曲线。</p>";
+    return "<section class='thermal-panel'><div class='thermal-heading'><h3>精确 QHA 热膨胀曲线</h3>" +
+      "<p class='curve-note'>温度 T 与体热膨胀系数 α(T)</p></div>" +
+      "<div class='thermal-empty'><p class='muted'>暂无已关联的精确 QHA 热膨胀曲线。</p>" +
+      "<span>可通过 QHA 计算生成 α(T) 数据后在此对照晶体结构。</span></div></section>";
   }
   const warnings = Array.isArray(result.quality_warnings) && result.quality_warnings.length
     ? "质量提示：" + result.quality_warnings.join("；")
     : "该曲线来自已关联的精确 QHA 任务。";
-  return "<h3>精确 QHA 热膨胀曲线</h3><canvas id='thermal-curve' class='thermal-curve' width='520' height='250'></canvas>" +
-    "<p class='curve-note'>任务 " + escapeHtml(result.job_id) + " · " + escapeHtml(warnings) + "</p>";
+  return "<section class='thermal-panel'><div class='thermal-heading'><h3>精确 QHA 热膨胀曲线</h3>" +
+    "<p class='curve-note'>温度 T 与体热膨胀系数 α(T)</p></div>" +
+    "<canvas id='thermal-curve' class='thermal-curve' width='720' height='440'></canvas>" +
+    "<p class='curve-note'>任务 " + escapeHtml(result.job_id) + " · " + escapeHtml(warnings) + "</p></section>";
 }
 
 function drawPrecisionThermalExpansion(result, canvasSelector = "#thermal-curve") {

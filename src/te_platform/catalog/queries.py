@@ -177,7 +177,7 @@ def material_detail(
         ).fetchone()
         structures = connection.execute(
             """
-            SELECT format, content_sha256, LENGTH(content) AS content_characters
+            SELECT format, content, content_sha256, LENGTH(content) AS content_characters
             FROM structures
             WHERE dataset_release_id = ? AND material_id = ?
             ORDER BY format

@@ -2,7 +2,7 @@
 
 英文仓库名：`thermal-expansion-platform`
 
-当前版本：`0.8.0`（6701条活跃数据库、快速筛选、精确任务、ZTE设计与受控Agent）
+当前版本：`0.9.0`（6701条活跃数据库、三维晶体结构、快速筛选、精确任务、ZTE设计与受控Agent）
 
 本项目把课题中的物性计算、剪切—键合比判别、材料数据管理、NTE/PTE复合设计和Agent工具调用整合为一套可追溯平台。
 
@@ -26,6 +26,7 @@
 - 旧科研代码到新模块的迁移映射。
 - 可运行的 FastAPI 服务与浏览器界面：材料检索、论文 Fig. 1d 景观、CIF/POSCAR 统一上传、三级预测、单温点/温区 ROM 和受控 Agent。
 - 独立 Python 进程执行的受控 ALIGNN 剪切模量预测接口，以及 MatterSim + CrystalNN + SBR 的上传结构快速筛选；模型、源码、Python环境均可通过环境变量配置。
+- 材料详情采用 pymatgen CrystalNN 生成周期键合图，在本地 3Dmol.js 中显示周期镜像原子，并与真实 QHA `alpha(T)` 曲线等宽并排对照。
 
 ## 项目结构
 
@@ -41,22 +42,22 @@ var/                   便携数据目录：数据库、上传、任务、结果
 
 ## 快速开始（PowerShell）
 
-无需安装第三方依赖即可运行当前数据和算法核心：
+推荐先用 `uv sync` 创建项目环境；pymatgen、FastAPI、NumPy 等依赖会安装到当前项目环境中：
 
 ```powershell
 Set-Location 'D:\9.Project\9.NTE&PTE_dataset\14.thermal_expansion_platform'
-$env:PYTHONPATH = (Join-Path (Get-Location) 'src')
-python -m te_platform init-db
-python -m te_platform import-dataset
-python -m te_platform import-pte-reference `
+uv sync
+uv run python -m te_platform init-db
+uv run python -m te_platform import-dataset
+uv run python -m te_platform import-pte-reference `
   --source-root 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\PTE_materials' `
   --summary-csv 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\plot_alpha_M\PTE_materials_summary_alpha_neg_300K_v3.csv'
-python -m te_platform dataset-stats
-python -m te_platform search-materials --query Zr --limit 10
-python -m te_platform material-detail 'CsNO3-mp-561851'
-python -m te_platform classify-sbr --g 20.5 --e-tilde 8.0
-python -m te_platform fast-screen --g-pred 20.5 --e-coh -4.2 --cell-volume 120 --atom-count 12 --avg-cn 3.5
-python -m te_platform optimize-zte --alpha-pte 8.0 --alpha-nte -12.0
+uv run python -m te_platform dataset-stats
+uv run python -m te_platform search-materials --query Zr --limit 10
+uv run python -m te_platform material-detail 'CsNO3-mp-561851'
+uv run python -m te_platform classify-sbr --g 20.5 --e-tilde 8.0
+uv run python -m te_platform fast-screen --g-pred 20.5 --e-coh -4.2 --cell-volume 120 --atom-count 12 --avg-cn 3.5
+uv run python -m te_platform optimize-zte --alpha-pte 8.0 --alpha-nte -12.0
 ```
 
 也可以使用统一入口脚本：

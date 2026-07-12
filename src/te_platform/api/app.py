@@ -29,6 +29,7 @@ from te_platform.config import (
 )
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
+from te_platform.structures import build_structure_view
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
@@ -302,7 +303,21 @@ def create_app(
     def material(material_key: str) -> dict[str, object]:
         ensure_catalog_database(catalog_db)
         try:
-            return material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            structure = next(
+                (item for item in detail["structures"] if item.get("content")),
+                None,
+            )
+            if structure:
+                try:
+                    detail["structure_view"] = build_structure_view(
+                        structure["content"], structure["format"]
+                    )
+                except Exception:  # Keep material details available if scene generation fails.
+                    detail["structure_view"] = None
+            else:
+                detail["structure_view"] = None
+            return detail
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 

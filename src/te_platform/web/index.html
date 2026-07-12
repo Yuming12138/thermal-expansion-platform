@@ -16,8 +16,8 @@
     </header>
     <main>
       <section class="stats" id="stats"></section>
-      <section class="grid two">
-        <article class="panel">
+      <section class="grid material-workspace">
+        <article class="panel catalog-panel">
           <h2>材料数据库</h2>
           <div class="row">
             <input id="search-input" placeholder="化学式、MP ID或材料名称">
@@ -25,7 +25,7 @@
           </div>
           <div id="material-results" class="table-wrap"></div>
         </article>
-        <article class="panel">
+        <article class="panel detail-panel">
           <h2>材料详情</h2>
           <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
         </article>
@@ -111,6 +111,7 @@
         <p class="agent-scope">领域白名单工具 · 不执行任意系统命令</p>
       </div>
     </aside>
+    <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>
