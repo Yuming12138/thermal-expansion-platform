@@ -80,17 +80,29 @@
         </div>
         <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
       </section>
-      <section class="panel">
-        <h2>热膨胀材料 Agent</h2>
-        <p class="muted">可用自然语言检索 NTE/PTE 数据、读取真实 QHA 曲线、解释 SBR，并调用曲线 ROM 设计 ZTE 配比。Agent 仅能调用白名单科学工具，不会执行任意系统命令。</p>
-        <div id="agent-status" class="prediction-result muted">正在检查 AI 助手配置…</div>
-        <form id="agent-form" class="row">
-          <input id="agent-message" placeholder="例如：查找含 Ag 的 NTE 材料，并解释热膨胀曲线" required>
-          <button>发送</button>
-        </form>
-        <div id="agent-result" class="prediction-result muted">尚未开始对话。</div>
-      </section>
     </main>
+    <aside id="agent-widget" class="agent-widget" aria-label="热膨胀材料 Agent">
+      <div class="agent-header">
+        <div class="agent-identity">
+          <span id="agent-status-dot" class="agent-status-dot" aria-hidden="true"></span>
+          <div>
+            <strong>热膨胀材料 Agent</strong>
+            <span id="agent-status">正在检查配置…</span>
+          </div>
+        </div>
+        <button id="agent-toggle" class="agent-toggle" type="button" aria-expanded="true" aria-label="最小化 Agent">−</button>
+      </div>
+      <div class="agent-body">
+        <div id="agent-messages" class="agent-messages" aria-live="polite">
+          <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析 QHA 曲线、解释 SBR，并设计 ZTE 配比。</div>
+        </div>
+        <form id="agent-form" class="agent-composer">
+          <textarea id="agent-message" rows="2" maxlength="500" placeholder="询问热膨胀材料问题…" required></textarea>
+          <button id="agent-send" type="submit">发送</button>
+        </form>
+        <p class="agent-scope">领域白名单工具 · 不执行任意系统命令</p>
+      </div>
+    </aside>
     <script src="/static/app.js"></script>
   </body>
 </html>

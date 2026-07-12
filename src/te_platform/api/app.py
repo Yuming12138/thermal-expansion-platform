@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from hashlib import sha256
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -93,8 +94,14 @@ class AgentToolRequest(BaseModel):
     arguments: dict[str, object] = Field(default_factory=dict)
 
 
+class AgentHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
+    history: list[AgentHistoryMessage] = Field(default_factory=list, max_length=12)
 
 
 def create_app(
@@ -163,7 +170,11 @@ def create_app(
     @app.post("/api/agent/chat")
     async def agent_chat(request: AgentChatRequest) -> dict[str, object]:
         try:
-            return await chat_with_model(request.message, agent_tools)
+            return await chat_with_model(
+                request.message,
+                agent_tools,
+                history=[item.model_dump() for item in request.history],
+            )
         except AgentNotConfiguredError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except AgentUpstreamError as error:

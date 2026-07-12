@@ -102,7 +102,7 @@ uv run python -m te_platform build-release-catalog `
 
 平台默认采用便携模式，所有运行数据都保存在项目内 `var/`，不会固定写入用户 C 盘目录。整个目录可以复制到其他磁盘或电脑；目录库随程序一起复制。发布或分享前应删除包含本机密钥的 `var/config/agent.env`，由接收方配置自己的 Agent。
 
-配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-lunar`，只允许调用材料检索、材料详情、SBR 与 ZTE 曲线设计等白名单工具，不会执行任意 shell 命令，也不会自动提交昂贵计算任务。
+配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-luna`，只允许调用材料检索、材料详情、SBR 与 ZTE 曲线设计等白名单工具，不会执行任意 shell 命令，也不会自动提交昂贵计算任务。
 
 ## 科学边界
 

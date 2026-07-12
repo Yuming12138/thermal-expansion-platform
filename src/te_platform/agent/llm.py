@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -22,6 +23,26 @@ class AgentNotConfiguredError(RuntimeError):
 
 class AgentUpstreamError(RuntimeError):
     pass
+
+
+def _safe_upstream_detail(error: Exception) -> str:
+    response = getattr(error, "response", None)
+    if response is None:
+        return ""
+    try:
+        payload = response.json()
+        detail: object = payload
+        if isinstance(payload, dict):
+            nested_error = payload.get("error")
+            if isinstance(nested_error, dict):
+                detail = nested_error.get("message") or nested_error.get("code") or nested_error
+            else:
+                detail = payload.get("message") or payload.get("detail") or payload
+        text = str(detail)
+    except (TypeError, ValueError):
+        text = ""
+    text = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-***", text)
+    return text[:300]
 
 
 def capability(settings: AgentSettings | None = None) -> dict[str, object]:
@@ -49,6 +70,7 @@ async def chat_with_model(
     message: str,
     registry: ToolRegistry,
     *,
+    history: list[dict[str, str]] | None = None,
     settings: AgentSettings | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, object]:
@@ -58,10 +80,13 @@ async def chat_with_model(
             "AI助手尚未配置密钥。请运行 scripts/configure-agent.ps1 后重启平台。"
         )
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": message},
-    ]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for item in (history or [])[-12:]:
+        role = item.get("role")
+        content = item.get("content", "")
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content[:4000]})
+    messages.append({"role": "user", "content": message})
     executed: list[dict[str, object]] = []
     owns_client = client is None
     active_client = client or httpx.AsyncClient(timeout=current.timeout_seconds)
@@ -85,7 +110,9 @@ async def chat_with_model(
             except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as error:
                 status = getattr(getattr(error, "response", None), "status_code", None)
                 suffix = f"（HTTP {status}）" if status else ""
-                raise AgentUpstreamError(f"AI中转站调用失败{suffix}，请稍后重试。") from error
+                detail = _safe_upstream_detail(error)
+                detail_suffix = f"：{detail}" if detail else "，请稍后重试。"
+                raise AgentUpstreamError(f"AI中转站调用失败{suffix}{detail_suffix}") from error
 
             tool_calls = assistant_message.get("tool_calls") or []
             if not tool_calls:

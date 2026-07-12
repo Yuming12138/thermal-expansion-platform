@@ -177,7 +177,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(denied.status_code, 422)
         model_response = {
             "mode": "llm",
-            "model": "gpt-5.6-lunar",
+            "model": "gpt-5.6-luna",
             "answer": "该材料具有较高NTE倾向。",
             "tool_calls": [{"tool": "classify_sbr"}],
         }
@@ -185,13 +185,22 @@ class ApiTests(unittest.TestCase):
             "te_platform.api.app.chat_with_model",
             new=AsyncMock(return_value=model_response),
         ):
-            chat = self.client.post("/api/agent/chat", json={"message": "请判断这个材料"})
+            chat = self.client.post(
+                "/api/agent/chat",
+                json={
+                    "message": "请继续判断这个材料",
+                    "history": [
+                        {"role": "user", "content": "先搜索材料"},
+                        {"role": "assistant", "content": "已找到候选材料"},
+                    ],
+                },
+            )
         self.assertEqual(chat.status_code, 200)
-        self.assertEqual(chat.json()["model"], "gpt-5.6-lunar")
+        self.assertEqual(chat.json()["model"], "gpt-5.6-luna")
         self.assertEqual(chat.json()["tool_calls"][0]["tool"], "classify_sbr")
         capability = self.client.get("/api/agent/capability")
         self.assertEqual(capability.status_code, 200)
-        self.assertEqual(capability.json()["model"], "gpt-5.6-lunar")
+        self.assertEqual(capability.json()["model"], "gpt-5.6-luna")
 
     def test_structure_inspection_for_poscar_and_cif(self) -> None:
         poscar = self.client.post(

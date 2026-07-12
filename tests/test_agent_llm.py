@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 
-from te_platform.agent.llm import capability, chat_with_model
+from te_platform.agent.llm import _safe_upstream_detail, capability, chat_with_model
 from te_platform.agent.registry import ToolRegistry
 from te_platform.config import AgentSettings, load_agent_env
 
@@ -62,6 +62,10 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
             result = await chat_with_model(
                 "查询数字",
                 registry,
+                history=[
+                    {"role": "user", "content": "上一轮问题"},
+                    {"role": "assistant", "content": "上一轮回答"},
+                ],
                 settings=settings,
                 client=client,
             )
@@ -96,3 +100,14 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values["TEP_AGENT_MODEL"], "test-model")
         self.assertEqual(values["TEP_AGENT_API_KEY"], "hidden-value")
         self.assertNotIn("UNRELATED_VALUE", values)
+
+    def test_upstream_error_detail_masks_api_keys(self) -> None:
+        request = httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+        response = httpx.Response(
+            503,
+            request=request,
+            json={"error": {"message": "channel failed for sk-sensitive-value"}},
+        )
+        error = httpx.HTTPStatusError("failed", request=request, response=response)
+        detail = _safe_upstream_detail(error)
+        self.assertEqual(detail, "channel failed for sk-***")

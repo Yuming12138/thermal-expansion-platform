@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Path $ConfigDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
     $Template = @(
         'TEP_AGENT_BASE_URL=https://api.cmsg666.xyz/v1'
-        'TEP_AGENT_MODEL=gpt-5.6-lunar'
+        'TEP_AGENT_MODEL=gpt-5.6-luna'
         'TEP_AGENT_API_KEY='
     ) -join [Environment]::NewLine
     [System.IO.File]::WriteAllText($ConfigPath, $Template, [System.Text.UTF8Encoding]::new($false))

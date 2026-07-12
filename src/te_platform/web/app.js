@@ -21,6 +21,7 @@ const numeric = value => Number.isFinite(Number(value)) ? Number(value).toFixed(
 let fig1dReference = null;
 let selectedLandscapePoint = null;
 let landscapeHitPoints = [];
+let agentHistory = [];
 const LANDSCAPE_MARKER_SIZE = 3.6;
 
 const propertyText = property => {
@@ -824,32 +825,75 @@ async function initialize() {
     submitPredictionJob("/api/precision/elastic-jobs", "elastic"));
   document.querySelector("#qha-button").addEventListener("click", () =>
     submitPredictionJob("/api/precision/qha-jobs", "qha"));
+  const agentWidget = document.querySelector("#agent-widget");
+  const agentToggle = document.querySelector("#agent-toggle");
+  agentToggle.addEventListener("click", () => {
+    const collapsed = agentWidget.classList.toggle("collapsed");
+    agentToggle.textContent = collapsed ? "+" : "−";
+    agentToggle.setAttribute("aria-expanded", String(!collapsed));
+    agentToggle.setAttribute("aria-label", collapsed ? "展开 Agent" : "最小化 Agent");
+  });
+
+  function appendAgentMessage(role, text, extraClass = "") {
+    const bubble = document.createElement("div");
+    bubble.className = `agent-bubble ${role} ${extraClass}`.trim();
+    bubble.textContent = text;
+    const messages = document.querySelector("#agent-messages");
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+    return bubble;
+  }
+
   document.querySelector("#agent-form").addEventListener("submit", async event => {
     event.preventDefault();
-    const message = document.querySelector("#agent-message").value;
-    const resultElement = document.querySelector("#agent-result");
-    resultElement.textContent = "Agent 正在查询数据库并分析…";
+    const input = document.querySelector("#agent-message");
+    const sendButton = document.querySelector("#agent-send");
+    const message = input.value.trim();
+    if (!message) return;
+    appendAgentMessage("user", message);
+    input.value = "";
+    sendButton.disabled = true;
+    const pending = appendAgentMessage("assistant", "正在查询数据库并分析…", "pending");
     try {
       const result = await api("/api/agent/chat", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({message}),
+        body: JSON.stringify({message, history: agentHistory}),
       });
       const toolSummary = (result.tool_calls || []).map(item => item.tool).join("、");
-      resultElement.textContent = result.answer || "Agent 未返回文本回答。";
-      if (toolSummary) resultElement.textContent += "\n\n已调用工具：" + toolSummary;
+      const answer = result.answer || "Agent 未返回文本回答。";
+      pending.classList.remove("pending");
+      pending.textContent = answer;
+      if (toolSummary) {
+        const toolElement = document.createElement("span");
+        toolElement.className = "agent-tool-summary";
+        toolElement.textContent = "已调用：" + toolSummary;
+        pending.appendChild(toolElement);
+      }
+      agentHistory.push(
+        {role: "user", content: message},
+        {role: "assistant", content: answer},
+      );
+      agentHistory = agentHistory.slice(-12);
     } catch (error) {
-      resultElement.textContent = error.message;
+      pending.classList.remove("pending");
+      pending.textContent = error.message;
+    } finally {
+      sendButton.disabled = false;
+      input.focus();
     }
   });
 
   try {
     const capability = await api("/api/agent/capability");
+    const statusDot = document.querySelector("#agent-status-dot");
     document.querySelector("#agent-status").textContent = capability.configured
-      ? `已连接 ${capability.model} · 白名单工具调用已启用`
-      : `尚未配置 AI 密钥 · 运行 scripts/configure-agent.ps1 后重启平台`;
+      ? `${capability.model} · 已连接`
+      : `尚未配置 AI 密钥`;
+    statusDot.classList.add(capability.configured ? "online" : "offline");
   } catch (error) {
     document.querySelector("#agent-status").textContent = error.message;
+    document.querySelector("#agent-status-dot").classList.add("offline");
   }
 }
 
