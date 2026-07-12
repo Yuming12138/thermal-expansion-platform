@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 from te_platform.catalog.importer import import_dataset
 from te_platform.catalog.qha_curve_importer import import_historical_qha_curves
+from te_platform.catalog.release_catalog import build_release_catalog
 from te_platform.catalog.pte_importer import import_pte_reference
 from te_platform.catalog.queries import material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
@@ -55,6 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
     pte_importer.add_argument("--source-root", type=Path, required=True)
     pte_importer.add_argument("--summary-csv", type=Path, required=True)
     pte_importer.add_argument("--replace", action="store_true")
+
+    release_catalog = subparsers.add_parser(
+        "build-release-catalog", help="Build a sanitized standalone catalog database"
+    )
+    release_catalog.add_argument("--source-db", type=Path, default=database_path())
+    release_catalog.add_argument("--output", type=Path, required=True)
+    release_catalog.add_argument("--replace", action="store_true")
 
     stats = subparsers.add_parser("dataset-stats", help="Show imported dataset statistics")
     _database_argument(stats)
@@ -168,6 +176,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.db,
                 args.source_root,
                 args.summary_csv,
+                replace=args.replace,
+            ).to_dict()
+        )
+        return 0
+    if args.command == "build-release-catalog":
+        _json_output(
+            build_release_catalog(
+                args.source_db,
+                args.output,
                 replace=args.replace,
             ).to_dict()
         )
