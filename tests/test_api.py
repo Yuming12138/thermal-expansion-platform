@@ -241,6 +241,37 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(duplicate.status_code, 422)
 
+    def test_agent_routes_fast_and_elastic_modes_through_approval(self) -> None:
+        upload = self.client.post(
+            "/api/agent/structures",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        structure_id = upload.json()["structure_id"]
+        cases = (
+            ("fast", "te_platform.api.app.submit_fast_screen_job", "fast-job", "fast_structure_screening"),
+            ("elastic", "te_platform.api.app.submit_elastic_job", "elastic-job", "precision_elastic"),
+        )
+        for mode, patch_target, job_id, workflow in cases:
+            with self.subTest(mode=mode):
+                request = self.client.post(
+                    "/api/agent/call",
+                    json={
+                        "tool": "request_structure_calculation",
+                        "arguments": {"structure_id": structure_id, "mode": mode},
+                    },
+                )
+                self.assertEqual(request.status_code, 200)
+                approval = request.json()["result"]
+                self.assertEqual(approval["mode"], mode)
+                fake_job = {"id": job_id, "workflow": workflow, "status": "PENDING"}
+                with patch(patch_target, return_value=fake_job) as submit_mock:
+                    approved = self.client.post(
+                        f"/api/agent/approvals/{approval['approval_id']}/approve"
+                    )
+                self.assertEqual(approved.status_code, 200)
+                self.assertEqual(approved.json()["job"]["workflow"], workflow)
+                submit_mock.assert_called_once()
+
     def test_agent_qha_request_can_be_rejected_without_starting_job(self) -> None:
         upload = self.client.post(
             "/api/agent/structures",

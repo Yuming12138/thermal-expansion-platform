@@ -4,15 +4,19 @@ import re
 import shutil
 import subprocess
 import threading
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
+from te_platform.api.structures import inspect_structure
 from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
 from te_platform.precision.results import parse_elastic_results, parse_precision_results, parse_qha_results
 from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
 from te_platform.screening.fast_sbr import calculate_bonding_modulus
+from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
+from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.workers.structure_converter import write_precision_poscar
 
@@ -25,18 +29,31 @@ _QHA_DISPLACEMENT_PROGRESS = re.compile(
 def precision_progress(database: str | Path, job_id: str) -> dict[str, str | int | float] | None:
     work = Path(database).parent / "runs" / job_id
     root = work / "elastic"
-    if not root.is_dir():
-        return _qha_displacement_progress(work)
-    tasks = [path for path in root.rglob("strain_*") if path.is_dir()]
-    if tasks:
-        completed = sum((path / "CONTCAR").is_file() for path in tasks)
-        return {
-            "stage": "elastic",
-            "completed_strains": completed,
-            "total_strains": len(tasks),
-            "percent": round(100.0 * completed / len(tasks), 1),
-        }
-    return _qha_displacement_progress(work)
+    if root.is_dir():
+        tasks = [path for path in root.rglob("strain_*") if path.is_dir()]
+        if tasks:
+            completed = sum((path / "CONTCAR").is_file() for path in tasks)
+            return {
+                "stage": "elastic",
+                "completed_strains": completed,
+                "total_strains": len(tasks),
+                "percent": round(100.0 * completed / len(tasks), 1),
+            }
+    qha_progress = _qha_displacement_progress(work)
+    if qha_progress is not None:
+        return qha_progress
+    job = get_job(database, job_id)
+    if job["workflow"] == "fast_structure_screening":
+        percent = {
+            JobStatus.PENDING.value: 0.0,
+            JobStatus.QUEUED.value: 5.0,
+            JobStatus.RUNNING.value: 50.0,
+            JobStatus.SUCCEEDED.value: 100.0,
+            JobStatus.FAILED.value: 100.0,
+            JobStatus.CANCELLED.value: 100.0,
+        }[job["status"]]
+        return {"stage": "fast_screening", "percent": percent}
+    return None
 
 
 def _qha_displacement_progress(work: Path) -> dict[str, str | int | float] | None:
@@ -60,6 +77,72 @@ def _qha_displacement_progress(work: Path) -> dict[str, str | int | float] | Non
 
 
 CalculationMode = Literal["combined", "elastic", "qha"]
+
+
+def submit_fast_screen_job(
+    database: str | Path,
+    structure: bytes,
+    filename: str = "POSCAR",
+) -> dict[str, object]:
+    job = create_job(
+        database,
+        workflow="fast_structure_screening",
+        parameters={"mode": "fast", "filename": filename, "structure_sha256": sha256(structure).hexdigest()},
+    )
+    work = Path(database).parent / "runs" / job["id"]
+    work.mkdir(parents=True, exist_ok=False)
+    suffix = Path(filename).suffix.lower() or ".vasp"
+    structure_path = work / f"input{suffix}"
+    structure_path.write_bytes(structure)
+    transition_job(database, job["id"], JobStatus.QUEUED)
+    threading.Thread(
+        target=_run_fast_screen,
+        args=(Path(database), job["id"], structure_path, filename),
+        daemon=True,
+    ).start()
+    return get_job(database, job["id"])
+
+
+def _run_fast_screen(
+    database: Path,
+    job_id: str,
+    structure_path: Path,
+    filename: str,
+) -> None:
+    transition_job(database, job_id, JobStatus.RUNNING)
+    try:
+        content = structure_path.read_bytes()
+        inspection = inspect_structure(filename, content)
+        alignn = predict_alignn_shear(structure_path)
+        mattersim = predict_mattersim_descriptors(structure_path)
+        descriptors = mattersim.descriptors
+        screening = fast_screen_sbr(
+            float(alignn.prediction["shear_modulus_gpa"]),
+            float(descriptors["cohesive_energy_ev_per_atom"]),
+            float(inspection.cell_volume_a3 or 0.0),
+            int(descriptors["atom_count"]),
+            float(descriptors["average_coordination_number"]),
+        )
+        transition_job(
+            database,
+            job_id,
+            JobStatus.SUCCEEDED,
+            result={
+                "calculation_mode": "fast",
+                "structure_sha256": sha256(content).hexdigest(),
+                "inspection": inspection.to_dict(),
+                "alignn": alignn.to_dict(),
+                "mattersim": mattersim.to_dict(),
+                "fast_sbr": screening.to_dict(),
+            },
+        )
+    except Exception as error:
+        transition_job(
+            database,
+            job_id,
+            JobStatus.FAILED,
+            error_message=str(error),
+        )
 
 
 def submit_precision_job(

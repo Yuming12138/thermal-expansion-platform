@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 - 2026-07-12
+
+- 将快速预测改为 `fast_structure_screening` 后台任务，避免阻塞 Agent 对话；
+- 增加统一的 `request_structure_calculation` 工具，由模型在 fast、elastic、qha 中自主选择；
+- 三种计算均复用持久化审批协议，未经用户确认不会执行；
+- 对话任务卡片可分别展示快速 SBR、精准弹性结果或完整 QHA 曲线；
+- 保留旧 QHA 工具作为兼容入口，并新增快速与弹性审批路由测试。
+
 ## 0.7.0 - 2026-07-12
 
 - 参考 `openai/codex` 的工具路由与集中审批边界，增加持久化 Agent 动作请求；

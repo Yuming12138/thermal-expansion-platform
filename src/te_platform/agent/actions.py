@@ -14,7 +14,9 @@ APPROVED = "APPROVED"
 EXECUTED = "EXECUTED"
 REJECTED = "REJECTED"
 FAILED = "FAILED"
-ALLOWED_ACTIONS = frozenset({"submit_qha_calculation"})
+ALLOWED_ACTIONS = frozenset(
+    {"submit_qha_calculation", "submit_structure_calculation"}
+)
 
 
 def _timestamp() -> str:

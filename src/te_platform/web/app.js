@@ -891,7 +891,12 @@ async function initialize() {
       const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
       const percent = Number.isFinite(Number(job.progress?.percent))
         ? ` · ${job.progress.percent}%` : "";
-      bubble.textContent = `QHA 任务 ${job.id}\n状态：${job.status}${percent}`;
+      const jobLabel = {
+        fast_structure_screening: "快速预测",
+        precision_elastic: "精准弹性",
+        precision_qha: "QHA",
+      }[job.workflow] || "计算";
+      bubble.textContent = `${jobLabel}任务 ${job.id}\n状态：${job.status}${percent}`;
       if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
         window.setTimeout(() => pollAgentCalculation(jobId, bubble), 3000);
         return;
@@ -901,6 +906,33 @@ async function initialize() {
         return;
       }
       const result = job.result;
+      if (job.workflow === "fast_structure_screening") {
+        const fast = result.fast_sbr;
+        bubble.classList.add("wide");
+        bubble.innerHTML =
+          "<strong>快速热膨胀倾向预测完成</strong>" +
+          "<p>预测 G：" + numeric(fast.predicted_shear_modulus_gpa) + " GPa<br>" +
+          "键合模量 Ẽ：" + numeric(fast.bonding.bonding_modulus_gpa) + " GPa<br>" +
+          "ξ：" + numeric(fast.sbr.xi) + "<br>" +
+          "结论：" + escapeHtml(classificationText(fast.sbr.classification)) + "</p>" +
+          "<span class='agent-tool-summary'>" +
+          escapeHtml(fast.recommended_next_step || "可进一步进行弹性或QHA验证") + "</span>";
+        return;
+      }
+      if (job.workflow === "precision_elastic") {
+        bubble.classList.add("wide");
+        bubble.innerHTML =
+          "<strong>精准弹性预测完成</strong>" +
+          "<p>Hill G：" + numeric(result.shear_modulus_hill_gpa) + " GPa<br>" +
+          "键合模量 Ẽ：" + numeric(result.bonding.bonding_modulus_gpa) + " GPa<br>" +
+          "ξ：" + numeric(result.sbr.xi) + "<br>" +
+          "结论：" + escapeHtml(classificationText(result.sbr.classification)) + "</p>" +
+          (result.quality_warnings?.length
+            ? "<span class='agent-tool-summary'>质量提示：" +
+              escapeHtml(result.quality_warnings.join("；")) + "</span>"
+            : "");
+        return;
+      }
       const canvasId = "agent-job-curve-" + job.id;
       bubble.classList.add("wide");
       bubble.innerHTML =
@@ -925,7 +957,12 @@ async function initialize() {
     const card = document.createElement("div");
     card.className = "agent-approval-card";
     const title = document.createElement("strong");
-    title.textContent = "需要确认：提交 QHA 计算";
+    const modeLabel = {
+      fast: "快速预测",
+      elastic: "精准弹性预测",
+      qha: "QHA 热膨胀计算",
+    }[approval.mode] || "结构计算";
+    title.textContent = "需要确认：提交" + modeLabel;
     const summary = document.createElement("div");
     summary.textContent = approval.summary;
     const actions = document.createElement("div");
@@ -953,7 +990,7 @@ async function initialize() {
         bubble.textContent = `已批准并提交 QHA 任务：${result.job.id}`;
         agentHistory.push({
           role: "assistant",
-          content: `用户已批准QHA计算，任务job_id=${result.job.id}，后续可查询任务进度。`,
+          content: `用户已批准${modeLabel}，任务job_id=${result.job.id}，后续可查询任务进度。`,
         });
         agentHistory = agentHistory.slice(-12);
         window.setTimeout(() => pollAgentCalculation(result.job.id, bubble), 800);

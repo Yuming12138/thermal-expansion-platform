@@ -170,8 +170,9 @@ def default_registry(
             },
         )
 
-        def request_qha_calculation(
+        def request_structure_calculation(
             structure_id: str,
+            mode: str,
             qha_points: int = 11,
             qha_mesh: int = 30,
             qha_scale: float = 0.003,
@@ -185,16 +186,28 @@ def default_registry(
                 parallel_workers=parallel_workers,
             )
             config.validate()
+            labels = {
+                "fast": "快速预测（ALIGNN G + MatterSim E_tilde + SBR）",
+                "elastic": "精准弹性预测（完整弹性张量 + Hill G + SBR）",
+                "qha": "MatterSim QHA 热膨胀曲线计算",
+            }
+            if mode not in labels:
+                raise ValueError("mode must be 'fast', 'elastic', or 'qha'")
             action = create_action_request(
                 workspace_database,
-                action="submit_qha_calculation",
+                action="submit_structure_calculation",
                 summary=(
-                    f"对上传结构 {structure_id[:12]}… 提交 MatterSim QHA 热膨胀计算；"
-                    f"qha_points={qha_points}, mesh={qha_mesh}, scale={qha_scale}, "
-                    f"parallel_workers={parallel_workers}"
+                    f"对上传结构 {structure_id[:12]}… 提交{labels[mode]}"
+                    + (
+                        f"；qha_points={qha_points}, mesh={qha_mesh}, scale={qha_scale}, "
+                        f"parallel_workers={parallel_workers}"
+                        if mode == "qha"
+                        else ""
+                    )
                 ),
                 arguments={
                     "structure_id": structure_id,
+                    "mode": mode,
                     "config": config.__dict__,
                     "filename": structure["stored_filename"],
                 },
@@ -203,18 +216,41 @@ def default_registry(
                 "approval_required": True,
                 "approval_id": action["id"],
                 "action": action["action"],
+                "mode": mode,
                 "summary": action["summary"],
                 "status": action["status"],
                 "structure": structure,
             }
 
         registry.register(
-            "request_qha_calculation",
-            request_qha_calculation,
+            "request_structure_calculation",
+            request_structure_calculation,
             description=(
-                "为已上传结构创建MatterSim QHA计算审批请求。此工具不会直接启动计算；"
-                "必须由用户在界面中明确批准后，平台才会提交后台任务。"
+                "为已上传结构创建计算审批请求。根据用户目标自主选择mode："
+                "fast用于快速判断NTE/PTE倾向，elastic用于完整弹性张量和精准SBR，"
+                "qha用于直接计算alpha(T)热膨胀曲线。此工具不会直接启动计算，必须由用户批准。"
             ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "structure_id": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha"]},
+                    "qha_points": {"type": "integer", "enum": [7, 9, 11], "default": 11},
+                    "qha_mesh": {"type": "integer", "minimum": 10, "maximum": 60, "default": 30},
+                    "qha_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01, "default": 0.003},
+                    "parallel_workers": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+                },
+                "required": ["structure_id", "mode"],
+                "additionalProperties": False,
+            },
+        )
+
+        registry.register(
+            "request_qha_calculation",
+            lambda structure_id, **kwargs: request_structure_calculation(
+                structure_id=structure_id, mode="qha", **kwargs
+            ),
+            description="兼容工具：为上传结构创建QHA热膨胀计算审批请求。",
             parameters={
                 "type": "object",
                 "properties": {

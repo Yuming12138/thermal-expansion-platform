@@ -11,7 +11,12 @@ from te_platform.jobs.states import JobStatus, validate_transition
 
 
 ALLOWED_WORKFLOWS = frozenset(
-    {"precision_elastic_qha", "precision_elastic", "precision_qha"}
+    {
+        "fast_structure_screening",
+        "precision_elastic_qha",
+        "precision_elastic",
+        "precision_qha",
+    }
 )
 
 

@@ -3,11 +3,31 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from te_platform.jobs.precision_runner import _parse_completed_result
+from te_platform.jobs.precision_runner import (
+    _parse_completed_result,
+    precision_progress,
+    submit_fast_screen_job,
+)
 from te_platform.workers.mattersim_runner import MatterSimPrediction
 
 
 class PrecisionModeTests(unittest.TestCase):
+    @patch("te_platform.jobs.precision_runner.threading.Thread")
+    def test_fast_screen_submission_creates_background_job(self, thread_mock) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "workspace.sqlite"
+            job = submit_fast_screen_job(
+                database,
+                b"test structure",
+                filename="sample.cif",
+            )
+
+            self.assertEqual(job["workflow"], "fast_structure_screening")
+            self.assertEqual(job["status"], "QUEUED")
+            self.assertTrue((Path(temp) / "runs" / job["id"] / "input.cif").is_file())
+            self.assertEqual(precision_progress(database, job["id"])["percent"], 5.0)
+            thread_mock.return_value.start.assert_called_once()
+
     @patch("te_platform.jobs.precision_runner.predict_mattersim_descriptors")
     def test_elastic_mode_combines_tensor_bonding_and_sbr(self, mattersim_mock) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -104,7 +104,9 @@ uv run python -m te_platform build-release-catalog `
 
 配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-luna`，只允许调用材料检索、材料详情、真实曲线全库查询、SBR、ZTE 设计、结构检查与计算任务等领域白名单工具，不会执行任意 shell 命令。
 
-Agent 对话框支持直接附加 CIF/POSCAR。模型可以自主检查结构并提出 QHA 计算计划，但不能自行批准昂贵计算：平台会持久化一个 `PENDING_APPROVAL` 动作，只有用户点击“确认并提交”后才启动后台任务。任务运行期间对话框会显示进度，成功后直接绘制完整热膨胀曲线。该控制层与计算层分离方式参考了 `openai/codex` 的公开工具路由和审批设计。
+Agent 对话框支持直接附加 CIF/POSCAR。模型可以自主检查结构并提出快速、精准弹性或 QHA 计算计划，但不能自行批准计算：平台会持久化一个 `PENDING_APPROVAL` 动作，只有用户点击“确认并提交”后才启动后台任务。任务运行期间对话框会显示进度，成功后展示相应指标或完整热膨胀曲线。该控制层与计算层分离方式参考了 `openai/codex` 的公开工具路由和审批设计。
+
+模型会根据问题自动选择计算层级：快速判断 NTE/PTE 倾向使用 `fast`，完整弹性张量与精准 SBR 使用 `elastic`，直接获得 α(T) 使用 `qha`。三种模式都进入后台任务并经过相同的用户审批边界；前端会根据任务类型展示快速筛选指标、弹性结果或 QHA 曲线。
 
 ## 科学边界
 

@@ -54,6 +54,7 @@ from te_platform.jobs.precision_runner import (
     refresh_precision_result,
     resume_precision_qha,
     submit_elastic_job,
+    submit_fast_screen_job,
     submit_precision_job,
     submit_qha_job,
 )
@@ -136,7 +137,7 @@ def create_app(
 
     app = FastAPI(
         title="热膨胀材料智能计算与设计平台",
-        version="0.7.0",
+        version="0.8.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -224,19 +225,39 @@ def create_app(
         try:
             action = claim_action_request(workspace_db, action_id)
             claimed = True
-            if action["action"] != "submit_qha_calculation":
+            if action["action"] not in {
+                "submit_qha_calculation",
+                "submit_structure_calculation",
+            }:
                 raise ValueError(f"Unsupported Agent action: {action['action']}")
             arguments = action["arguments"]
             structure_path = find_agent_structure(
                 workspace_db, str(arguments["structure_id"])
             )
             config = PrecisionTaskConfig(**arguments["config"])
-            job = submit_qha_job(
-                workspace_db,
-                structure_path.read_bytes(),
-                config,
-                filename=structure_path.name,
-            )
+            mode = arguments.get("mode", "qha")
+            submitter = {
+                "fast": lambda: submit_fast_screen_job(
+                    workspace_db,
+                    structure_path.read_bytes(),
+                    filename=structure_path.name,
+                ),
+                "elastic": lambda: submit_elastic_job(
+                    workspace_db,
+                    structure_path.read_bytes(),
+                    config,
+                    filename=structure_path.name,
+                ),
+                "qha": lambda: submit_qha_job(
+                    workspace_db,
+                    structure_path.read_bytes(),
+                    config,
+                    filename=structure_path.name,
+                ),
+            }.get(mode)
+            if submitter is None:
+                raise ValueError(f"Unsupported calculation mode: {mode}")
+            job = submitter()
             completed = complete_action_request(
                 workspace_db,
                 action_id,
