@@ -575,9 +575,10 @@ function drawZteCurves(result) {
   const nte = result.nte_alpha_ppm_per_k.map(Number);
   const mixed = result.mixed_alpha_ppm_per_k.map(Number);
   const target = Number(result.target_alpha_ppm_per_k);
-  const allY = [...pte, ...nte, ...mixed, target];
-  const xMin = Math.min(...temperatures);
-  const xMax = Math.max(...temperatures);
+  const zteLimit = 5;
+  const allY = [...pte, ...nte, ...mixed, target, -zteLimit, zteLimit];
+  const xMin = 0;
+  const xMax = 1000;
   const rawYMin = Math.min(...allY);
   const rawYMax = Math.max(...allY);
   const yPad = Math.max((rawYMax - rawYMin) * .12, 1);
@@ -586,6 +587,31 @@ function drawZteCurves(result) {
   const x = value => margin.left + (value - xMin) / (xMax - xMin || 1) * (width - margin.left - margin.right);
   const y = value => height - margin.bottom - (value - yMin) / (yMax - yMin || 1) * (height - margin.top - margin.bottom);
   ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(22, 131, 106, 0.14)";
+  ctx.fillRect(
+    margin.left,
+    y(zteLimit),
+    width - margin.left - margin.right,
+    y(-zteLimit) - y(zteLimit)
+  );
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "rgba(22, 131, 106, 0.72)";
+  ctx.lineWidth = 1;
+  for (const limit of [-zteLimit, zteLimit]) {
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y(limit));
+    ctx.lineTo(width - margin.right, y(limit));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (let value = 0; value <= 1000; value += 100) {
+    ctx.strokeStyle = "rgba(174, 189, 202, 0.32)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x(value), margin.top);
+    ctx.lineTo(x(value), height - margin.bottom);
+    ctx.stroke();
+  }
   ctx.strokeStyle = "#aebdca";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -615,9 +641,9 @@ function drawZteCurves(result) {
   ctx.fillStyle = "#516476";
   ctx.font = "12px Segoe UI";
   ctx.textAlign = "center";
-  for (let index = 0; index <= 4; index++) {
-    const value = xMin + index / 4 * (xMax - xMin);
-    ctx.fillText(value.toFixed(0), x(value), height - 26);
+  for (let value = 0; value <= 1000; value += 100) {
+    ctx.fillStyle = "#516476";
+    ctx.fillText(String(value), x(value), height - 26);
   }
   ctx.textAlign = "right";
   for (let index = 0; index <= 4; index++) {
@@ -644,6 +670,13 @@ function drawZteCurves(result) {
     ctx.fillStyle = "#516476";
     ctx.fillText(item[0], startX + 25, legendY + 4);
   });
+  const bandLegendX = margin.left + 245;
+  ctx.fillStyle = "rgba(22, 131, 106, 0.18)";
+  ctx.fillRect(bandLegendX, legendY - 7, 20, 10);
+  ctx.strokeStyle = "rgba(22, 131, 106, 0.72)";
+  ctx.strokeRect(bandLegendX, legendY - 7, 20, 10);
+  ctx.fillStyle = "#516476";
+  ctx.fillText("ZTE ±5 ppm/K", bandLegendX + 25, legendY + 4);
 }
 
 function renderZteDesign(result) {
