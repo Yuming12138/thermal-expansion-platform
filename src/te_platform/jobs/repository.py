@@ -91,6 +91,56 @@ def _persist_thermal_expansion_curve(connection: Any, job_id: str, result: dict[
     )
 
 
+def import_historical_thermal_expansion_curve(
+    connection: Any,
+    *,
+    material_id: int,
+    source_path: str,
+    thermal_expansion_curve: tuple[tuple[float, float], ...],
+    alpha_300k_per_k: float | None,
+) -> str:
+    """Idempotently register a pre-existing QHA curve in an open database transaction."""
+    job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, Path(source_path).resolve().as_uri()))
+    now = _timestamp()
+    result = {
+        "alpha_300k_per_k": alpha_300k_per_k,
+        "alpha_300k_ppm_per_k": alpha_300k_per_k * 1_000_000
+        if alpha_300k_per_k is not None
+        else None,
+        "quality_warnings": [],
+        "thermal_expansion_source_path": source_path,
+    }
+    connection.execute(
+        """INSERT INTO calculation_jobs
+        (id, material_id, workflow, model_name, status, parameters_json, result_json,
+         error_message, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'SUCCEEDED', ?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            material_id = excluded.material_id,
+            result_json = excluded.result_json,
+            updated_at = excluded.updated_at""",
+        (
+            job_id,
+            material_id,
+            "historical_qha_thermal_expansion",
+            "historical-qha-import",
+            json.dumps({"source_path": source_path}, ensure_ascii=False, sort_keys=True),
+            json.dumps(result, ensure_ascii=False, sort_keys=True),
+            now,
+            now,
+        ),
+    )
+    _persist_thermal_expansion_curve(
+        connection,
+        job_id,
+        {
+            **result,
+            "thermal_expansion_curve": thermal_expansion_curve,
+        },
+    )
+    return job_id
+
+
 def associate_job_with_material(
     database: str | Path, job_id: str, material_key: str
 ) -> dict[str, Any]:

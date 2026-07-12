@@ -44,7 +44,9 @@ def _parse_elastic_tensor(path: Path) -> np.ndarray:
     return tensor
 
 
-def _parse_thermal_expansion(path: Path) -> tuple[tuple[float, float], ...]:
+def parse_thermal_expansion_file(path: str | Path) -> tuple[tuple[float, float], ...]:
+    """Read one QHA ``thermal_expansion.dat`` into ordered (T, alpha) points."""
+    path = Path(path)
     points: list[tuple[float, float]] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         values = line.split()
@@ -63,7 +65,7 @@ def _parse_thermal_expansion(path: Path) -> tuple[tuple[float, float], ...]:
     return tuple(points)
 
 
-def _interpolate_alpha(points: tuple[tuple[float, float], ...], target: float) -> float | None:
+def interpolate_alpha(points: tuple[tuple[float, float], ...], target: float) -> float | None:
     if target < points[0][0] or target > points[-1][0]:
         return None
     for (left_t, left_alpha), (right_t, right_alpha) in zip(points, points[1:]):
@@ -86,8 +88,8 @@ def parse_precision_results(work_directory: str | Path) -> PrecisionResults:
     tensor = _parse_elastic_tensor(tensor_path)
     symmetric_tensor = (tensor + tensor.T) / 2.0
     eigenvalues = np.linalg.eigvalsh(symmetric_tensor)
-    points = _parse_thermal_expansion(thermal_path)
-    alpha_300 = _interpolate_alpha(points, 300.0)
+    points = parse_thermal_expansion_file(thermal_path)
+    alpha_300 = interpolate_alpha(points, 300.0)
     warnings: list[str] = []
     if not np.allclose(tensor, tensor.T, rtol=0, atol=1e-3):
         warnings.append("Elastic tensor is not symmetric within 1e-3 GPa")

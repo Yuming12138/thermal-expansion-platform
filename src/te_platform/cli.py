@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from te_platform.catalog.importer import import_dataset
+from te_platform.catalog.qha_curve_importer import import_historical_qha_curves
 from te_platform.catalog.queries import material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.config import (
@@ -39,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--dataset", type=Path, default=DEFAULT_DATASET_PATH)
     importer.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
     importer.add_argument("--replace", action="store_true")
+
+    qha_importer = subparsers.add_parser(
+        "import-qha-curves", help="Import complete thermal_expansion.dat curves from QHA result roots"
+    )
+    _database_argument(qha_importer)
+    qha_importer.add_argument("roots", type=Path, nargs="+")
 
     stats = subparsers.add_parser("dataset-stats", help="Show imported dataset statistics")
     _database_argument(stats)
@@ -142,6 +149,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             replace=args.replace,
         )
         _json_output(summary.to_dict())
+        return 0
+    if args.command == "import-qha-curves":
+        _json_output(import_historical_qha_curves(args.db, args.roots).to_dict())
         return 0
     if args.command == "dataset-stats":
         _json_output(_dataset_stats(args.db, args.release))

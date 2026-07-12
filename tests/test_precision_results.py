@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from te_platform.precision.results import parse_precision_results
+from te_platform.precision.results import parse_precision_results, parse_thermal_expansion_file
 
 
 class PrecisionResultsTests(unittest.TestCase):
@@ -37,6 +37,12 @@ class PrecisionResultsTests(unittest.TestCase):
             result = parse_precision_results(root)
 
             self.assertIn("Imaginary phonon frequencies", " ".join(result.quality_warnings))
+
+    def test_reads_standalone_thermal_expansion_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "thermal_expansion.dat"
+            path.write_text("0 0\n300 -1.23e-5\n", encoding="utf-8")
+            self.assertEqual(parse_thermal_expansion_file(path), ((0.0, 0.0), (300.0, -1.23e-5)))
 
 
 if __name__ == "__main__":
