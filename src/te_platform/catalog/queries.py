@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from te_platform.db.schema import connect_database
+from te_platform.db.schema import connect_readonly_database
 
 
 def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
@@ -46,7 +46,7 @@ def dataset_summary(
     database_path: str | Path,
     release_slug: str,
 ) -> dict[str, Any]:
-    with connect_database(database_path) as connection:
+    with connect_readonly_database(database_path) as connection:
         release = connection.execute(
             """
             SELECT id, slug, title, version, record_count, source_file_name,
@@ -102,7 +102,7 @@ def search_materials(
     if limit < 1 or limit > 500:
         raise ValueError("limit must be between 1 and 500")
     pattern = f"%{query.strip()}%"
-    with connect_database(database_path) as connection:
+    with connect_readonly_database(database_path) as connection:
         rows = connection.execute(
             """
             SELECT
@@ -140,7 +140,7 @@ def material_detail(
     release_slug: str,
     material_key: str,
 ) -> dict[str, Any]:
-    with connect_database(database_path) as connection:
+    with connect_readonly_database(database_path) as connection:
         material = connection.execute(
             """
             SELECT m.id, m.material_key, m.formula, m.external_id, dr.id AS release_id
@@ -223,7 +223,7 @@ def material_landscape(
 ) -> list[dict[str, Any]]:
     if limit < 1 or limit > 7001:
         raise ValueError("limit must be between 1 and 7001")
-    with connect_database(database_path) as connection:
+    with connect_readonly_database(database_path) as connection:
         rows = connection.execute(
             """
             SELECT

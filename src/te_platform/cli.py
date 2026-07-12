@@ -15,9 +15,10 @@ from te_platform.config import (
     DEFAULT_DATASET_PATH,
     DEFAULT_MANIFEST_PATH,
     DEFAULT_RELEASE_SLUG,
+    catalog_database_path,
     database_path,
 )
-from te_platform.db.schema import connect_database, initialize_database
+from te_platform.db.schema import connect_readonly_database, initialize_database
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 
@@ -28,6 +29,10 @@ def _json_output(value: Any) -> None:
 
 def _database_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--db", type=Path, default=database_path())
+
+
+def _catalog_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--db", type=Path, default=catalog_database_path())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,22 +65,22 @@ def build_parser() -> argparse.ArgumentParser:
     release_catalog = subparsers.add_parser(
         "build-release-catalog", help="Build a sanitized standalone catalog database"
     )
-    release_catalog.add_argument("--source-db", type=Path, default=database_path())
+    release_catalog.add_argument("--source-db", type=Path, default=catalog_database_path())
     release_catalog.add_argument("--output", type=Path, required=True)
     release_catalog.add_argument("--replace", action="store_true")
 
     stats = subparsers.add_parser("dataset-stats", help="Show imported dataset statistics")
-    _database_argument(stats)
+    _catalog_argument(stats)
     stats.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
 
     search = subparsers.add_parser("search-materials", help="Search the material catalog")
-    _database_argument(search)
+    _catalog_argument(search)
     search.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
     search.add_argument("--query", default="")
     search.add_argument("--limit", type=int, default=20)
 
     detail = subparsers.add_parser("material-detail", help="Show material properties")
-    _database_argument(detail)
+    _catalog_argument(detail)
     detail.add_argument("material_key")
     detail.add_argument("--release", default=DEFAULT_RELEASE_SLUG)
 
@@ -103,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _dataset_stats(db_path: Path, release_slug: str) -> dict[str, Any]:
-    with connect_database(db_path) as connection:
+    with connect_readonly_database(db_path) as connection:
         release = connection.execute(
             """
             SELECT id, slug, title, version, record_count, source_file_name,

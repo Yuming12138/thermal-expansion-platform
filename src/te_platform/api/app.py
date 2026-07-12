@@ -10,14 +10,22 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from te_platform.api.services import active_dataset_summary, ensure_active_database
+from te_platform.api.services import (
+    active_dataset_summary,
+    ensure_catalog_database,
+    ensure_workspace_database,
+)
 from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import material_detail, material_landscape, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.curve_rom import optimize_curve_rom
 from te_platform.composites.material_pair import curve_materials, optimize_material_pair
-from te_platform.config import DEFAULT_RELEASE_SLUG, database_path
-from te_platform.config import DEFAULT_PTE_RELEASE_SLUG
+from te_platform.config import (
+    DEFAULT_PTE_RELEASE_SLUG,
+    DEFAULT_RELEASE_SLUG,
+    catalog_database_path,
+    workspace_database_path,
+)
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.workers.alignn_runner import predict_alignn_shear
@@ -84,12 +92,22 @@ class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
 
 
-def create_app(database: Path | None = None) -> FastAPI:
-    db_path = database or database_path()
+def create_app(
+    catalog_database: Path | None = None,
+    workspace_database: Path | None = None,
+    *,
+    database: Path | None = None,
+) -> FastAPI:
+    if database is not None:
+        catalog_database = database
+        workspace_database = database
+    catalog_db = catalog_database or catalog_database_path()
+    workspace_db = workspace_database or workspace_database_path()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        ensure_active_database(db_path)
+        ensure_catalog_database(catalog_db)
+        ensure_workspace_database(workspace_db)
         yield
 
     app = FastAPI(
@@ -113,11 +131,13 @@ def create_app(database: Path | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
-        summary = active_dataset_summary(db_path)
+        summary = active_dataset_summary(catalog_db)
         return {
             "status": "ok",
             "dataset_release": summary["release"]["slug"],
             "material_count": summary["counts"]["materials"],
+            "catalog_database": catalog_db.name,
+            "workspace_database": workspace_db.name,
         }
 
     @app.get("/api/agent/tools")
@@ -137,28 +157,28 @@ def create_app(database: Path | None = None) -> FastAPI:
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:
-        return active_dataset_summary(db_path)
+        return active_dataset_summary(catalog_db)
 
     @app.get("/api/materials")
     def materials(
         query: str = "",
         limit: int = Query(default=50, ge=1, le=500),
     ) -> list[dict[str, object]]:
-        ensure_active_database(db_path)
-        return search_materials(db_path, DEFAULT_RELEASE_SLUG, query, limit)
+        ensure_catalog_database(catalog_db)
+        return search_materials(catalog_db, DEFAULT_RELEASE_SLUG, query, limit)
 
     @app.get("/api/materials/landscape")
     def landscape(
         limit: int = Query(default=1600, ge=1, le=7001),
     ) -> list[dict[str, object]]:
-        ensure_active_database(db_path)
-        return material_landscape(db_path, DEFAULT_RELEASE_SLUG, limit)
+        ensure_catalog_database(catalog_db)
+        return material_landscape(catalog_db, DEFAULT_RELEASE_SLUG, limit)
 
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:
-        ensure_active_database(db_path)
+        ensure_catalog_database(catalog_db)
         try:
-            return material_detail(db_path, DEFAULT_RELEASE_SLUG, material_key)
+            return material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -215,7 +235,7 @@ def create_app(database: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="role must be 'pte' or 'nte'")
         try:
             return curve_materials(
-                db_path,
+                catalog_db,
                 release_slug,
                 query,
                 limit,
@@ -228,7 +248,7 @@ def create_app(database: Path | None = None) -> FastAPI:
     def composite_curve_design(request: MaterialPairCurveRequest) -> dict[str, object]:
         try:
             return optimize_material_pair(
-                db_path,
+                catalog_db,
                 pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
                 nte_release_slug=DEFAULT_RELEASE_SLUG,
                 pte_material_key=request.pte_material_key,
@@ -278,7 +298,7 @@ def create_app(database: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(error)) from error
         suffix = Path(file.filename).suffix.lower() or ".vasp"
         structure_hash = sha256(content).hexdigest()
-        upload_directory = db_path.parent / "uploads"
+        upload_directory = workspace_db.parent / "uploads"
         upload_directory.mkdir(parents=True, exist_ok=True)
         structure_path = upload_directory / f"{structure_hash}{suffix}"
         if not structure_path.exists():
@@ -310,7 +330,7 @@ def create_app(database: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(error)) from error
         suffix = Path(file.filename).suffix.lower() or ".vasp"
         structure_hash = sha256(content).hexdigest()
-        upload_directory = db_path.parent / "uploads"
+        upload_directory = workspace_db.parent / "uploads"
         upload_directory.mkdir(parents=True, exist_ok=True)
         structure_path = upload_directory / f"{structure_hash}{suffix}"
         if not structure_path.exists():
@@ -345,7 +365,7 @@ def create_app(database: Path | None = None) -> FastAPI:
         try:
             inspect_structure(file.filename or "POSCAR", content)
             return submit_precision_job(
-                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+                workspace_db, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -358,7 +378,7 @@ def create_app(database: Path | None = None) -> FastAPI:
         try:
             inspect_structure(file.filename or "POSCAR", content)
             return submit_elastic_job(
-                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+                workspace_db, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -371,7 +391,7 @@ def create_app(database: Path | None = None) -> FastAPI:
         try:
             inspect_structure(file.filename or "POSCAR", content)
             return submit_qha_job(
-                db_path, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
+                workspace_db, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
             )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -379,8 +399,8 @@ def create_app(database: Path | None = None) -> FastAPI:
     @app.get("/api/precision/jobs/{job_id}")
     def precision_job(job_id: str) -> dict[str, object]:
         try:
-            job = get_job(db_path, job_id)
-            job["progress"] = precision_progress(db_path, job_id)
+            job = get_job(workspace_db, job_id)
+            job["progress"] = precision_progress(workspace_db, job_id)
             return job
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -388,14 +408,14 @@ def create_app(database: Path | None = None) -> FastAPI:
     @app.post("/api/precision/jobs/{job_id}/resume-qha")
     def resume_qha_job(job_id: str) -> dict[str, object]:
         try:
-            return resume_precision_qha(db_path, job_id)
+            return resume_precision_qha(workspace_db, job_id)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/precision/jobs/{job_id}/refresh-result")
     def refresh_precision_job_result(job_id: str) -> dict[str, object]:
         try:
-            return refresh_precision_result(db_path, job_id)
+            return refresh_precision_result(workspace_db, job_id)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 

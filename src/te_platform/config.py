@@ -5,7 +5,8 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATABASE_PATH = PROJECT_ROOT / "var" / "dev.db"
+DEFAULT_CATALOG_DATABASE_PATH = PROJECT_ROOT / "var" / "releases" / "catalog-v1.sqlite"
+DEFAULT_WORKSPACE_DATABASE_PATH = PROJECT_ROOT / "var" / "workspace.sqlite"
 DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
 DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
 DEFAULT_DATASET_PATH = (
@@ -21,4 +22,20 @@ DEFAULT_MANIFEST_PATH = (
 
 
 def database_path() -> Path:
-    return Path(os.environ.get("TEP_DATABASE_PATH", DEFAULT_DATABASE_PATH))
+    """Backward-compatible writable database path for CLI and worker code."""
+    return workspace_database_path()
+
+
+def catalog_database_path() -> Path:
+    return Path(
+        os.environ.get("TEP_CATALOG_DATABASE_PATH", DEFAULT_CATALOG_DATABASE_PATH)
+    )
+
+
+def workspace_database_path() -> Path:
+    return Path(
+        os.environ.get(
+            "TEP_WORKSPACE_DATABASE_PATH",
+            os.environ.get("TEP_DATABASE_PATH", DEFAULT_WORKSPACE_DATABASE_PATH),
+        )
+    )

@@ -1,9 +1,13 @@
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from te_platform.api.app import create_app
+from te_platform.config import DEFAULT_CATALOG_DATABASE_PATH
 from te_platform.workers.alignn_runner import AlignnWorkerPrediction
 from te_platform.workers.mattersim_runner import MatterSimPrediction
 
@@ -36,12 +40,28 @@ Ba1 Ba 0 0 0
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.client_context = TestClient(create_app())
+        cls.temp_directory = tempfile.TemporaryDirectory()
+        cls.workspace_database = Path(cls.temp_directory.name) / "workspace.sqlite"
+        cls.catalog_hash_before = hashlib.sha256(
+            DEFAULT_CATALOG_DATABASE_PATH.read_bytes()
+        ).hexdigest()
+        cls.client_context = TestClient(
+            create_app(
+                catalog_database=DEFAULT_CATALOG_DATABASE_PATH,
+                workspace_database=cls.workspace_database,
+            )
+        )
         cls.client = cls.client_context.__enter__()
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls.client_context.__exit__(None, None, None)
+        catalog_hash_after = hashlib.sha256(
+            DEFAULT_CATALOG_DATABASE_PATH.read_bytes()
+        ).hexdigest()
+        if catalog_hash_after != cls.catalog_hash_before:
+            raise AssertionError("API tests modified the immutable catalog database")
+        cls.temp_directory.cleanup()
 
     def test_health_and_dataset_summary(self) -> None:
         home = self.client.get("/")
@@ -52,6 +72,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
         self.assertEqual(health.json()["material_count"], 6701)
+        self.assertEqual(health.json()["catalog_database"], "catalog-v1.sqlite")
+        self.assertEqual(health.json()["workspace_database"], "workspace.sqlite")
+        self.assertTrue(self.workspace_database.is_file())
 
         dataset = self.client.get("/api/datasets/current")
         self.assertEqual(dataset.status_code, 200)
@@ -227,6 +250,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "job-123")
+        self.assertEqual(submission_mock.call_args.args[0], self.workspace_database)
 
     @patch("te_platform.api.app.submit_elastic_job")
     def test_elastic_job_submission_endpoint(self, submission_mock) -> None:
@@ -237,6 +261,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "elastic-123")
+        self.assertEqual(submission_mock.call_args.args[0], self.workspace_database)
 
     @patch("te_platform.api.app.submit_qha_job")
     def test_qha_job_submission_endpoint(self, submission_mock) -> None:
@@ -247,6 +272,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "qha-123")
+        self.assertEqual(submission_mock.call_args.args[0], self.workspace_database)
 
     @patch("te_platform.api.app.refresh_precision_result")
     def test_precision_result_refresh_endpoint(self, refresh_mock) -> None:
@@ -261,6 +287,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "SUCCEEDED")
         refresh_mock.assert_called_once()
+        self.assertEqual(refresh_mock.call_args.args[0], self.workspace_database)
 
 
 if __name__ == "__main__":

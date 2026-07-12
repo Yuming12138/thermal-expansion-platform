@@ -75,18 +75,27 @@ uv sync
 随后在浏览器打开 <http://127.0.0.1:8000>。接口文档位于
 <http://127.0.0.1:8000/docs>，测试可用 `uv run python -m unittest discover -s tests -v`。
 
+Web 服务默认使用两个完全分离的数据库：
+
+```text
+var/releases/catalog-v1.sqlite   只读材料目录、结构、属性和历史曲线
+var/workspace.sqlite             用户上传、预测任务和计算结果
+```
+
+可通过 `TEP_CATALOG_DATABASE_PATH` 和 `TEP_WORKSPACE_DATABASE_PATH` 修改位置。启动时不会再从原始科研目录自动导入数据；缺少 `catalog-v1.sqlite` 会直接报告配置错误。
+
 ## 构建可分享的离线目录数据库
 
-不要直接分发包含开发任务和本机路径的 `var/dev.db`。使用发布构建命令生成独立目录库：
+不要直接分发历史开发数据库。维护人员需要从明确指定的归档或数据构建库生成独立目录库：
 
 ```powershell
 uv run python -m te_platform build-release-catalog `
-  --source-db 'var\dev.db' `
+  --source-db 'D:\path\to\archived-development.db' `
   --output 'var\releases\catalog-v1.sqlite' `
   --replace
 ```
 
-生成的 `catalog-v1.sqlite` 已内置 NTE/PTE 材料、POSCAR、属性和完整热膨胀曲线，接收方不需要原始科研数据目录。构建器会删除开发期计算任务，将绝对路径替换为 `catalog://...` 逻辑来源，并生成包含文件哈希与计数的 `.manifest.json`。正式程序应保留该目录库作为不可变发布快照，首次运行时复制为可写运行库；用户上传和新计算结果后续再迁移到独立的 `workspace.sqlite`。详见 [发布目录数据库说明](docs/release-catalog.md)。
+生成的 `catalog-v1.sqlite` 已内置 NTE/PTE 材料、POSCAR、属性和完整热膨胀曲线，接收方不需要原始科研数据目录。构建器会删除开发期计算任务，将绝对路径替换为 `catalog://...` 逻辑来源，并生成包含文件哈希与计数的 `.manifest.json`。平台只读打开目录库，用户上传和新计算结果写入独立的 `workspace.sqlite`。详见 [发布目录数据库说明](docs/release-catalog.md)。
 
 ## 科学边界
 

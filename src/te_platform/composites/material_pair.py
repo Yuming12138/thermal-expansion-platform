@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from te_platform.composites.curve_rom import optimize_curve_rom
-from te_platform.db.schema import connect_database
+from te_platform.db.schema import connect_readonly_database
 
 
 def _release_materials_with_curves(
@@ -19,7 +19,7 @@ def _release_materials_with_curves(
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
     pattern = f"%{query.strip()}%"
-    with connect_database(database) as connection:
+    with connect_readonly_database(database) as connection:
         rows = connection.execute(
             """WITH ranked_curves AS (
                 SELECT j.material_id, c.points_json,
@@ -91,7 +91,7 @@ def _interpolate(points: list[list[float]], target: float) -> float | None:
 def _material_curve(
     database: str | Path, release_slug: str, material_key: str
 ) -> dict[str, Any]:
-    with connect_database(database) as connection:
+    with connect_readonly_database(database) as connection:
         row = connection.execute(
             """SELECT m.id, m.material_key, m.formula
             FROM dataset_releases dr

@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import quote
 
 
 SCHEMA_VERSION = 2
@@ -143,6 +144,21 @@ def connect_database(path: str | Path) -> Iterator[sqlite3.Connection]:
         raise
     else:
         connection.commit()
+    finally:
+        connection.close()
+
+
+@contextmanager
+def connect_readonly_database(path: str | Path) -> Iterator[sqlite3.Connection]:
+    db_path = Path(path).resolve()
+    if not db_path.is_file():
+        raise ValueError(f"Read-only database does not exist: {db_path}")
+    uri_path = quote(db_path.as_posix(), safe="/:._-")
+    connection = sqlite3.connect(f"file:{uri_path}?mode=ro&immutable=1", uri=True)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield connection
     finally:
         connection.close()
 
