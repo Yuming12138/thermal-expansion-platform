@@ -412,7 +412,9 @@ function classificationText(value) {
 
 function metricCards(items) {
   return "<div class='prediction-metrics'>" + items.map(item =>
-    "<div><span>" + escapeHtml(item[0]) + "</span><strong>" + escapeHtml(item[1]) + "</strong></div>"
+    "<div><span>" + escapeHtml(item[0]) + "</span><strong" +
+    (item[2] ? " id='" + escapeHtml(item[2]) + "'" : "") + ">" +
+    escapeHtml(item[1]) + "</strong></div>"
   ).join("") + "</div>";
 }
 
@@ -684,16 +686,53 @@ function renderZteDesign(result) {
   const ptePercent = 100 - ntePercent;
   document.querySelector("#zte-result").innerHTML =
     "<h3>曲线配比优化结果</h3>" + metricCards([
-      ["PTE 体积分数", ptePercent.toFixed(2) + "%"],
-      ["NTE 体积分数", ntePercent.toFixed(2) + "%"],
-      ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K"],
-      ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K"],
+      ["PTE 体积分数", ptePercent.toFixed(2) + "%", "zte-pte-fraction"],
+      ["NTE 体积分数", ntePercent.toFixed(2) + "%", "zte-nte-fraction"],
+      ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K", "zte-rms"],
+      ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K", "zte-max-error"],
     ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
     "；NTE：" + escapeHtml(result.nte_material.material_key) + "；优化温区：" +
     numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) +
     " K；完整曲线：" + numeric(result.curve_temperature_min_k) + "–" +
     numeric(result.curve_temperature_max_k) + " K</p>" +
+    "<div class='zte-fraction-control'><div class='zte-fraction-heading'>" +
+    "<strong>NTE 掺杂浓度</strong><span>算法最佳：" + ntePercent.toFixed(2) + "%</span>" +
+    "<button id='zte-reset-fraction' type='button'>恢复最佳比例</button></div>" +
+    "<div class='zte-slider-wrap'><input id='zte-fraction-slider' type='range' min='0' max='100' step='0.01' " +
+    "value='" + ntePercent.toFixed(2) + "' aria-label='NTE 掺杂浓度百分比'>" +
+    "<span class='zte-best-marker' style='left:" + ntePercent.toFixed(3) +
+    "%' title='算法最佳比例 " + ntePercent.toFixed(2) + "%'></span></div>" +
+    "<div class='zte-slider-scale'><span>0% NTE</span><strong id='zte-current-fraction'>当前：" +
+    ntePercent.toFixed(1) + "% NTE</strong><span>100% NTE</span></div></div>" +
     "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>";
+  const slider = document.querySelector("#zte-fraction-slider");
+  const applyFraction = value => {
+    const fraction = Math.min(1, Math.max(0, Number(value) / 100));
+    const pte = result.pte_alpha_ppm_per_k.map(Number);
+    const nte = result.nte_alpha_ppm_per_k.map(Number);
+    const mixed = pte.map((pteValue, index) =>
+      (1 - fraction) * pteValue + fraction * nte[index]
+    );
+    const errors = mixed.filter((_, index) => {
+      const temperature = Number(result.temperatures_k[index]);
+      return temperature >= Number(result.temperature_min_k) &&
+        temperature <= Number(result.temperature_max_k);
+    }).map(value => value - Number(result.target_alpha_ppm_per_k));
+    const rms = Math.sqrt(errors.reduce((total, value) => total + value * value, 0) / errors.length);
+    const maxError = Math.max(...errors.map(Math.abs));
+    document.querySelector("#zte-pte-fraction").textContent = ((1 - fraction) * 100).toFixed(2) + "%";
+    document.querySelector("#zte-nte-fraction").textContent = (fraction * 100).toFixed(2) + "%";
+    document.querySelector("#zte-rms").textContent = numeric(rms) + " ppm/K";
+    document.querySelector("#zte-max-error").textContent = numeric(maxError) + " ppm/K";
+    document.querySelector("#zte-current-fraction").textContent =
+      "当前：" + (fraction * 100).toFixed(1) + "% NTE";
+    drawZteCurves({...result, mixed_alpha_ppm_per_k: mixed, nte_volume_fraction: fraction});
+  };
+  slider.addEventListener("input", () => applyFraction(slider.value));
+  document.querySelector("#zte-reset-fraction").addEventListener("click", () => {
+    slider.value = ntePercent.toFixed(2);
+    applyFraction(slider.value);
+  });
   drawZteCurves(result);
 }
 
