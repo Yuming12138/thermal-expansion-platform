@@ -56,6 +56,7 @@ const ELEMENT_FAMILIES = {
   lanthanide: new Set(LANTHANIDES),
   actinide: new Set(ACTINIDES),
 };
+const MATERIAL_CONTEXT_STORAGE_KEY = "tep.material-context.v1";
 const WORKSPACE_PAGES = {
   database: {path: "/database", title: "材料数据库"},
   predict: {path: "/predict", title: "结构预测"},
@@ -204,6 +205,106 @@ function workspacePageFromPath(pathname = window.location.pathname) {
     .find(([, page]) => page.path === pathname)?.[0] || "database";
 }
 
+function validLandscapeContext(point) {
+  return point && typeof point.material_key === "string" &&
+    Number.isFinite(Number(point.x_gpa)) && Number(point.x_gpa) > 0 &&
+    Number.isFinite(Number(point.g_gpa)) && Number(point.g_gpa) > 0;
+}
+
+function landscapeSelectionText(point) {
+  if (!validLandscapeContext(point)) return "尚未选择材料。";
+  const prefix = point.context_origin === "predict" ? "当前预测：" : "当前材料：";
+  return prefix + point.material_key + " · Ẽ=" + Number(point.x_gpa).toFixed(3) +
+    " GPa · G=" + Number(point.g_gpa).toFixed(3) + " GPa";
+}
+
+function restoreLandscapeContext() {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(MATERIAL_CONTEXT_STORAGE_KEY));
+    if (validLandscapeContext(stored)) {
+      selectedLandscapePoint = stored;
+      document.querySelector("#landscape-selection").textContent = landscapeSelectionText(stored);
+    }
+  } catch (error) {
+    console.warn("无法恢复当前材料上下文", error);
+  }
+}
+
+function persistLandscapeContext() {
+  try {
+    if (selectedLandscapePoint) {
+      window.sessionStorage.setItem(MATERIAL_CONTEXT_STORAGE_KEY, JSON.stringify(selectedLandscapePoint));
+    } else {
+      window.sessionStorage.removeItem(MATERIAL_CONTEXT_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn("无法保存当前材料上下文", error);
+  }
+}
+
+function workspaceUrl(pageName) {
+  const page = WORKSPACE_PAGES[pageName] || WORKSPACE_PAGES.database;
+  if (pageName === "landscape" && selectedLandscapePoint?.context_origin === "database" &&
+      selectedLandscapePoint.database_key) {
+    return page.path + "?material=" + encodeURIComponent(selectedLandscapePoint.database_key);
+  }
+  return page.path;
+}
+
+function updateMaterialContextUi(activePage = workspacePageFromPath()) {
+  const container = document.querySelector("#material-context");
+  const landscapeLink = document.querySelector("[data-page-link='landscape']");
+  landscapeLink?.classList.toggle("has-context", Boolean(selectedLandscapePoint));
+  if (!selectedLandscapePoint) {
+    container.hidden = true;
+    return;
+  }
+  const point = selectedLandscapePoint;
+  container.hidden = false;
+  document.querySelector("#material-context-source").textContent = point.source || "当前材料";
+  document.querySelector("#material-context-name").textContent = point.material_key;
+  document.querySelector("#material-context-metrics").textContent =
+    "G=" + Number(point.g_gpa).toFixed(3) + " GPa · Ẽ=" + Number(point.x_gpa).toFixed(3) + " GPa";
+  const classification = document.querySelector("#material-context-classification");
+  classification.textContent = point.classification || "未判定";
+  classification.className = "material-context-classification " +
+    (point.classification === "NTE" ? "nte" : point.classification === "PTE" ? "pte" : "");
+  const origin = document.querySelector("#material-context-origin");
+  origin.textContent = point.context_origin === "predict" ? "返回预测工作台" : "返回材料详情";
+  origin.hidden = !point.context_origin;
+  const landscape = document.querySelector("#material-context-landscape");
+  landscape.disabled = activePage === "landscape";
+  landscape.textContent = activePage === "landscape" ? "已在景观中定位" : "在景观中定位";
+}
+
+function setLandscapeContext(point, selectionText) {
+  selectedLandscapePoint = validLandscapeContext(point) ? point : null;
+  persistLandscapeContext();
+  updateMaterialContextUi();
+  document.querySelector("#landscape-selection").textContent =
+    selectionText || landscapeSelectionText(selectedLandscapePoint);
+  drawLandscape();
+}
+
+function clearLandscapeContext({replaceUrl = true} = {}) {
+  selectedLandscapePoint = null;
+  persistLandscapeContext();
+  updateMaterialContextUi();
+  document.querySelector("#landscape-selection").textContent = "尚未选择材料。";
+  drawLandscape();
+  if (replaceUrl && window.location.pathname === WORKSPACE_PAGES.landscape.path && window.location.search) {
+    window.history.replaceState({page: "landscape"}, "", WORKSPACE_PAGES.landscape.path);
+  }
+}
+
+function focusLandscapeContext() {
+  if (!selectedLandscapePoint) return;
+  const wrap = document.querySelector(".landscape-wrap");
+  wrap.classList.remove("context-focus");
+  window.requestAnimationFrame(() => wrap.classList.add("context-focus"));
+  window.setTimeout(() => wrap.classList.remove("context-focus"), 1250);
+}
+
 function showWorkspacePage(pageName, {updateHistory = false} = {}) {
   const selectedPage = WORKSPACE_PAGES[pageName] ? pageName : "database";
   const page = WORKSPACE_PAGES[selectedPage];
@@ -215,9 +316,11 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     else link.removeAttribute("aria-current");
   });
   document.title = page.title + " · 热膨胀材料智能计算与设计平台";
-  if (updateHistory && window.location.pathname !== page.path) {
-    window.history.pushState({page: selectedPage}, "", page.path);
+  const targetUrl = workspaceUrl(selectedPage);
+  if (updateHistory && window.location.pathname + window.location.search !== targetUrl) {
+    window.history.pushState({page: selectedPage}, "", targetUrl);
   }
+  updateMaterialContextUi(selectedPage);
   window.requestAnimationFrame(() => {
     const activePage = document.querySelector(`[data-page='${selectedPage}']`);
     activePage?.querySelectorAll("canvas").forEach(canvas => canvas.teRedraw?.());
@@ -225,6 +328,44 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     materialStructureViewer?.render?.();
     materialStructureAxisViewer?.resize?.();
     materialStructureAxisViewer?.render?.();
+    if (selectedPage === "landscape") focusLandscapeContext();
+  });
+}
+
+function navigateToWorkspace(pageName) {
+  showWorkspacePage(pageName, {updateHistory: true});
+  const navigation = document.querySelector(".workspace-nav");
+  window.scrollTo({top: navigation.offsetTop, behavior: "auto"});
+}
+
+async function restoreLandscapeContextFromLocation() {
+  if (window.location.pathname !== WORKSPACE_PAGES.landscape.path) return;
+  const materialKey = new URLSearchParams(window.location.search).get("material");
+  if (!materialKey || selectedLandscapePoint?.database_key === materialKey) return;
+  const data = await api("/api/materials/" + encodeURIComponent(materialKey));
+  selectLandscapeMaterial(data);
+}
+
+function setupMaterialContext() {
+  document.querySelector("#material-context-landscape").addEventListener("click", () =>
+    navigateToWorkspace("landscape"));
+  document.querySelector("#material-context-origin").addEventListener("click", async () => {
+    const point = selectedLandscapePoint;
+    if (!point) return;
+    const origin = point.context_origin === "predict" ? "predict" : "database";
+    navigateToWorkspace(origin);
+    if (origin === "database" && point.database_key) {
+      try {
+        await loadDetail(point.database_key);
+        document.querySelector(".detail-panel").scrollIntoView({behavior: "smooth", block: "start"});
+      } catch (error) {
+        document.querySelector("#material-detail").textContent = error.message;
+      }
+    }
+  });
+  document.querySelector("#material-context-clear").addEventListener("click", () => clearLandscapeContext());
+  document.addEventListener("click", event => {
+    if (event.target.closest("[data-context-action='landscape']")) navigateToWorkspace("landscape");
   });
 }
 
@@ -233,12 +374,17 @@ function setupWorkspaceNavigation() {
     link.addEventListener("click", event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      showWorkspacePage(link.dataset.pageLink, {updateHistory: true});
-      const navigation = document.querySelector(".workspace-nav");
-      window.scrollTo({top: navigation.offsetTop, behavior: "auto"});
+      navigateToWorkspace(link.dataset.pageLink);
     });
   });
-  window.addEventListener("popstate", () => showWorkspacePage(workspacePageFromPath()));
+  window.addEventListener("popstate", async () => {
+    try {
+      await restoreLandscapeContextFromLocation();
+    } catch (error) {
+      console.warn("无法恢复景观材料", error);
+    }
+    showWorkspacePage(workspacePageFromPath());
+  });
   showWorkspacePage(workspacePageFromPath());
 }
 
@@ -300,7 +446,9 @@ async function loadDetail(key) {
     .join("");
   document.querySelector("#material-detail").innerHTML =
     "<p><strong>" + escapeHtml(data.material.material_key) + "</strong> · " +
-    escapeHtml(data.material.external_id || "无外部ID") + "</p><p class='muted'>结构：" +
+    escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
+    landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
+    "<p class='muted'>结构：" +
     escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
     "</dl><div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
     renderPrecisionThermalExpansion(data.precision_thermal_expansion) + "</div>" +
@@ -850,13 +998,12 @@ function selectLandscapeMaterial(data) {
   const cte = value("CTE_ppm");
   if (![shear, cohesive, atomicVolume, coordination].every(Number.isFinite) ||
       shear <= 0 || atomicVolume <= 0 || coordination <= 0) {
-    selectedLandscapePoint = null;
+    clearLandscapeContext({replaceUrl: false});
     document.querySelector("#landscape-selection").textContent =
       "该材料缺少 Fig. 1d 坐标所需的 G、E_coh、AAV 或 avg_cn。";
-    drawLandscape();
     return;
   }
-  selectedLandscapePoint = {
+  const point = {
     material_key: data.material.material_key,
     x_gpa: 160.217 * Math.abs(cohesive) / (atomicVolume * coordination),
     g_gpa: shear,
@@ -864,11 +1011,12 @@ function selectLandscapeMaterial(data) {
     source: "当前数据库",
     year: null,
     selected: true,
+    context_origin: "database",
+    database_key: data.material.material_key,
   };
-  document.querySelector("#landscape-selection").textContent =
+  setLandscapeContext(point,
     "当前材料：" + data.material.material_key + " · Ẽ=" +
-    selectedLandscapePoint.x_gpa.toFixed(3) + " GPa · G=" + shear.toFixed(3) + " GPa";
-  drawLandscape();
+    point.x_gpa.toFixed(3) + " GPa · G=" + shear.toFixed(3) + " GPa");
 }
 
 function renderPrecisionThermalExpansion(result) {
@@ -1190,8 +1338,13 @@ function metricCards(items) {
   ).join("") + "</div>";
 }
 
+function landscapeJumpAction(message) {
+  return "<div class='context-jump-action'><span>" + escapeHtml(message) +
+    "</span><button type='button' data-context-action='landscape'>在景观中定位</button></div>";
+}
+
 function selectPredictedLandscapePoint(filename, shear, bonding, classification, source) {
-  selectedLandscapePoint = {
+  const point = {
     material_key: filename,
     x_gpa: Number(bonding),
     g_gpa: Number(shear),
@@ -1199,11 +1352,11 @@ function selectPredictedLandscapePoint(filename, shear, bonding, classification,
     source,
     year: null,
     selected: true,
+    context_origin: "predict",
   };
-  document.querySelector("#landscape-selection").textContent =
+  setLandscapeContext(point,
     "当前预测：" + filename + " · Ẽ=" + Number(bonding).toFixed(3) +
-    " GPa · G=" + Number(shear).toFixed(3) + " GPa";
-  drawLandscape();
+    " GPa · G=" + Number(shear).toFixed(3) + " GPa");
 }
 
 function renderFastPrediction(file, payload) {
@@ -1217,7 +1370,8 @@ function renderFastPrediction(file, payload) {
       ["剪切—键合比 ξ", Number(sbr.xi).toFixed(4)],
       ["预测结论", classificationText(sbr.classification)],
     ]) + "<p class='curve-note'>置信等级：" + escapeHtml(result.decision_quality) +
-    "；建议：" + escapeHtml(result.recommended_next_step) + "</p>";
+    "；建议：" + escapeHtml(result.recommended_next_step) + "</p>" +
+    landscapeJumpAction("快速预测已生成 G–Ẽ 坐标，可立即查看分类位置。");
   selectPredictedLandscapePoint(
     file.name,
     result.predicted_shear_modulus_gpa,
@@ -1245,7 +1399,8 @@ function renderElasticPrediction(file, result) {
       ["预测结论", classificationText(sbr.classification)],
     ]) + "<h3>完整弹性张量 Cᵢⱼ (GPa)</h3>" + tensorTable(result.elastic_tensor_gpa) +
     (result.quality_warnings?.length ? "<p class='curve-note'>质量提示：" +
-      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "");
+      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "") +
+    landscapeJumpAction("精准弹性结果已生成 G–Ẽ 坐标，可与论文材料直接比较。");
   selectPredictedLandscapePoint(
     file.name,
     result.shear_modulus_hill_gpa,
@@ -1537,6 +1692,8 @@ async function designZteComposite() {
 }
 
 async function initialize() {
+  restoreLandscapeContext();
+  setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
   try {
@@ -1547,6 +1704,12 @@ async function initialize() {
       api("/static/fig1d-reference.json"),
     ]);
     fig1dReference = results[3];
+    try {
+      await restoreLandscapeContextFromLocation();
+    } catch (error) {
+      console.warn("无法从链接恢复景观材料", error);
+      document.querySelector("#landscape-selection").textContent = "链接中的材料无法加载。";
+    }
     drawLandscape();
   } catch (error) {
     document.querySelector("#health-status").textContent = "服务异常";

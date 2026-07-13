@@ -67,10 +67,14 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
+        self.assertIn("/static/app.js?v=0.9.0-ux1", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
             self.assertIn("科研工作区导航", workspace_page.text)
+            self.assertIn("当前研究材料", workspace_page.text)
+        landscape_material = self.client.get("/landscape?material=Ag%28AuF4%292-mp-18125")
+        self.assertEqual(landscape_material.status_code, 200)
 
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

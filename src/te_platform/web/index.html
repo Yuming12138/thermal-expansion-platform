@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=0.9.0-ux1">
   </head>
   <body>
     <header>
@@ -22,6 +22,23 @@
         <a href="/zte" data-page-link="zte"><span>04</span>ZTE 复合设计</a>
       </div>
     </nav>
+    <section id="material-context" class="material-context" aria-label="当前研究材料" aria-live="polite" hidden>
+      <div class="material-context-inner">
+        <div class="material-context-identity">
+          <span id="material-context-source" class="material-context-source">当前材料</span>
+          <div>
+            <strong id="material-context-name">—</strong>
+            <span id="material-context-metrics">尚未获得景观坐标</span>
+          </div>
+          <span id="material-context-classification" class="material-context-classification">—</span>
+        </div>
+        <div class="material-context-actions">
+          <button id="material-context-origin" class="secondary-button" type="button">返回来源</button>
+          <button id="material-context-landscape" type="button">在景观中定位</button>
+          <button id="material-context-clear" class="context-clear" type="button" aria-label="清除当前材料">×</button>
+        </div>
+      </div>
+    </section>
     <main>
       <div class="workspace-page" data-page="database">
         <section class="catalog-summary" id="stats" aria-live="polite"></section>
@@ -79,7 +96,7 @@
       </section>
       <section class="panel workspace-page" data-page="landscape" hidden>
         <h2>论文 Fig. 1d：G–Ẽ 热膨胀景观</h2>
-        <p class="muted">论文原始散点与渐变背景。悬停查看材料；打开材料详情后，所选材料会以红色星标叠加。</p>
+        <p class="muted">论文原始散点与渐变背景。数据库选中的材料或结构预测结果会以红色星标定位，悬停可查看来源与数值。</p>
         <div class="landscape-wrap">
           <canvas id="landscape" width="1100" height="600" role="img" aria-label="论文 Fig. 1d 双对数热膨胀分类图"></canvas>
           <div id="landscape-tooltip" class="landscape-tooltip" hidden></div>
@@ -141,6 +158,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=0.9.0-ux1"></script>
   </body>
 </html>
