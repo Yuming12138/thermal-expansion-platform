@@ -344,9 +344,9 @@ function createStructureAxisViewer(container) {
   });
   viewer.setBackgroundColor("#ffffff", 0);
   const axes = [
-    {label: "X", color: "#d92d2d", end: {x: 2, y: 0, z: 0}, labelPosition: {x: 2.28, y: 0, z: 0}},
-    {label: "Y", color: "#239044", end: {x: 0, y: 2, z: 0}, labelPosition: {x: 0, y: 2.28, z: 0}},
-    {label: "Z", color: "#315fc8", end: {x: 0, y: 0, z: 2}, labelPosition: {x: 0, y: 0, z: 2.28}},
+    {label: "X", color: "#d92d2d", end: {x: 2, y: 0, z: 0}, unit: {x: 1, y: 0, z: 0}},
+    {label: "Y", color: "#239044", end: {x: 0, y: 2, z: 0}, unit: {x: 0, y: 1, z: 0}},
+    {label: "Z", color: "#315fc8", end: {x: 0, y: 0, z: 2}, unit: {x: 0, y: 0, z: 1}},
   ];
   axes.forEach(axis => {
     viewer.addArrow({
@@ -357,19 +357,42 @@ function createStructureAxisViewer(container) {
       radiusRatio: 2.2,
       mid: .76,
     });
-    viewer.addLabel(axis.label, {
-      position: axis.labelPosition,
-      fontColor: axis.color,
-      fontSize: 15,
-      font: "sans-serif",
-      backgroundOpacity: 0,
-      borderThickness: 0,
-      inFront: true,
-    });
+    const label = document.createElement("span");
+    label.className = `structure-axis-label structure-axis-label-${axis.label.toLowerCase()}`;
+    label.textContent = axis.label;
+    label.setAttribute("aria-hidden", "true");
+    axis.labelElement = label;
+    container.append(label);
   });
+  viewer.updateStructureAxisLabels = quaternion => {
+    if (!Array.isArray(quaternion) || quaternion.length < 4) return;
+    const [qx, qy, qz, qw] = quaternion.map(Number);
+    const norm = Math.hypot(qx, qy, qz, qw) || 1;
+    const q = {x: qx / norm, y: qy / norm, z: qz / norm, w: qw / norm};
+    const size = Math.min(container.clientWidth || 112, container.clientHeight || 112);
+    const projectionScale = size * .17;
+    const centerX = (container.clientWidth || size) / 2;
+    const centerY = (container.clientHeight || size) / 2;
+    const modelCenter = {x: 1, y: 1, z: 1};
+    const labelOffset = .38;
+    axes.forEach(axis => {
+      const x = axis.end.x + axis.unit.x * labelOffset - modelCenter.x;
+      const y = axis.end.y + axis.unit.y * labelOffset - modelCenter.y;
+      const z = axis.end.z + axis.unit.z * labelOffset - modelCenter.z;
+      const ix = q.w * x + q.y * z - q.z * y;
+      const iy = q.w * y + q.z * x - q.x * z;
+      const iz = q.w * z + q.x * y - q.y * x;
+      const iw = -q.x * x - q.y * y - q.z * z;
+      const rotatedX = ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y;
+      const rotatedY = iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z;
+      axis.labelElement.style.left = `${centerX + rotatedX * projectionScale}px`;
+      axis.labelElement.style.top = `${centerY - rotatedY * projectionScale}px`;
+    });
+  };
   viewer.zoomTo();
   viewer.zoom(1.5);
   viewer.render();
+  viewer.updateStructureAxisLabels([0, 0, 0, 1]);
   return viewer;
 }
 
@@ -468,6 +491,7 @@ function drawMaterialStructure(material, structure, structureView = null) {
       axisView[0], axisView[1], axisView[2], axisView[3],
       view[4], view[5], view[6], view[7],
     ], true);
+    materialStructureAxisViewer.updateStructureAxisLabels?.(view.slice(4, 8));
     axisContainer.dataset.rotation = view.slice(4, 8).map(value => Number(value).toFixed(6)).join(",");
   };
   materialStructureViewer.setViewChangeCallback(syncStructureAxisRotation);
@@ -586,6 +610,8 @@ function drawMaterialStructure(material, structure, structureView = null) {
         materialStructureViewer?.render();
         materialStructureAxisViewer?.resize();
         materialStructureAxisViewer?.render();
+        const axisView = materialStructureAxisViewer?.getView?.();
+        if (axisView) materialStructureAxisViewer.updateStructureAxisLabels?.(axisView.slice(4, 8));
       }, 80);
     });
     structureFullscreenHandlerInstalled = true;

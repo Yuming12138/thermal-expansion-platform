@@ -96,6 +96,10 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .structure-checkbox input { margin: 0; }
 .structure-axis-viewer { position: absolute; z-index: 3; left: 16px; bottom: 14px; width: 112px; height: 112px; overflow: hidden; border-radius: 10px; background: rgba(255,255,255,.56); pointer-events: none; }
 .structure-axis-viewer canvas { outline: none; pointer-events: none; }
+.structure-axis-label { position: absolute; z-index: 2; display: grid; place-items: center; width: 20px; height: 20px; color: var(--axis-label-color); font: 800 15px/1 Inter, "Segoe UI", Arial, sans-serif; text-align: center; text-shadow: -1px -1px 0 rgba(255,255,255,.98), 1px -1px 0 rgba(255,255,255,.98), -1px 1px 0 rgba(255,255,255,.98), 1px 1px 0 rgba(255,255,255,.98), 0 1px 4px rgba(36,48,64,.28); transform: translate(-50%, -50%); }
+.structure-axis-label-x { --axis-label-color: #c91f2b; }
+.structure-axis-label-y { --axis-label-color: #147d3b; }
+.structure-axis-label-z { --axis-label-color: #2456c5; }
 .structure-element-legend { position: absolute; z-index: 3; right: 20px; bottom: 18px; display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 110px); pointer-events: none; }
 .structure-element-legend span { display: grid; place-items: center; min-width: 42px; height: 42px; padding: 0 10px; border: 1px solid rgba(52,63,77,.12); border-radius: 999px; background: var(--element-color); color: #202733; font-size: .82rem; font-weight: 700; box-shadow: 0 2px 7px rgba(30,42,57,.12); }
 .structure-atom-info { min-height: 20px; margin: 8px 2px 0; color: #52687a; font-size: .76rem; }
