@@ -26,7 +26,8 @@ let agentAttachments = [];
 let materialStructureViewer = null;
 let materialStructureAxisViewer = null;
 let structureFullscreenHandlerInstalled = false;
-const LANDSCAPE_MARKER_SIZE = 3.6;
+const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
+const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
 
 function prepareHiDpiCanvas(canvas) {
   const width = Math.max(1, canvas.clientWidth);
@@ -762,7 +763,7 @@ function rgba(hex, opacity) {
 function drawLandscapeMarker(ctx, point, x, y, size, color) {
   ctx.fillStyle = color;
   ctx.strokeStyle = "rgba(255,255,255,.86)";
-  ctx.lineWidth = .8;
+  ctx.lineWidth = Math.max(.45, .8 * size / LANDSCAPE_REFERENCE_MARKER_SIZE);
   ctx.beginPath();
   if (point.source === "DFT") {
     const halfSide = size * Math.sqrt(Math.PI) / 2;
@@ -781,14 +782,14 @@ function drawLandscapeMarker(ctx, point, x, y, size, color) {
   ctx.stroke();
 }
 
-function drawSelectedStar(ctx, x, y) {
+function drawSelectedStar(ctx, x, y, scale = 1) {
   ctx.save();
   ctx.fillStyle = "#d7191c";
   ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2.2;
+  ctx.lineWidth = 2.2 * scale;
   ctx.beginPath();
   for (let index = 0; index < 10; index++) {
-    const radius = index % 2 ? 5 : 11;
+    const radius = (index % 2 ? 5 : 11) * scale;
     const angle = -Math.PI / 2 + index * Math.PI / 5;
     const px = x + Math.cos(angle) * radius;
     const py = y + Math.sin(angle) * radius;
@@ -800,6 +801,12 @@ function drawSelectedStar(ctx, x, y) {
   ctx.restore();
 }
 
+function landscapeMarkerScale(plotWidth, plotHeight) {
+  const widthScale = plotWidth / LANDSCAPE_REFERENCE_PLOT.width;
+  const heightScale = plotHeight / LANDSCAPE_REFERENCE_PLOT.height;
+  return Math.max(.38, Math.min(2.4, Math.sqrt(widthScale * heightScale)));
+}
+
 function drawLandscape() {
   if (!fig1dReference) return;
   const canvas = document.querySelector("#landscape");
@@ -808,6 +815,9 @@ function drawLandscape() {
   const margin = {left: 72, right: 22, top: 18, bottom: 64};
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
+  const markerScale = landscapeMarkerScale(plotWidth, plotHeight);
+  const markerSize = LANDSCAPE_REFERENCE_MARKER_SIZE * markerScale;
+  canvas.dataset.markerSize = markerSize.toFixed(3);
   const axis = fig1dReference.axis;
   const points = fig1dReference.points;
   const logXMin = Math.log10(axis.x_min);
@@ -851,8 +861,13 @@ function drawLandscape() {
     const pointX = x(point.x_gpa);
     const pointY = y(point.g_gpa);
     const color = point.classification === "NTE" ? "rgba(68,119,170,.78)" : "rgba(253,56,39,.72)";
-    drawLandscapeMarker(ctx, point, pointX, pointY, LANDSCAPE_MARKER_SIZE, color);
-    landscapeHitPoints.push({...point, canvasX: pointX, canvasY: pointY});
+    drawLandscapeMarker(ctx, point, pointX, pointY, markerSize, color);
+    landscapeHitPoints.push({
+      ...point,
+      canvasX: pointX,
+      canvasY: pointY,
+      hitRadius: Math.max(7, markerSize * 1.9),
+    });
   });
 
   if (selectedLandscapePoint && selectedLandscapePoint.x_gpa >= axis.x_min &&
@@ -860,8 +875,13 @@ function drawLandscape() {
       selectedLandscapePoint.g_gpa <= axis.y_max) {
     const selectedX = x(selectedLandscapePoint.x_gpa);
     const selectedY = y(selectedLandscapePoint.g_gpa);
-    drawSelectedStar(ctx, selectedX, selectedY);
-    landscapeHitPoints.unshift({...selectedLandscapePoint, canvasX: selectedX, canvasY: selectedY});
+    drawSelectedStar(ctx, selectedX, selectedY, markerScale);
+    landscapeHitPoints.unshift({
+      ...selectedLandscapePoint,
+      canvasX: selectedX,
+      canvasY: selectedY,
+      hitRadius: Math.max(10, 13 * markerScale),
+    });
   }
   ctx.restore();
 
@@ -898,9 +918,9 @@ function drawLandscape() {
   ctx.font = "13px Segoe UI";
   const legendX = margin.left + plotWidth - 195;
   const legendY = margin.top + plotHeight - 42;
-  drawLandscapeMarker(ctx, {source: "Exp."}, legendX, legendY, LANDSCAPE_MARKER_SIZE, "rgba(68,119,170,.9)");
+  drawLandscapeMarker(ctx, {source: "Exp."}, legendX, legendY, LANDSCAPE_REFERENCE_MARKER_SIZE, "rgba(68,119,170,.9)");
   ctx.fillText("NTE", legendX + 10, legendY + 4);
-  drawLandscapeMarker(ctx, {source: "DFT"}, legendX + 62, legendY, LANDSCAPE_MARKER_SIZE, "rgba(253,56,39,.85)");
+  drawLandscapeMarker(ctx, {source: "DFT"}, legendX + 62, legendY, LANDSCAPE_REFERENCE_MARKER_SIZE, "rgba(253,56,39,.85)");
   ctx.fillText("PTE", legendX + 72, legendY + 4);
   drawSelectedStar(ctx, legendX + 130, legendY);
   ctx.fillText("当前材料", legendX + 144, legendY + 4);
@@ -923,7 +943,7 @@ function setupLandscapeInteraction() {
         nearest = point;
       }
     });
-    if (!nearest || nearestDistance > 13) {
+    if (!nearest || nearestDistance > nearest.hitRadius) {
       tooltip.hidden = true;
       return;
     }
