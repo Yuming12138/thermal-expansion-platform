@@ -95,6 +95,22 @@ class ApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(materials.json()), 1)
         material_key = materials.json()[0]["material_key"]
 
+        element_stats = self.client.get("/api/materials/elements")
+        self.assertEqual(element_stats.status_code, 200)
+        self.assertEqual(element_stats.json()["material_count"], 6701)
+        self.assertGreater(element_stats.json()["elements"]["O"], 0)
+
+        exact_elements = self.client.get(
+            "/api/materials",
+            params={
+                "query": "BaCrSi4O10",
+                "elements": "Ba,Cr,Si,O",
+                "element_mode": "exact",
+            },
+        )
+        self.assertEqual(exact_elements.status_code, 200)
+        self.assertGreaterEqual(len(exact_elements.json()), 1)
+
         detail = self.client.get(f"/api/materials/{material_key}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["material"]["material_key"], material_key)

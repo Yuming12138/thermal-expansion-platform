@@ -2,10 +2,34 @@ from __future__ import annotations
 
 import json
 import math
+import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from te_platform.db.schema import connect_readonly_database
+
+
+ELEMENT_SYMBOLS = frozenset(
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn "
+    "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce "
+    "Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn "
+    "Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl "
+    "Mc Lv Ts Og".split()
+)
+ELEMENT_PATTERN = re.compile(r"[A-Z][a-z]?")
+
+
+def formula_elements(formula: str | None) -> frozenset[str]:
+    return frozenset(ELEMENT_PATTERN.findall(formula or ""))
+
+
+def _selected_elements(elements: list[str] | tuple[str, ...] | None) -> frozenset[str]:
+    selected = frozenset(str(element).strip() for element in elements or [] if str(element).strip())
+    invalid = sorted(selected - ELEMENT_SYMBOLS)
+    if invalid:
+        raise ValueError(f"Unknown element symbols: {', '.join(invalid)}")
+    return selected
 
 
 def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
@@ -98,11 +122,70 @@ def search_materials(
     release_slug: str,
     query: str = "",
     limit: int = 20,
+    *,
+    elements: list[str] | tuple[str, ...] | None = None,
+    element_mode: str = "contains",
 ) -> list[dict[str, Any]]:
     if limit < 1 or limit > 500:
         raise ValueError("limit must be between 1 and 500")
+    if element_mode not in {"contains", "exact"}:
+        raise ValueError("element_mode must be 'contains' or 'exact'")
+    selected = _selected_elements(elements)
     pattern = f"%{query.strip()}%"
     with connect_readonly_database(database_path) as connection:
+        if selected:
+            candidates = connection.execute(
+                """
+                SELECT m.id, m.material_key, m.formula, m.external_id
+                FROM dataset_releases dr
+                JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+                JOIN materials m ON m.id = dm.material_id
+                WHERE dr.slug = ?
+                  AND (
+                    ? = '%%'
+                    OR m.material_key LIKE ?
+                    OR m.formula LIKE ?
+                    OR m.external_id LIKE ?
+                  )
+                ORDER BY m.material_key
+                """,
+                (release_slug, pattern, pattern, pattern, pattern),
+            ).fetchall()
+            filtered_ids = [
+                int(row["id"])
+                for row in candidates
+                if (
+                    formula_elements(row["formula"]) == selected
+                    if element_mode == "exact"
+                    else selected <= formula_elements(row["formula"])
+                )
+            ][:limit]
+            if not filtered_ids:
+                return []
+            placeholders = ",".join("?" for _ in filtered_ids)
+            rows = connection.execute(
+                f"""
+                SELECT
+                    m.material_key,
+                    m.formula,
+                    m.external_id,
+                    MAX(CASE WHEN mp.name = 'K_GPa' THEN mp.numeric_value END) AS K_GPa,
+                    MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
+                    MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS E_tilde_GPa,
+                    MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
+                FROM dataset_releases dr
+                JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+                JOIN materials m ON m.id = dm.material_id
+                LEFT JOIN material_properties mp
+                  ON mp.dataset_release_id = dr.id
+                 AND mp.material_id = m.id
+                WHERE dr.slug = ? AND m.id IN ({placeholders})
+                GROUP BY m.id
+                ORDER BY m.material_key
+                """,
+                (release_slug, *filtered_ids),
+            ).fetchall()
+            return [dict(row) for row in rows]
         rows = connection.execute(
             """
             SELECT
@@ -133,6 +216,30 @@ def search_materials(
             (release_slug, pattern, pattern, pattern, pattern, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def material_element_statistics(
+    database_path: str | Path,
+    release_slug: str,
+) -> dict[str, Any]:
+    with connect_readonly_database(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT m.formula
+            FROM dataset_releases dr
+            JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+            JOIN materials m ON m.id = dm.material_id
+            WHERE dr.slug = ?
+            """,
+            (release_slug,),
+        ).fetchall()
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts.update(formula_elements(row["formula"]))
+    return {
+        "material_count": len(rows),
+        "elements": {element: counts.get(element, 0) for element in sorted(ELEMENT_SYMBOLS)},
+    }
 
 
 def material_detail(

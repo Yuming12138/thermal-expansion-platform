@@ -6,7 +6,7 @@ from pathlib import Path
 
 from te_platform.catalog.importer import import_dataset
 from te_platform.catalog.provenance import sha256_file
-from te_platform.catalog.queries import search_materials
+from te_platform.catalog.queries import material_element_statistics, search_materials
 from te_platform.db.schema import connect_database
 
 
@@ -58,6 +58,27 @@ class DatasetImporterTests(unittest.TestCase):
             found = search_materials(database, "test-v1", "ZrW2O8")
             self.assertEqual(len(found), 1)
             self.assertEqual(found[0]["external_id"], "mp-1")
+            oxygen_materials = search_materials(
+                database,
+                "test-v1",
+                elements=["O"],
+                element_mode="contains",
+            )
+            self.assertEqual(len(oxygen_materials), 2)
+            exact_zirconium_tungstate = search_materials(
+                database,
+                "test-v1",
+                elements=["Zr", "W", "O"],
+                element_mode="exact",
+            )
+            self.assertEqual(
+                [item["material_key"] for item in exact_zirconium_tungstate],
+                ["ZrW2O8-mp-1"],
+            )
+            element_stats = material_element_statistics(database, "test-v1")
+            self.assertEqual(element_stats["material_count"], 2)
+            self.assertEqual(element_stats["elements"]["O"], 2)
+            self.assertEqual(element_stats["elements"]["Zr"], 1)
 
 
 if __name__ == "__main__":

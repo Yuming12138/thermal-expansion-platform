@@ -15,13 +15,33 @@
       <span id="health-status" class="status">连接中</span>
     </header>
     <main>
-      <section class="stats" id="stats"></section>
+      <section class="catalog-summary" id="stats" aria-live="polite"></section>
       <section class="grid material-workspace">
         <article class="panel catalog-panel">
-          <h2>材料数据库</h2>
-          <div class="row">
+          <div class="catalog-panel-heading">
+            <div>
+              <h2>材料数据库</h2>
+              <p class="muted">按化学式、材料编号或组成元素检索 NTE 候选材料。</p>
+            </div>
+            <span id="material-view-summary" class="catalog-view-summary">正在加载…</span>
+          </div>
+          <div class="catalog-search-row">
             <input id="search-input" placeholder="化学式、MP ID或材料名称">
             <button id="search-button">检索</button>
+            <button id="periodic-toggle" class="secondary-button" type="button" aria-expanded="false" aria-controls="element-filter">元素周期表</button>
+          </div>
+          <div id="element-filter" class="element-filter" hidden>
+            <div class="element-filter-toolbar">
+              <div class="element-mode" role="group" aria-label="元素筛选方式">
+                <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
+                <button type="button" data-element-mode="exact">仅含所选元素</button>
+              </div>
+              <span id="element-selection" class="element-selection">尚未选择元素</span>
+              <button id="element-clear" class="secondary-button" type="button" disabled>清除</button>
+            </div>
+            <div class="periodic-table-scroll">
+              <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
+            </div>
           </div>
           <div id="material-results" class="table-wrap"></div>
         </article>

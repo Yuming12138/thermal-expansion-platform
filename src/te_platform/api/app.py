@@ -17,7 +17,12 @@ from te_platform.api.services import (
     ensure_workspace_database,
 )
 from te_platform.api.structures import inspect_structure
-from te_platform.catalog.queries import material_detail, material_landscape, search_materials
+from te_platform.catalog.queries import (
+    material_detail,
+    material_element_statistics,
+    material_landscape,
+    search_materials,
+)
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.curve_rom import optimize_curve_rom
 from te_platform.composites.material_pair import curve_materials, optimize_material_pair
@@ -288,9 +293,26 @@ def create_app(
     def materials(
         query: str = "",
         limit: int = Query(default=50, ge=1, le=500),
+        elements: str = Query(default="", max_length=256),
+        element_mode: Literal["contains", "exact"] = "contains",
     ) -> list[dict[str, object]]:
         ensure_catalog_database(catalog_db)
-        return search_materials(catalog_db, DEFAULT_RELEASE_SLUG, query, limit)
+        selected_elements = [
+            item[:1].upper() + item[1:].lower()
+            for item in (part.strip() for part in elements.split(","))
+            if item
+        ]
+        try:
+            return search_materials(
+                catalog_db,
+                DEFAULT_RELEASE_SLUG,
+                query,
+                limit,
+                elements=selected_elements,
+                element_mode=element_mode,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/materials/landscape")
     def landscape(
@@ -298,6 +320,11 @@ def create_app(
     ) -> list[dict[str, object]]:
         ensure_catalog_database(catalog_db)
         return material_landscape(catalog_db, DEFAULT_RELEASE_SLUG, limit)
+
+    @app.get("/api/materials/elements")
+    def material_elements() -> dict[str, object]:
+        ensure_catalog_database(catalog_db)
+        return material_element_statistics(catalog_db, DEFAULT_RELEASE_SLUG)
 
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:

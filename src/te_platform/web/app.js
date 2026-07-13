@@ -26,8 +26,36 @@ let agentAttachments = [];
 let materialStructureViewer = null;
 let materialStructureAxisViewer = null;
 let structureFullscreenHandlerInstalled = false;
+let catalogElementMode = "contains";
+let catalogElementCounts = {};
+let catalogSearchSequence = 0;
+const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
+
+const PERIODIC_MAIN_ROWS = [
+  ["H:1", "He:18"],
+  ["Li:1", "Be:2", "B:13", "C:14", "N:15", "O:16", "F:17", "Ne:18"],
+  ["Na:1", "Mg:2", "Al:13", "Si:14", "P:15", "S:16", "Cl:17", "Ar:18"],
+  ["K:1", "Ca:2", "Sc:3", "Ti:4", "V:5", "Cr:6", "Mn:7", "Fe:8", "Co:9", "Ni:10", "Cu:11", "Zn:12", "Ga:13", "Ge:14", "As:15", "Se:16", "Br:17", "Kr:18"],
+  ["Rb:1", "Sr:2", "Y:3", "Zr:4", "Nb:5", "Mo:6", "Tc:7", "Ru:8", "Rh:9", "Pd:10", "Ag:11", "Cd:12", "In:13", "Sn:14", "Sb:15", "Te:16", "I:17", "Xe:18"],
+  ["Cs:1", "Ba:2", "La–Lu:3", "Hf:4", "Ta:5", "W:6", "Re:7", "Os:8", "Ir:9", "Pt:10", "Au:11", "Hg:12", "Tl:13", "Pb:14", "Bi:15", "Po:16", "At:17", "Rn:18"],
+  ["Fr:1", "Ra:2", "Ac–Lr:3", "Rf:4", "Db:5", "Sg:6", "Bh:7", "Hs:8", "Mt:9", "Ds:10", "Rg:11", "Cn:12", "Nh:13", "Fl:14", "Mc:15", "Lv:16", "Ts:17", "Og:18"],
+];
+const LANTHANIDES = "La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu".split(" ");
+const ACTINIDES = "Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr".split(" ");
+const ELEMENT_FAMILIES = {
+  alkali: new Set("Li Na K Rb Cs Fr".split(" ")),
+  alkaline: new Set("Be Mg Ca Sr Ba Ra".split(" ")),
+  transition: new Set("Sc Ti V Cr Mn Fe Co Ni Cu Zn Y Zr Nb Mo Tc Ru Rh Pd Ag Cd Hf Ta W Re Os Ir Pt Au Hg Rf Db Sg Bh Hs Mt Ds Rg Cn".split(" ")),
+  "post-transition": new Set("Al Ga In Sn Tl Pb Bi Po Nh Fl Mc Lv".split(" ")),
+  metalloid: new Set("B Si Ge As Sb Te".split(" ")),
+  nonmetal: new Set("H C N O P S Se".split(" ")),
+  halogen: new Set("F Cl Br I At Ts".split(" ")),
+  noble: new Set("He Ne Ar Kr Xe Rn Og".split(" ")),
+  lanthanide: new Set(LANTHANIDES),
+  actinide: new Set(ACTINIDES),
+};
 
 function prepareHiDpiCanvas(canvas) {
   const width = Math.max(1, canvas.clientWidth);
@@ -55,19 +83,132 @@ async function loadStats() {
   const dataset = results[1];
   document.querySelector("#health-status").textContent = "服务正常";
   const counts = dataset.counts;
-  const cards = [
-    ["活跃材料", counts.materials],
-    ["结构文件", counts.structures],
-    ["属性值", counts.property_values],
-    ["数据版本", dataset.release.version],
-  ];
-  document.querySelector("#stats").innerHTML = cards.map(item =>
-    "<article class='stat'><span>" + item[0] + "</span><strong>" + item[1] + "</strong></article>"
-  ).join("");
+  document.querySelector("#stats").innerHTML =
+    "<div class='catalog-summary-main'><span>NTE 材料数据库</span><strong>" +
+    escapeHtml(counts.materials) + "</strong><span>个活跃材料</span></div>" +
+    "<div class='catalog-summary-meta'><span>结构 " + escapeHtml(counts.structures) +
+    "</span><span>属性值 " + escapeHtml(counts.property_values) +
+    "</span><span>数据版本 " + escapeHtml(dataset.release.version) + "</span></div>";
+}
+
+function elementFamily(symbol) {
+  return Object.entries(ELEMENT_FAMILIES)
+    .find(([, elements]) => elements.has(symbol))?.[0] || "post-transition";
+}
+
+function periodicElementButton(symbol, column, row) {
+  const count = Number(catalogElementCounts[symbol] || 0);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "periodic-element element-family-" + elementFamily(symbol);
+  button.style.gridColumn = String(column);
+  button.style.gridRow = String(row);
+  button.dataset.element = symbol;
+  button.textContent = symbol;
+  button.title = symbol + " · " + count + " 个材料";
+  button.setAttribute("aria-label", symbol + "，数据库中 " + count + " 个材料");
+  button.setAttribute("aria-pressed", String(selectedCatalogElements.has(symbol)));
+  if (selectedCatalogElements.has(symbol)) button.classList.add("selected");
+  if (!count) {
+    button.classList.add("unavailable");
+    button.disabled = true;
+  }
+  button.addEventListener("click", () => {
+    if (selectedCatalogElements.has(symbol)) selectedCatalogElements.delete(symbol);
+    else selectedCatalogElements.add(symbol);
+    renderPeriodicTable();
+    updateElementFilterSummary();
+    searchMaterials();
+  });
+  return button;
+}
+
+function renderPeriodicTable() {
+  const container = document.querySelector("#periodic-table");
+  container.replaceChildren();
+  PERIODIC_MAIN_ROWS.forEach((entries, rowIndex) => {
+    entries.forEach(entry => {
+      const [symbol, column] = entry.split(":");
+      if (symbol.includes("–")) {
+        const placeholder = document.createElement("span");
+        placeholder.className = "periodic-placeholder";
+        placeholder.style.gridColumn = column;
+        placeholder.style.gridRow = String(rowIndex + 1);
+        placeholder.textContent = symbol;
+        container.append(placeholder);
+      } else {
+        container.append(periodicElementButton(symbol, Number(column), rowIndex + 1));
+      }
+    });
+  });
+  const lanthanideLabel = document.createElement("span");
+  lanthanideLabel.className = "periodic-series-label";
+  lanthanideLabel.style.gridColumn = "1 / 4";
+  lanthanideLabel.style.gridRow = "8";
+  lanthanideLabel.textContent = "镧系";
+  container.append(lanthanideLabel);
+  LANTHANIDES.forEach((symbol, index) => container.append(periodicElementButton(symbol, index + 4, 8)));
+  const actinideLabel = document.createElement("span");
+  actinideLabel.className = "periodic-series-label";
+  actinideLabel.style.gridColumn = "1 / 4";
+  actinideLabel.style.gridRow = "9";
+  actinideLabel.textContent = "锕系";
+  container.append(actinideLabel);
+  ACTINIDES.forEach((symbol, index) => container.append(periodicElementButton(symbol, index + 4, 9)));
+}
+
+function updateElementFilterSummary() {
+  document.querySelectorAll("[data-element-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.elementMode === catalogElementMode);
+  });
+  const selected = [...selectedCatalogElements];
+  const modeText = catalogElementMode === "exact" ? "仅含" : "包含";
+  document.querySelector("#element-selection").textContent = selected.length
+    ? modeText + "：" + selected.join(" · ")
+    : "尚未选择元素";
+  document.querySelector("#element-clear").disabled = !selected.length;
+  document.querySelector("#periodic-toggle").textContent = selected.length
+    ? "元素周期表 (" + selected.length + ")"
+    : "元素周期表";
+}
+
+async function loadPeriodicElementCounts() {
+  const result = await api("/api/materials/elements");
+  catalogElementCounts = result.elements || {};
+  renderPeriodicTable();
+  updateElementFilterSummary();
+}
+
+function setupElementFilter() {
+  const filter = document.querySelector("#element-filter");
+  const toggle = document.querySelector("#periodic-toggle");
+  toggle.addEventListener("click", () => {
+    filter.hidden = !filter.hidden;
+    toggle.setAttribute("aria-expanded", String(!filter.hidden));
+  });
+  document.querySelectorAll("[data-element-mode]").forEach(button => {
+    button.addEventListener("click", () => {
+      catalogElementMode = button.dataset.elementMode;
+      updateElementFilterSummary();
+      if (selectedCatalogElements.size) searchMaterials();
+    });
+  });
+  document.querySelector("#element-clear").addEventListener("click", () => {
+    selectedCatalogElements.clear();
+    renderPeriodicTable();
+    updateElementFilterSummary();
+    searchMaterials();
+  });
+  updateElementFilterSummary();
 }
 
 function renderMaterials(items) {
   const container = document.querySelector("#material-results");
+  const filterDescription = selectedCatalogElements.size
+    ? " · " + (catalogElementMode === "exact" ? "仅含 " : "包含 ") + [...selectedCatalogElements].join("/")
+    : "";
+  document.querySelector("#material-view-summary").textContent =
+    "显示 " + items.length + " 条" + filterDescription;
   if (!items.length) {
     container.innerHTML = "<p class='muted'>没有匹配材料。</p>";
     return;
@@ -86,7 +227,23 @@ function renderMaterials(items) {
 
 async function searchMaterials() {
   const query = document.querySelector("#search-input").value;
-  renderMaterials(await api("/api/materials?limit=50&query=" + encodeURIComponent(query)));
+  const requestId = ++catalogSearchSequence;
+  document.querySelector("#material-view-summary").textContent = "正在检索…";
+  const params = new URLSearchParams({
+    limit: "50",
+    query,
+    elements: [...selectedCatalogElements].join(","),
+    element_mode: catalogElementMode,
+  });
+  try {
+    const items = await api("/api/materials?" + params.toString());
+    if (requestId === catalogSearchSequence) renderMaterials(items);
+  } catch (error) {
+    if (requestId !== catalogSearchSequence) return;
+    document.querySelector("#material-view-summary").textContent = "检索失败";
+    document.querySelector("#material-results").innerHTML =
+      "<p class='structure-error'>" + escapeHtml(error.message) + "</p>";
+  }
 }
 
 async function loadDetail(key) {
@@ -1340,13 +1497,15 @@ async function designZteComposite() {
 }
 
 async function initialize() {
+  setupElementFilter();
   try {
     const results = await Promise.all([
       loadStats(),
+      loadPeriodicElementCounts(),
       searchMaterials(),
       api("/static/fig1d-reference.json"),
     ]);
-    fig1dReference = results[2];
+    fig1dReference = results[3];
     drawLandscape();
   } catch (error) {
     document.querySelector("#health-status").textContent = "服务异常";
@@ -1354,6 +1513,9 @@ async function initialize() {
   }
   setupLandscapeInteraction();
   document.querySelector("#search-button").addEventListener("click", searchMaterials);
+  document.querySelector("#search-input").addEventListener("keydown", event => {
+    if (event.key === "Enter") searchMaterials();
+  });
   document.querySelector("#pte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#nte-search-button").addEventListener("click", () =>
