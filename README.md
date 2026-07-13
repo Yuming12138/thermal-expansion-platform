@@ -6,6 +6,10 @@
 
 本项目把课题中的物性计算、剪切—键合比判别、材料数据管理、NTE/PTE复合设计和Agent工具调用整合为一套可追溯平台。
 
+## 下载公开便携版
+
+普通用户建议直接从 [GitHub Releases](https://github.com/Yuming12138/thermal-expansion-platform/releases/latest) 下载 `thermal-expansion-platform-v0.9.0-portable.zip`（Windows）或 `.tar.gz`（macOS/Linux）。便携包内置6701条NTE候选材料、185条PTE参考材料、结构和QHA曲线，不依赖开发者电脑上的原始科研目录，也不包含开发者的Agent密钥。
+
 ## 当前已经落地
 
 - 独立Git仓库和模块化Python包；
@@ -45,13 +49,14 @@ var/                   便携数据目录：数据库、上传、任务、结果
 推荐先用 `uv sync` 创建项目环境；pymatgen、FastAPI、NumPy 等依赖会安装到当前项目环境中：
 
 ```powershell
-Set-Location 'D:\9.Project\9.NTE&PTE_dataset\14.thermal_expansion_platform'
+git clone https://github.com/Yuming12138/thermal-expansion-platform.git
+Set-Location '.\thermal-expansion-platform'
 uv sync
 uv run python -m te_platform init-db
 uv run python -m te_platform import-dataset
 uv run python -m te_platform import-pte-reference `
-  --source-root 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\PTE_materials' `
-  --summary-csv 'D:\9.Project\9.NTE&PTE_dataset\9.gruneisen_parameter\plot_alpha_M\PTE_materials_summary_alpha_neg_300K_v3.csv'
+  --source-root 'D:\path\to\PTE_materials' `
+  --summary-csv 'D:\path\to\PTE_materials_summary.csv'
 uv run python -m te_platform dataset-stats
 uv run python -m te_platform search-materials --query Zr --limit 10
 uv run python -m te_platform material-detail 'CsNO3-mp-561851'
