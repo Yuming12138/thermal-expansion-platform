@@ -24,6 +24,7 @@ let landscapeHitPoints = [];
 let agentHistory = [];
 let agentAttachments = [];
 let materialStructureViewer = null;
+let materialStructureAxisViewer = null;
 let structureFullscreenHandlerInstalled = false;
 const LANDSCAPE_MARKER_SIZE = 3.6;
 
@@ -138,8 +139,8 @@ function renderStructureViewer(structures) {
     "<option value='2'>2×2×2</option><option value='3'>3×3×3</option></select></label>" +
     "<label class='structure-checkbox'><input id='structure-unit-cell' type='checkbox' checked>显示晶胞边框</label>" +
     "</div>" +
-    "<div class='structure-axis' aria-label='坐标轴方向'><span class='axis-x'>X</span>" +
-    "<span class='axis-y'>Y</span><span class='axis-z'>Z</span></div>" +
+    "<div id='structure-axis-viewer' class='structure-axis-viewer' role='img' " +
+    "aria-label='随晶体旋转的三维坐标轴'></div>" +
     "<div id='structure-element-legend' class='structure-element-legend' aria-label='元素图例'></div>" +
     "</div>" +
     "<p id='structure-atom-info' class='structure-atom-info'>点击原子可查看元素和笛卡尔坐标。</p>" +
@@ -330,6 +331,48 @@ function addStructureUnitCell(viewer, lattice) {
   });
 }
 
+function createStructureAxisViewer(container) {
+  materialStructureAxisViewer?.clear?.();
+  container.replaceChildren();
+  const viewer = window.$3Dmol.createViewer(container, {
+    backgroundColor: "#ffffff",
+    backgroundAlpha: 0,
+    antialias: true,
+    disableFog: true,
+    orthographic: true,
+    minimumZoomToDistance: 2.2,
+  });
+  viewer.setBackgroundColor("#ffffff", 0);
+  const axes = [
+    {label: "X", color: "#d92d2d", end: {x: 2, y: 0, z: 0}, labelPosition: {x: 2.28, y: 0, z: 0}},
+    {label: "Y", color: "#239044", end: {x: 0, y: 2, z: 0}, labelPosition: {x: 0, y: 2.28, z: 0}},
+    {label: "Z", color: "#315fc8", end: {x: 0, y: 0, z: 2}, labelPosition: {x: 0, y: 0, z: 2.28}},
+  ];
+  axes.forEach(axis => {
+    viewer.addArrow({
+      start: {x: 0, y: 0, z: 0},
+      end: axis.end,
+      color: axis.color,
+      radius: .075,
+      radiusRatio: 2.2,
+      mid: .76,
+    });
+    viewer.addLabel(axis.label, {
+      position: axis.labelPosition,
+      fontColor: axis.color,
+      fontSize: 15,
+      font: "sans-serif",
+      backgroundOpacity: 0,
+      borderThickness: 0,
+      inFront: true,
+    });
+  });
+  viewer.zoomTo();
+  viewer.zoom(1.5);
+  viewer.render();
+  return viewer;
+}
+
 function structureViewModelAtoms(structureView) {
   return structureView.atoms.map(atom => ({
     elem: atom.element,
@@ -350,6 +393,7 @@ function structureViewModelAtoms(structureView) {
 
 function drawMaterialStructure(material, structure, structureView = null) {
   const container = document.querySelector("#structure-viewer");
+  const axisContainer = document.querySelector("#structure-axis-viewer");
   if (!container || !structure?.content) return;
   const summary = document.querySelector("#material-structure-summary");
   const atomInfo = document.querySelector("#structure-atom-info");
@@ -407,6 +451,26 @@ function drawMaterialStructure(material, structure, structureView = null) {
     console.error(error);
     return;
   }
+
+  try {
+    materialStructureAxisViewer = axisContainer
+      ? createStructureAxisViewer(axisContainer)
+      : null;
+  } catch (error) {
+    materialStructureAxisViewer = null;
+    console.warn("三维坐标轴渲染失败。", error);
+  }
+
+  const syncStructureAxisRotation = view => {
+    if (!materialStructureAxisViewer || !axisContainer || !Array.isArray(view) || view.length < 8) return;
+    const axisView = materialStructureAxisViewer.getView();
+    materialStructureAxisViewer.setView([
+      axisView[0], axisView[1], axisView[2], axisView[3],
+      view[4], view[5], view[6], view[7],
+    ], true);
+    axisContainer.dataset.rotation = view.slice(4, 8).map(value => Number(value).toFixed(6)).join(",");
+  };
+  materialStructureViewer.setViewChangeCallback(syncStructureAxisRotation);
 
   const applyDefaultStructureView = () => {
     materialStructureViewer.setView?.([0, 0, 0, 0, 0, 0, 0, 1]);
@@ -520,6 +584,8 @@ function drawMaterialStructure(material, structure, structureView = null) {
       window.setTimeout(() => {
         materialStructureViewer?.resize();
         materialStructureViewer?.render();
+        materialStructureAxisViewer?.resize();
+        materialStructureAxisViewer?.render();
       }, 80);
     });
     structureFullscreenHandlerInstalled = true;
