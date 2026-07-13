@@ -14,10 +14,19 @@
       </div>
       <span id="health-status" class="status">连接中</span>
     </header>
+    <nav class="workspace-nav" aria-label="科研工作区导航">
+      <div class="workspace-nav-inner">
+        <a href="/database" data-page-link="database" aria-current="page"><span>01</span>材料数据库</a>
+        <a href="/predict" data-page-link="predict"><span>02</span>结构预测</a>
+        <a href="/landscape" data-page-link="landscape"><span>03</span>热膨胀景观</a>
+        <a href="/zte" data-page-link="zte"><span>04</span>ZTE 复合设计</a>
+      </div>
+    </nav>
     <main>
-      <section class="catalog-summary" id="stats" aria-live="polite"></section>
-      <section class="grid material-workspace">
-        <article class="panel catalog-panel">
+      <div class="workspace-page" data-page="database">
+        <section class="catalog-summary" id="stats" aria-live="polite"></section>
+        <section class="grid material-workspace">
+          <article class="panel catalog-panel">
           <div class="catalog-panel-heading">
             <div>
               <h2>材料数据库</h2>
@@ -25,12 +34,11 @@
             </div>
             <span id="material-view-summary" class="catalog-view-summary">正在加载…</span>
           </div>
-          <div class="catalog-search-row">
-            <input id="search-input" placeholder="化学式、MP ID或材料名称">
-            <button id="search-button">检索</button>
-            <button id="periodic-toggle" class="secondary-button" type="button" aria-expanded="false" aria-controls="element-filter">元素周期表</button>
-          </div>
-          <div id="element-filter" class="element-filter" hidden>
+            <div class="catalog-search-row">
+              <input id="search-input" placeholder="化学式、MP ID或材料名称">
+              <button id="search-button">检索</button>
+            </div>
+            <div id="element-filter" class="element-filter">
             <div class="element-filter-toolbar">
               <div class="element-mode" role="group" aria-label="元素筛选方式">
                 <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
@@ -43,14 +51,15 @@
               <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
             </div>
           </div>
-          <div id="material-results" class="table-wrap"></div>
-        </article>
-        <article class="panel detail-panel">
-          <h2>材料详情</h2>
-          <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
-        </article>
-      </section>
-      <section class="panel prediction-workbench">
+            <div id="material-results" class="table-wrap"></div>
+          </article>
+          <article class="panel detail-panel">
+            <h2>材料详情</h2>
+            <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
+          </article>
+        </section>
+      </div>
+      <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
         <h2>上传结构与分级预测</h2>
         <p class="muted">上传 CIF 或 POSCAR 后选择计算层级。快速预测适合初筛；精准预测计算完整弹性张量；QHA 直接给出热膨胀曲线。</p>
         <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
@@ -68,7 +77,7 @@
         </div>
         <div id="prediction-result" class="prediction-result muted">尚未开始计算。</div>
       </section>
-      <section class="panel">
+      <section class="panel workspace-page" data-page="landscape" hidden>
         <h2>论文 Fig. 1d：G–Ẽ 热膨胀景观</h2>
         <p class="muted">论文原始散点与渐变背景。悬停查看材料；打开材料详情后，所选材料会以红色星标叠加。</p>
         <div class="landscape-wrap">
@@ -77,7 +86,7 @@
         </div>
         <p id="landscape-selection" class="curve-note">尚未选择材料。</p>
       </section>
-      <section class="panel">
+      <section class="panel workspace-page" data-page="zte" hidden>
         <h2>ZTE 复合材料曲线设计</h2>
         <p class="muted">从独立 PTE/NTE 数据集中选择两种材料，在目标温区内优化一个固定体积分数，使混合热膨胀曲线尽可能接近目标值。</p>
         <div class="composite-pickers">

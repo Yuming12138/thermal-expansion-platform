@@ -157,6 +157,10 @@ def create_app(
     agent_tools = default_registry(catalog_db, workspace_db)
 
     @app.get("/", include_in_schema=False)
+    @app.get("/database", include_in_schema=False)
+    @app.get("/predict", include_in_schema=False)
+    @app.get("/landscape", include_in_schema=False)
+    @app.get("/zte", include_in_schema=False)
     def web_home() -> FileResponse:
         return FileResponse(WEB_DIRECTORY / "index.html")
 

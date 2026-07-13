@@ -56,6 +56,12 @@ const ELEMENT_FAMILIES = {
   lanthanide: new Set(LANTHANIDES),
   actinide: new Set(ACTINIDES),
 };
+const WORKSPACE_PAGES = {
+  database: {path: "/database", title: "材料数据库"},
+  predict: {path: "/predict", title: "结构预测"},
+  landscape: {path: "/landscape", title: "热膨胀景观"},
+  zte: {path: "/zte", title: "ZTE 复合设计"},
+};
 
 function prepareHiDpiCanvas(canvas) {
   const width = Math.max(1, canvas.clientWidth);
@@ -167,9 +173,6 @@ function updateElementFilterSummary() {
     ? modeText + "：" + selected.join(" · ")
     : "尚未选择元素";
   document.querySelector("#element-clear").disabled = !selected.length;
-  document.querySelector("#periodic-toggle").textContent = selected.length
-    ? "元素周期表 (" + selected.length + ")"
-    : "元素周期表";
 }
 
 async function loadPeriodicElementCounts() {
@@ -180,12 +183,6 @@ async function loadPeriodicElementCounts() {
 }
 
 function setupElementFilter() {
-  const filter = document.querySelector("#element-filter");
-  const toggle = document.querySelector("#periodic-toggle");
-  toggle.addEventListener("click", () => {
-    filter.hidden = !filter.hidden;
-    toggle.setAttribute("aria-expanded", String(!filter.hidden));
-  });
   document.querySelectorAll("[data-element-mode]").forEach(button => {
     button.addEventListener("click", () => {
       catalogElementMode = button.dataset.elementMode;
@@ -200,6 +197,49 @@ function setupElementFilter() {
     searchMaterials();
   });
   updateElementFilterSummary();
+}
+
+function workspacePageFromPath(pathname = window.location.pathname) {
+  return Object.entries(WORKSPACE_PAGES)
+    .find(([, page]) => page.path === pathname)?.[0] || "database";
+}
+
+function showWorkspacePage(pageName, {updateHistory = false} = {}) {
+  const selectedPage = WORKSPACE_PAGES[pageName] ? pageName : "database";
+  const page = WORKSPACE_PAGES[selectedPage];
+  document.querySelectorAll("[data-page]").forEach(section => {
+    section.hidden = section.dataset.page !== selectedPage;
+  });
+  document.querySelectorAll("[data-page-link]").forEach(link => {
+    if (link.dataset.pageLink === selectedPage) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  document.title = page.title + " · 热膨胀材料智能计算与设计平台";
+  if (updateHistory && window.location.pathname !== page.path) {
+    window.history.pushState({page: selectedPage}, "", page.path);
+  }
+  window.requestAnimationFrame(() => {
+    const activePage = document.querySelector(`[data-page='${selectedPage}']`);
+    activePage?.querySelectorAll("canvas").forEach(canvas => canvas.teRedraw?.());
+    materialStructureViewer?.resize?.();
+    materialStructureViewer?.render?.();
+    materialStructureAxisViewer?.resize?.();
+    materialStructureAxisViewer?.render?.();
+  });
+}
+
+function setupWorkspaceNavigation() {
+  document.querySelectorAll("[data-page-link]").forEach(link => {
+    link.addEventListener("click", event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showWorkspacePage(link.dataset.pageLink, {updateHistory: true});
+      const navigation = document.querySelector(".workspace-nav");
+      window.scrollTo({top: navigation.offsetTop, behavior: "auto"});
+    });
+  });
+  window.addEventListener("popstate", () => showWorkspacePage(workspacePageFromPath()));
+  showWorkspacePage(workspacePageFromPath());
 }
 
 function renderMaterials(items) {
@@ -1497,6 +1537,7 @@ async function designZteComposite() {
 }
 
 async function initialize() {
+  setupWorkspaceNavigation();
   setupElementFilter();
   try {
     const results = await Promise.all([
