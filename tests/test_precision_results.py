@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,10 +12,12 @@ from te_platform.precision.results import (
 
 
 class PrecisionResultsTests(unittest.TestCase):
+    @unittest.skipUnless(
+        os.environ.get("TEP_REFERENCE_PRECISION_RESULT"),
+        "Set TEP_REFERENCE_PRECISION_RESULT to run the workstation reference-result test",
+    )
     def test_parses_known_bacrsio_result(self) -> None:
-        result = parse_precision_results(
-            r"D:\9.Project\10.recalcu_elastic_nte\1.Gaoqilong_data\1.Gaoqilong\1.ordered\BaCrSi4O10"
-        )
+        result = parse_precision_results(os.environ["TEP_REFERENCE_PRECISION_RESULT"])
         self.assertTrue(result.elastic_positive_definite)
         self.assertEqual(len(result.elastic_tensor_gpa), 6)
         self.assertGreater(result.elastic_min_eigenvalue_gpa, 0)

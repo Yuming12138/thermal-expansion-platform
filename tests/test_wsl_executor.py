@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precis
 
 
 class WslExecutorTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "WSL command construction is Windows-specific")
     def test_builds_fixed_command_for_prepared_task(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             work = Path(temp)
