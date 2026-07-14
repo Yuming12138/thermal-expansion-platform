@@ -67,8 +67,8 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.9.0-ux1", home.text)
-        for workspace_path in ["/database", "/predict", "/landscape", "/zte"]:
+        self.assertIn("/static/app.js?v=0.10.0", home.text)
+        for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
             self.assertIn("科研工作区导航", workspace_page.text)
@@ -83,6 +83,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health.json()["catalog_database"], "catalog-v1.sqlite")
         self.assertEqual(health.json()["workspace_database"], "workspace.sqlite")
         self.assertTrue(self.workspace_database.is_file())
+
+        about = self.client.get("/api/about")
+        self.assertEqual(about.status_code, 200)
+        self.assertEqual(about.json()["software"]["version"], "0.10.0")
+        self.assertEqual(about.json()["datasets"]["catalog_materials"], 6886)
+        self.assertIn("160.21766208", about.json()["descriptor"]["bonding_modulus"])
 
         dataset = self.client.get("/api/datasets/current")
         self.assertEqual(dataset.status_code, 200)
@@ -101,7 +107,8 @@ class ApiTests(unittest.TestCase):
         materials = self.client.get("/api/materials", params={"query": "BaCrSi4O10"})
         self.assertEqual(materials.status_code, 200)
         self.assertGreaterEqual(len(materials.json()), 1)
-        material_key = materials.json()[0]["material_key"]
+        material_summary = materials.json()[0]
+        material_key = material_summary["material_key"]
 
         element_stats = self.client.get("/api/materials/elements")
         self.assertEqual(element_stats.status_code, 200)
@@ -122,6 +129,15 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/materials/{material_key}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["material"]["material_key"], material_key)
+        properties = detail.json()["properties"]
+        expected_bonding = (
+            160.21766208
+            * abs(properties["E_coh_eV_per_atom"]["value"])
+            / (properties["AAV"]["value"] * properties["avg_cn"]["value"])
+        )
+        self.assertAlmostEqual(properties["E_tilde_GPa"]["value"], expected_bonding)
+        self.assertAlmostEqual(material_summary["E_tilde_GPa"], expected_bonding)
+        self.assertEqual(material_summary["E_tilde_source"], "paper_definition_UV_over_n")
         structure = detail.json()["structures"][0]
         self.assertEqual(structure["format"], "POSCAR")
         self.assertGreater(len(structure["content"]), 100)

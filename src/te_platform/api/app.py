@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from te_platform import __version__
 from te_platform.api.services import (
     active_dataset_summary,
     ensure_catalog_database,
@@ -18,6 +19,7 @@ from te_platform.api.services import (
 )
 from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import (
+    dataset_summary,
     material_detail,
     material_element_statistics,
     material_landscape,
@@ -30,6 +32,7 @@ from te_platform.config import (
     DEFAULT_PTE_RELEASE_SLUG,
     DEFAULT_RELEASE_SLUG,
     catalog_database_path,
+    copyright_owner,
     workspace_database_path,
 )
 from te_platform.screening.fast_sbr import fast_screen_sbr
@@ -134,16 +137,17 @@ def create_app(
         workspace_database = database
     catalog_db = catalog_database or catalog_database_path()
     workspace_db = workspace_database or workspace_database_path()
+    allow_catalog_download = catalog_database is None and database is None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        ensure_catalog_database(catalog_db)
+        ensure_catalog_database(catalog_db, allow_download=allow_catalog_download)
         ensure_workspace_database(workspace_db)
         yield
 
     app = FastAPI(
         title="热膨胀材料智能计算与设计平台",
-        version="0.8.0",
+        version=__version__,
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -161,6 +165,7 @@ def create_app(
     @app.get("/predict", include_in_schema=False)
     @app.get("/landscape", include_in_schema=False)
     @app.get("/zte", include_in_schema=False)
+    @app.get("/about", include_in_schema=False)
     def web_home() -> FileResponse:
         return FileResponse(WEB_DIRECTORY / "index.html")
 
@@ -173,6 +178,41 @@ def create_app(
             "material_count": summary["counts"]["materials"],
             "catalog_database": catalog_db.name,
             "workspace_database": workspace_db.name,
+        }
+
+    @app.get("/api/about")
+    def about() -> dict[str, object]:
+        nte = active_dataset_summary(catalog_db)
+        pte = dataset_summary(catalog_db, DEFAULT_PTE_RELEASE_SLUG)
+        return {
+            "software": {
+                "name_zh": "热膨胀材料智能计算与设计平台",
+                "name_en": "Thermal Expansion Materials Platform",
+                "version": __version__,
+                "copyright_owner": copyright_owner(),
+                "repository": "https://github.com/Yuming12138/thermal-expansion-platform",
+            },
+            "descriptor": {
+                "name": "剪切—键合描述符",
+                "formula": "xi = G/E_tilde",
+                "bonding_modulus": "E_tilde = U_V/n = 160.21766208*abs(E_coh)/(AAV*avg_cn)",
+                "formal_boundary": 2.84151,
+            },
+            "datasets": {
+                "nte": nte["release"],
+                "nte_materials": nte["counts"]["materials"],
+                "pte": pte["release"],
+                "pte_materials": pte["counts"]["materials"],
+                "catalog_materials": nte["counts"]["materials"] + pte["counts"]["materials"],
+            },
+            "technology": [
+                "FastAPI", "SQLite", "pymatgen/CrystalNN", "3Dmol.js",
+                "ALIGNN", "MatterSim", "Phonopy", "VASPKIT",
+            ],
+            "scientific_scope": (
+                "G/E_tilde用于固定相、声子驱动的体热膨胀符号筛选；"
+                "精确alpha(T)需要QHA或更高层级计算。"
+            ),
         }
 
     @app.get("/api/agent/tools")
@@ -448,7 +488,7 @@ def create_app(
             "bytes": len(content),
             "inspection": result.to_dict(),
             "next_step": (
-                "Use the ALIGNN worker to predict G, then calculate E_tilde "
+                "Use the ALIGNN worker to predict G, then calculate paper-defined E_tilde=U_V/n "
                 "and return the fast SBR result."
             ),
         }
@@ -483,7 +523,7 @@ def create_app(
             "alignn": prediction.to_dict(),
             "next_step": (
                 "Run MatterSim cohesive-energy and CrystalNN coordination workers "
-                "to calculate E_tilde and the fast SBR result."
+                "to calculate paper-defined E_tilde=U_V/n and the fast SBR result."
             ),
         }
 

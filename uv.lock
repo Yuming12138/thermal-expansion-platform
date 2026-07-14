@@ -1625,7 +1625,7 @@ wheels = [
 
 [[package]]
 name = "thermal-expansion-platform"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

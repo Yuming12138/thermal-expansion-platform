@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.9.0-ux1">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0">
   </head>
   <body>
     <header>
@@ -20,6 +20,7 @@
         <a href="/predict" data-page-link="predict"><span>02</span>结构预测</a>
         <a href="/landscape" data-page-link="landscape"><span>03</span>热膨胀景观</a>
         <a href="/zte" data-page-link="zte"><span>04</span>ZTE 复合设计</a>
+        <a href="/about" data-page-link="about"><span>05</span>关于软件</a>
       </div>
     </nav>
     <section id="material-context" class="material-context" aria-label="当前研究材料" aria-live="polite" hidden>
@@ -126,6 +127,48 @@
         </div>
         <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
       </section>
+      <section class="workspace-page about-page" data-page="about" hidden>
+        <article class="panel about-hero">
+          <div>
+            <p class="eyebrow about-eyebrow">Software Information</p>
+            <h2 id="about-name">热膨胀材料智能计算与设计平台</h2>
+            <p id="about-scope" class="muted">正在读取软件与科学边界信息…</p>
+          </div>
+          <div class="about-version-block">
+            <span>当前版本</span>
+            <strong id="about-version">—</strong>
+          </div>
+        </article>
+        <section class="about-grid">
+          <article class="panel">
+            <h2>软件登记信息</h2>
+            <dl class="about-list">
+              <div><dt>英文名称</dt><dd id="about-name-en">—</dd></div>
+              <div><dt>著作权人/开发单位</dt><dd id="about-owner">—</dd></div>
+              <div><dt>源代码仓库</dt><dd><a id="about-repository" href="#" target="_blank" rel="noreferrer">—</a></dd></div>
+            </dl>
+          </article>
+          <article class="panel">
+            <h2>内置数据版本</h2>
+            <dl class="about-list">
+              <div><dt>NTE 候选材料</dt><dd id="about-nte">—</dd></div>
+              <div><dt>PTE 参考材料</dt><dd id="about-pte">—</dd></div>
+              <div><dt>目录材料总数</dt><dd id="about-total">—</dd></div>
+            </dl>
+          </article>
+          <article class="panel">
+            <h2>核心科学定义</h2>
+            <div class="about-formula"><span>键合模量</span><strong>Ẽ = U<sub>V</sub> / n</strong></div>
+            <div class="about-formula"><span>剪切—键合比</span><strong>ξ = G / Ẽ</strong></div>
+            <p id="about-descriptor" class="curve-note">—</p>
+          </article>
+          <article class="panel">
+            <h2>技术组成</h2>
+            <div id="about-technology" class="about-tags"></div>
+            <p class="curve-note">第三方组件的许可证与归属见 NOTICE-THIRD-PARTY.md。</p>
+          </article>
+        </section>
+      </section>
     </main>
     <aside id="agent-widget" class="agent-widget" aria-label="热膨胀材料 Agent">
       <div class="agent-header">
@@ -158,6 +201,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.9.0-ux1"></script>
+    <script src="/static/app.js?v=0.10.0"></script>
   </body>
 </html>

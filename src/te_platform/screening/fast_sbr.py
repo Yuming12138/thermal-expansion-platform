@@ -58,13 +58,35 @@ def calculate_bonding_modulus(
         raise ValueError("Average coordination number must be positive")
 
     volume_per_atom = cell_volume_a3 / atom_count
+    return calculate_bonding_modulus_from_atomic_volume(
+        cohesive_energy_ev_per_atom,
+        volume_per_atom,
+        average_coordination_number,
+    )
+
+
+def calculate_bonding_modulus_from_atomic_volume(
+    cohesive_energy_ev_per_atom: float,
+    volume_per_atom_a3: float,
+    average_coordination_number: float,
+) -> BondingModulusResult:
+    """Return the paper-defined bonding modulus E_tilde = U_V / n.
+
+    U_V is the volumetric cohesive-energy density in GPa, obtained from the
+    cohesive energy per atom divided by the average atomic volume.
+    """
+    if volume_per_atom_a3 <= 0:
+        raise ValueError("Volume per atom must be positive")
+    if average_coordination_number <= 0:
+        raise ValueError("Average coordination number must be positive")
+
     cohesive_energy_density = (
-        abs(cohesive_energy_ev_per_atom) / volume_per_atom * EV_PER_A3_TO_GPA
+        abs(cohesive_energy_ev_per_atom) / volume_per_atom_a3 * EV_PER_A3_TO_GPA
     )
     bonding_modulus = cohesive_energy_density / average_coordination_number
     return BondingModulusResult(
         cohesive_energy_ev_per_atom=cohesive_energy_ev_per_atom,
-        volume_per_atom_a3=volume_per_atom,
+        volume_per_atom_a3=volume_per_atom_a3,
         average_coordination_number=average_coordination_number,
         cohesive_energy_density_gpa=cohesive_energy_density,
         bonding_modulus_gpa=bonding_modulus,

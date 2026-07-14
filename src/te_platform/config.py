@@ -14,6 +14,7 @@ DEFAULT_AGENT_ENV_PATH = PROJECT_ROOT / "var" / "config" / "agent.env"
 DEFAULT_COMPUTE_ENV_PATH = PROJECT_ROOT / "var" / "config" / "compute.env"
 DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
 DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
+DEFAULT_COPYRIGHT_OWNER = "负热膨胀材料研究课题组"
 DEFAULT_DATASET_PATH = (
     PROJECT_ROOT
     / "datasets"
@@ -44,6 +45,10 @@ def workspace_database_path() -> Path:
             os.environ.get("TEP_DATABASE_PATH", DEFAULT_WORKSPACE_DATABASE_PATH),
         )
     )
+
+
+def copyright_owner() -> str:
+    return os.environ.get("TEP_COPYRIGHT_OWNER", DEFAULT_COPYRIGHT_OWNER).strip()
 
 
 @dataclass(frozen=True)

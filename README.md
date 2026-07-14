@@ -2,13 +2,15 @@
 
 英文仓库名：`thermal-expansion-platform`
 
-当前版本：`0.9.0`（6701条活跃数据库、三维晶体结构、快速筛选、精确任务、ZTE设计与受控Agent）
+当前版本：`0.10.0`（6701条活跃数据库、三维晶体结构、快速筛选、精确任务、ZTE设计与受控Agent）
 
 本项目把课题中的物性计算、剪切—键合比判别、材料数据管理、NTE/PTE复合设计和Agent工具调用整合为一套可追溯平台。
 
 ## 下载公开便携版
 
-普通用户建议直接从 [GitHub Releases](https://github.com/Yuming12138/thermal-expansion-platform/releases/latest) 下载 `thermal-expansion-platform-v0.9.0-portable.zip`（Windows）或 `.tar.gz`（macOS/Linux）。便携包内置6701条NTE候选材料、185条PTE参考材料、结构和QHA曲线，不依赖开发者电脑上的原始科研目录，也不包含开发者的Agent密钥。
+普通用户建议直接从 [GitHub Releases](https://github.com/Yuming12138/thermal-expansion-platform/releases/latest) 下载最新的 `thermal-expansion-platform-*-portable.zip`（Windows）或 `.tar.gz`（macOS/Linux）。便携包内置6701条NTE候选材料、185条PTE参考材料、结构和QHA曲线，不依赖开发者电脑上的原始科研目录，也不包含开发者的Agent密钥。
+
+从源码启动时，如果 `var/releases/catalog-v1.sqlite` 不存在，平台会自动下载公开便携包、校验SHA256，并只提取目录数据库。可以通过 `TEP_CATALOG_BUNDLE_URL` 和 `TEP_CATALOG_BUNDLE_CHECKSUM_URL` 指向镜像地址；离线环境则应直接下载完整便携包。
 
 ## 当前已经落地
 
@@ -17,7 +19,7 @@
 - 独立的185条PTE参考材料版本 `pte-reference-185-v1`，每条均保存POSCAR和0–990 K完整QHA热膨胀曲线；
 - SQLite数据模型、数据集版本和来源记录；
 - JSON/JSON.GZ数据导入、唯一性和结构完整性校验；
-- 剪切—键合比 `xi = G / E_tilde` 判别；
+- 剪切—键合比 `xi = G / E_tilde` 判别，其中 `E_tilde = U_V/n = 160.21766208*abs(E_coh)/(AAV*avg_cn)`；
 - ALIGNN预测G、快速E_tilde计算及带误差区间的上传结构预筛；
 - ALIGNN快速预筛链路及模型误差区间；运行时间取决于硬件与模型是否常驻，不作为对外性能承诺；
 - 两相ROM零热膨胀体积分数计算；

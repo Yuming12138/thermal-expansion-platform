@@ -62,6 +62,7 @@ const WORKSPACE_PAGES = {
   predict: {path: "/predict", title: "结构预测"},
   landscape: {path: "/landscape", title: "热膨胀景观"},
   zte: {path: "/zte", title: "ZTE 复合设计"},
+  about: {path: "/about", title: "关于软件"},
 };
 
 function prepareHiDpiCanvas(canvas) {
@@ -96,6 +97,31 @@ async function loadStats() {
     "<div class='catalog-summary-meta'><span>结构 " + escapeHtml(counts.structures) +
     "</span><span>属性值 " + escapeHtml(counts.property_values) +
     "</span><span>数据版本 " + escapeHtml(dataset.release.version) + "</span></div>";
+}
+
+async function loadAbout() {
+  const payload = await api("/api/about");
+  const software = payload.software;
+  const datasets = payload.datasets;
+  document.querySelector("#about-name").textContent = software.name_zh;
+  document.querySelector("#about-name-en").textContent = software.name_en;
+  document.querySelector("#about-version").textContent = "v" + software.version;
+  document.querySelector("#about-owner").textContent = software.copyright_owner;
+  const repository = document.querySelector("#about-repository");
+  repository.href = software.repository;
+  repository.textContent = software.repository.replace("https://github.com/", "");
+  document.querySelector("#about-nte").textContent =
+    datasets.nte_materials + " 条 · " + datasets.nte.version;
+  document.querySelector("#about-pte").textContent =
+    datasets.pte_materials + " 条 · " + datasets.pte.version;
+  document.querySelector("#about-total").textContent = datasets.catalog_materials + " 条";
+  document.querySelector("#about-descriptor").textContent =
+    payload.descriptor.bonding_modulus + "；正式分类边界 ξc=" +
+    Number(payload.descriptor.formal_boundary).toFixed(5) + "。";
+  document.querySelector("#about-scope").textContent = payload.scientific_scope;
+  document.querySelector("#about-technology").innerHTML = payload.technology
+    .map(item => "<span>" + escapeHtml(item) + "</span>")
+    .join("");
 }
 
 function elementFamily(symbol) {
@@ -992,20 +1018,17 @@ function renderStructureElementLegend(atoms) {
 function selectLandscapeMaterial(data) {
   const value = name => Number(data.properties[name]?.value);
   const shear = value("G_GPa");
-  const cohesive = value("E_coh_eV_per_atom");
-  const atomicVolume = value("AAV");
-  const coordination = value("avg_cn");
+  const bonding = value("E_tilde_GPa");
   const cte = value("CTE_ppm");
-  if (![shear, cohesive, atomicVolume, coordination].every(Number.isFinite) ||
-      shear <= 0 || atomicVolume <= 0 || coordination <= 0) {
+  if (![shear, bonding].every(Number.isFinite) || shear <= 0 || bonding <= 0) {
     clearLandscapeContext({replaceUrl: false});
     document.querySelector("#landscape-selection").textContent =
-      "该材料缺少 Fig. 1d 坐标所需的 G、E_coh、AAV 或 avg_cn。";
+      "该材料缺少 Fig. 1d 坐标所需的 G 或论文定义 Ẽ=U_V/n。";
     return;
   }
   const point = {
     material_key: data.material.material_key,
-    x_gpa: 160.217 * Math.abs(cohesive) / (atomicVolume * coordination),
+    x_gpa: bonding,
     g_gpa: shear,
     classification: Number.isFinite(cte) && cte < 0 ? "NTE" : "PTE",
     source: "当前数据库",
@@ -1702,6 +1725,7 @@ async function initialize() {
       loadPeriodicElementCounts(),
       searchMaterials(),
       api("/static/fig1d-reference.json"),
+      loadAbout(),
     ]);
     fig1dReference = results[3];
     try {
@@ -1766,11 +1790,15 @@ async function initialize() {
     submitPredictionJob("/api/precision/qha-jobs", "qha"));
   const agentWidget = document.querySelector("#agent-widget");
   const agentToggle = document.querySelector("#agent-toggle");
-  agentToggle.addEventListener("click", () => {
-    const collapsed = agentWidget.classList.toggle("collapsed");
+  const setAgentCollapsed = collapsed => {
+    agentWidget.classList.toggle("collapsed", collapsed);
     agentToggle.textContent = collapsed ? "+" : "−";
     agentToggle.setAttribute("aria-expanded", String(!collapsed));
     agentToggle.setAttribute("aria-label", collapsed ? "展开 Agent" : "最小化 Agent");
+  };
+  if (window.matchMedia("(max-width: 560px)").matches) setAgentCollapsed(true);
+  agentToggle.addEventListener("click", () => {
+    setAgentCollapsed(!agentWidget.classList.contains("collapsed"));
   });
 
   function appendAgentMessage(role, text, extraClass = "") {

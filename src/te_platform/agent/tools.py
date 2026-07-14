@@ -28,7 +28,9 @@ def default_registry(
     registry.register(
         "classify_sbr",
         lambda **kwargs: classify_sbr(**kwargs).to_dict(),
-        description="根据剪切模量G和键合模量E_tilde计算SBR并判断NTE倾向。",
+        description=(
+            "根据剪切模量G和论文定义的键合模量E_tilde=U_V/n计算SBR并判断NTE倾向。"
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -42,7 +44,10 @@ def default_registry(
     registry.register(
         "fast_screen_structure_features",
         lambda **kwargs: fast_screen_sbr(**kwargs).to_dict(),
-        description="用已有的结构描述符和预测剪切模量执行快速SBR筛选。",
+        description=(
+            "用内聚能、平均原子体积和平均配位数计算E_tilde=U_V/n，"
+            "再结合预测剪切模量执行快速SBR筛选。"
+        ),
     )
     registry.register(
         "optimize_composite",

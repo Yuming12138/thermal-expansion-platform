@@ -18,6 +18,9 @@ class DatasetImporterTests(unittest.TestCase):
                 "POSCAR": "ZrW2O8\n1.0\n",
                 "G_GPa": 20.0,
                 "E_tilde_GPa": 10.0,
+                "E_coh_eV_per_atom": -4.0,
+                "AAV": 10.0,
+                "avg_cn": 4.0,
                 "CTE_ppm": -8.0,
             },
             {
@@ -25,6 +28,9 @@ class DatasetImporterTests(unittest.TestCase):
                 "POSCAR": "Al2O3\n1.0\n",
                 "G_GPa": 100.0,
                 "E_tilde_GPa": 20.0,
+                "E_coh_eV_per_atom": -5.0,
+                "AAV": 10.0,
+                "avg_cn": 5.0,
                 "CTE_ppm": 7.0,
                 "porosity": -0.1,
             },
@@ -50,7 +56,7 @@ class DatasetImporterTests(unittest.TestCase):
             database = root / "test.db"
             summary = import_dataset(database, dataset, manifest)
             self.assertEqual(summary.records, 2)
-            self.assertEqual(summary.properties, 7)
+            self.assertEqual(summary.properties, 13)
             self.assertEqual(summary.quality_flags, 1)
             with connect_database(database) as connection:
                 count = connection.execute("SELECT COUNT(*) FROM materials").fetchone()[0]
@@ -58,6 +64,8 @@ class DatasetImporterTests(unittest.TestCase):
             found = search_materials(database, "test-v1", "ZrW2O8")
             self.assertEqual(len(found), 1)
             self.assertEqual(found[0]["external_id"], "mp-1")
+            self.assertAlmostEqual(found[0]["E_tilde_GPa"], 16.021766208)
+            self.assertEqual(found[0]["E_tilde_source"], "paper_definition_UV_over_n")
             oxygen_materials = search_materials(
                 database,
                 "test-v1",

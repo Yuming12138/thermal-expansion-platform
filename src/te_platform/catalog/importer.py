@@ -15,6 +15,7 @@ from te_platform.catalog.provenance import (
     sha256_text,
 )
 from te_platform.db.schema import connect_database, initialize_database
+from te_platform.screening.fast_sbr import calculate_bonding_modulus_from_atomic_volume
 
 
 PROPERTY_UNITS = {
@@ -41,6 +42,17 @@ PROPERTY_UNITS = {
 }
 
 MATERIAL_PATTERN = re.compile(r"^(?P<formula>.+)[-_](?P<external_id>mp-\d+)$")
+
+
+def _canonical_bonding_modulus_value(row: dict[str, Any]) -> float | None:
+    try:
+        return calculate_bonding_modulus_from_atomic_volume(
+            float(row["E_coh_eV_per_atom"]),
+            float(row["AAV"]),
+            float(row["avg_cn"]),
+        ).bonding_modulus_gpa
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -129,13 +141,13 @@ def _quality_flags(row: dict[str, Any]) -> list[tuple[str, str, str, Any]]:
                 shear_modulus,
             )
         )
-    bonding_modulus = row.get("E_tilde_GPa")
+    bonding_modulus = _canonical_bonding_modulus_value(row)
     if isinstance(bonding_modulus, (int, float)) and bonding_modulus <= 0:
         flags.append(
             (
                 "nonpositive_bonding_modulus",
                 "error",
-                "E_tilde_GPa must be positive before SBR classification",
+                "Paper-defined E_tilde = U_V/n must be positive before SBR classification",
                 bonding_modulus,
             )
         )
@@ -253,9 +265,14 @@ def import_dataset(
             )
             structure_count += 1
 
+            canonical_bonding_modulus = _canonical_bonding_modulus_value(row)
             for name, value in row.items():
                 if name in {"material_folder", "POSCAR"}:
                     continue
+                if name == "E_tilde_GPa":
+                    if canonical_bonding_modulus is None:
+                        continue
+                    value = canonical_bonding_modulus
                 numeric_value, text_value = _property_values(value)
                 connection.execute(
                     """
@@ -272,6 +289,18 @@ def import_dataset(
                         text_value,
                         PROPERTY_UNITS.get(name),
                     ),
+                )
+                property_count += 1
+
+            if canonical_bonding_modulus is not None and "E_tilde_GPa" not in row:
+                connection.execute(
+                    """
+                    INSERT INTO material_properties(
+                        dataset_release_id, material_id, name,
+                        numeric_value, text_value, unit
+                    ) VALUES (?, ?, 'E_tilde_GPa', ?, NULL, 'GPa')
+                    """,
+                    (release_id, material_id, canonical_bonding_modulus),
                 )
                 property_count += 1
 

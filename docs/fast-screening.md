@@ -8,7 +8,7 @@
 → ALIGNN预测剪切模量G
 → MatterSim-5M静态能量计算内聚能
 → CrystalNN计算平均配位数
-→ 计算键合模量E_tilde
+→ 按论文定义计算键合模量E_tilde=U_V/n=160.21766208|E_coh|/(AAV·avg_cn)
 → 计算xi=G/E_tilde
 → 返回PTE/NTE快速判断、误差区间和后续建议
 ```
@@ -31,6 +31,8 @@
 - config SHA256：`65d2a1a27534a6fdc5554ef6e980b10756e4dd2f7403bd7c7fc55464ec996c79`
 
 由于G预测存在误差，平台会把MAE传播为xi区间。区间跨越`xi_c=2.84`时，不给出强结论，而是进入`boundary_review`，建议计算完整弹性张量和QHA。
+
+数据库列表、材料详情、Fig. 1d定位、快速预测、精准弹性和Agent均调用同一键合模量实现。历史数据文件中已有的`E_tilde_GPa`字段只作为原始快照保留，不再作为对外结果直接使用。
 
 ## 环境要求
 

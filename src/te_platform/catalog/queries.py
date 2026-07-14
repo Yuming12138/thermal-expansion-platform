@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from te_platform.db.schema import connect_readonly_database
+from te_platform.screening.fast_sbr import calculate_bonding_modulus_from_atomic_volume
 
 
 ELEMENT_SYMBOLS = frozenset(
@@ -18,6 +19,27 @@ ELEMENT_SYMBOLS = frozenset(
     "Mc Lv Ts Og".split()
 )
 ELEMENT_PATTERN = re.compile(r"[A-Z][a-z]?")
+
+
+def _canonical_bonding_modulus(row: dict[str, Any]) -> tuple[float | None, str | None]:
+    try:
+        result = calculate_bonding_modulus_from_atomic_volume(
+            float(row["E_coh_eV_per_atom"]),
+            float(row["AAV"]),
+            float(row["avg_cn"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None, None
+    return result.bonding_modulus_gpa, "paper_definition_UV_over_n"
+
+
+def _canonicalize_material_row(row: Any) -> dict[str, Any]:
+    result = dict(row)
+    value, source = _canonical_bonding_modulus(result)
+    result["E_tilde_GPa"] = value
+    result["E_tilde_source"] = source
+    result.pop("stored_E_tilde_GPa", None)
+    return result
 
 
 def formula_elements(formula: str | None) -> frozenset[str]:
@@ -171,7 +193,10 @@ def search_materials(
                     m.external_id,
                     MAX(CASE WHEN mp.name = 'K_GPa' THEN mp.numeric_value END) AS K_GPa,
                     MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
-                    MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS E_tilde_GPa,
+                    MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS stored_E_tilde_GPa,
+                    MAX(CASE WHEN mp.name = 'E_coh_eV_per_atom' THEN mp.numeric_value END) AS E_coh_eV_per_atom,
+                    MAX(CASE WHEN mp.name = 'AAV' THEN mp.numeric_value END) AS AAV,
+                    MAX(CASE WHEN mp.name = 'avg_cn' THEN mp.numeric_value END) AS avg_cn,
                     MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
                 FROM dataset_releases dr
                 JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
@@ -185,7 +210,7 @@ def search_materials(
                 """,
                 (release_slug, *filtered_ids),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [_canonicalize_material_row(row) for row in rows]
         rows = connection.execute(
             """
             SELECT
@@ -194,7 +219,10 @@ def search_materials(
                 m.external_id,
                 MAX(CASE WHEN mp.name = 'K_GPa' THEN mp.numeric_value END) AS K_GPa,
                 MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
-                MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS E_tilde_GPa,
+                MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS stored_E_tilde_GPa,
+                MAX(CASE WHEN mp.name = 'E_coh_eV_per_atom' THEN mp.numeric_value END) AS E_coh_eV_per_atom,
+                MAX(CASE WHEN mp.name = 'AAV' THEN mp.numeric_value END) AS AAV,
+                MAX(CASE WHEN mp.name = 'avg_cn' THEN mp.numeric_value END) AS avg_cn,
                 MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
             FROM dataset_releases dr
             JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
@@ -215,7 +243,7 @@ def search_materials(
             """,
             (release_slug, pattern, pattern, pattern, pattern, limit),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_canonicalize_material_row(row) for row in rows]
 
 
 def material_element_statistics(
@@ -310,6 +338,18 @@ def material_detail(
         }
         for row in properties
     }
+    property_values = {
+        name: value["value"] for name, value in property_map.items()
+    }
+    property_values["stored_E_tilde_GPa"] = property_values.get("E_tilde_GPa")
+    bonding_modulus, bonding_source = _canonical_bonding_modulus(property_values)
+    if bonding_modulus is not None:
+        property_map["E_tilde_GPa"] = {
+            "value": bonding_modulus,
+            "unit": "GPa",
+            "source": bonding_source,
+            "formula": "160.21766208*abs(E_coh_eV_per_atom)/(AAV*avg_cn)",
+        }
     return {
         "material": {
             "material_key": material["material_key"],
@@ -317,6 +357,12 @@ def material_detail(
             "external_id": material["external_id"],
         },
         "properties": property_map,
+        "bonding_modulus_definition": {
+            "symbol": "E_tilde",
+            "formula": "U_V/n = 160.21766208*abs(E_coh_eV_per_atom)/(AAV*avg_cn)",
+            "unit": "GPa",
+            "source": bonding_source,
+        },
         "precision_thermal_expansion": _precision_thermal_expansion(precision_job),
         "structures": [dict(row) for row in structures],
         "quality_flags": [dict(row) for row in flags],
@@ -337,7 +383,10 @@ def material_landscape(
                 m.material_key,
                 m.formula,
                 MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
-                MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS E_tilde_GPa,
+                MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS stored_E_tilde_GPa,
+                MAX(CASE WHEN mp.name = 'E_coh_eV_per_atom' THEN mp.numeric_value END) AS E_coh_eV_per_atom,
+                MAX(CASE WHEN mp.name = 'AAV' THEN mp.numeric_value END) AS AAV,
+                MAX(CASE WHEN mp.name = 'avg_cn' THEN mp.numeric_value END) AS avg_cn,
                 MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
             FROM dataset_releases dr
             JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
@@ -347,10 +396,14 @@ def material_landscape(
              AND mp.material_id = m.id
             WHERE dr.slug = ?
             GROUP BY m.id
-            HAVING G_GPa IS NOT NULL AND E_tilde_GPa IS NOT NULL
+            HAVING G_GPa IS NOT NULL
             ORDER BY m.material_key
             LIMIT ?
             """,
             (release_slug, limit),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        result
+        for row in rows
+        if (result := _canonicalize_material_row(row))["E_tilde_GPa"] is not None
+    ]
