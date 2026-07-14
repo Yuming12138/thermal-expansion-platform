@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-2", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-3", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
