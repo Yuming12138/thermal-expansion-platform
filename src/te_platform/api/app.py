@@ -19,6 +19,7 @@ from te_platform.api.services import (
 )
 from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import (
+    compare_materials,
     dataset_summary,
     material_detail,
     material_element_statistics,
@@ -339,6 +340,10 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=500),
         elements: str = Query(default="", max_length=256),
         element_mode: Literal["contains", "exact"] = "contains",
+        sort_by: Literal["material_key", "G_GPa", "E_tilde_GPa", "CTE_ppm", "xi"] = "material_key",
+        sort_order: Literal["ascending", "descending"] = "ascending",
+        cte_min_ppm: float | None = None,
+        cte_max_ppm: float | None = None,
     ) -> list[dict[str, object]]:
         ensure_catalog_database(catalog_db)
         selected_elements = [
@@ -354,6 +359,10 @@ def create_app(
                 limit,
                 elements=selected_elements,
                 element_mode=element_mode,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                cte_min_ppm=cte_min_ppm,
+                cte_max_ppm=cte_max_ppm,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -369,6 +378,22 @@ def create_app(
     def material_elements() -> dict[str, object]:
         ensure_catalog_database(catalog_db)
         return material_element_statistics(catalog_db, DEFAULT_RELEASE_SLUG)
+
+    @app.get("/api/materials/compare")
+    def material_comparison(
+        material_keys: str = Query(min_length=3, max_length=2048),
+        temperature_k: float = Query(default=300.0, ge=0),
+    ) -> dict[str, object]:
+        ensure_catalog_database(catalog_db)
+        try:
+            return compare_materials(
+                catalog_db,
+                DEFAULT_RELEASE_SLUG,
+                material_keys.split("|"),
+                temperature_k=temperature_k,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:

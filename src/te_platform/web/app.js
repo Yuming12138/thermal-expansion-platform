@@ -29,9 +29,12 @@ let structureFullscreenHandlerInstalled = false;
 let catalogElementMode = "contains";
 let catalogElementCounts = {};
 let catalogSearchSequence = 0;
+let comparisonMaterialKeys = [];
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
+const MATERIAL_COMPARE_STORAGE_KEY = "tep.material-compare.v1";
+const COMPARISON_COLORS = ["#d84a3a", "#2864c7", "#15906f", "#d98624", "#7b57b2", "#5d6a76"];
 
 const PERIODIC_MAIN_ROWS = [
   ["H:1", "He:18"],
@@ -414,6 +417,96 @@ function setupWorkspaceNavigation() {
   showWorkspacePage(workspacePageFromPath());
 }
 
+function restoreComparisonMaterials() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(MATERIAL_COMPARE_STORAGE_KEY));
+    comparisonMaterialKeys = Array.isArray(stored)
+      ? [...new Set(stored.filter(item => typeof item === "string" && item.trim()))].slice(0, 4)
+      : [];
+  } catch (error) {
+    console.warn("无法恢复材料收藏", error);
+    comparisonMaterialKeys = [];
+  }
+}
+
+function persistComparisonMaterials() {
+  try {
+    window.localStorage.setItem(MATERIAL_COMPARE_STORAGE_KEY, JSON.stringify(comparisonMaterialKeys));
+  } catch (error) {
+    console.warn("无法保存材料收藏", error);
+  }
+}
+
+function comparisonSelected(materialKey) {
+  return comparisonMaterialKeys.includes(materialKey);
+}
+
+function updateComparisonButtons() {
+  document.querySelectorAll("button[data-compare-key]").forEach(button => {
+    const materialKey = decodeURIComponent(button.dataset.compareKey);
+    const selected = comparisonSelected(materialKey);
+    button.classList.toggle("selected", selected);
+    button.textContent = selected ? "已收藏" : "收藏";
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+
+function renderComparisonSelection() {
+  const selection = document.querySelector("#material-compare-selection");
+  const runButton = document.querySelector("#material-compare-run");
+  const clearButton = document.querySelector("#material-compare-clear");
+  runButton.disabled = comparisonMaterialKeys.length < 2;
+  clearButton.disabled = comparisonMaterialKeys.length === 0;
+  if (!comparisonMaterialKeys.length) {
+    selection.className = "compare-selection muted";
+    selection.textContent = "尚未收藏材料。";
+  } else {
+    selection.className = "compare-selection";
+    selection.innerHTML = comparisonMaterialKeys.map(materialKey =>
+      "<span class='compare-chip'><span>" + escapeHtml(materialKey) + "</span>" +
+      "<button type='button' data-compare-remove='" +
+      escapeHtml(encodeURIComponent(materialKey)) + "' aria-label='移除 " +
+      escapeHtml(materialKey) + "'>×</button></span>"
+    ).join("");
+    selection.querySelectorAll("button[data-compare-remove]").forEach(button => {
+      button.addEventListener("click", () => toggleComparisonMaterial(
+        decodeURIComponent(button.dataset.compareRemove),
+      ));
+    });
+  }
+  updateComparisonButtons();
+  const result = document.querySelector("#material-compare-result");
+  result.className = "compare-result placeholder";
+  result.textContent = comparisonMaterialKeys.length >= 2
+    ? "收藏列表已更新，请点击“生成对比”读取属性和真实QHA曲线。"
+    : "至少收藏两个材料后即可生成对比。";
+}
+
+function toggleComparisonMaterial(materialKey) {
+  if (comparisonSelected(materialKey)) {
+    comparisonMaterialKeys = comparisonMaterialKeys.filter(item => item !== materialKey);
+  } else if (comparisonMaterialKeys.length >= 4) {
+    const result = document.querySelector("#material-compare-result");
+    result.className = "compare-result";
+    result.textContent = "一次最多收藏并对比 4 个材料，请先移除一个材料。";
+    return;
+  } else {
+    comparisonMaterialKeys.push(materialKey);
+  }
+  persistComparisonMaterials();
+  renderComparisonSelection();
+}
+
+function comparisonFilterBounds() {
+  const selected = document.querySelector("#material-cte-filter").value;
+  return {
+    strong: {cte_max_ppm: "-20"},
+    moderate: {cte_min_ppm: "-20", cte_max_ppm: "-5"},
+    "near-zero": {cte_min_ppm: "-5", cte_max_ppm: "5"},
+    positive: {cte_min_ppm: "5"},
+  }[selected] || {};
+}
+
 function renderMaterials(items) {
   const container = document.querySelector("#material-results");
   const filterDescription = selectedCatalogElements.size
@@ -425,15 +518,25 @@ function renderMaterials(items) {
     container.innerHTML = "<p class='muted'>没有匹配材料。</p>";
     return;
   }
-  const rows = items.map(item =>
-    "<tr><td>" + escapeHtml(item.material_key) + "</td><td>" + numeric(item.G_GPa) +
-    "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" +
-    numeric(item.CTE_ppm) + "</td><td><button data-key='" +
-    escapeHtml(encodeURIComponent(item.material_key)) + "'>详情</button></td></tr>"
-  ).join("");
-  container.innerHTML = "<table><thead><tr><th>材料</th><th>G</th><th>Ẽ</th><th>CTE</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>";
+  const rows = items.map(item => {
+    const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
+    const selectedClass = comparisonSelected(item.material_key) ? " selected" : "";
+    const selectedText = comparisonSelected(item.material_key) ? "已收藏" : "收藏";
+    return "<tr><td>" + escapeHtml(item.material_key) + "</td><td>" + numeric(item.G_GPa) +
+      "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
+      "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
+      "<button class='compare-toggle" + selectedClass + "' data-compare-key='" + encodedKey +
+      "' aria-pressed='" + String(comparisonSelected(item.material_key)) + "'>" + selectedText +
+      "</button><button data-key='" + encodedKey + "'>详情</button></div></td></tr>";
+  }).join("");
+  container.innerHTML = "<table><thead><tr><th>材料</th><th>G</th><th>Ẽ</th><th>ξ</th><th>CTE</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>";
   container.querySelectorAll("button[data-key]").forEach(button => {
     button.addEventListener("click", () => loadDetail(decodeURIComponent(button.dataset.key)));
+  });
+  container.querySelectorAll("button[data-compare-key]").forEach(button => {
+    button.addEventListener("click", () => toggleComparisonMaterial(
+      decodeURIComponent(button.dataset.compareKey),
+    ));
   });
 }
 
@@ -442,10 +545,13 @@ async function searchMaterials() {
   const requestId = ++catalogSearchSequence;
   document.querySelector("#material-view-summary").textContent = "正在检索…";
   const params = new URLSearchParams({
-    limit: "50",
+    limit: document.querySelector("#material-limit").value,
     query,
     elements: [...selectedCatalogElements].join(","),
     element_mode: catalogElementMode,
+    sort_by: document.querySelector("#material-sort-by").value,
+    sort_order: document.querySelector("#material-sort-order").value,
+    ...comparisonFilterBounds(),
   });
   try {
     const items = await api("/api/materials?" + params.toString());
@@ -456,6 +562,32 @@ async function searchMaterials() {
     document.querySelector("#material-results").innerHTML =
       "<p class='structure-error'>" + escapeHtml(error.message) + "</p>";
   }
+}
+
+function displaySourceName(value) {
+  const text = String(value || "未记录");
+  const parts = text.split(/[\\/]/);
+  return parts[parts.length - 1] || text;
+}
+
+function renderMaterialProvenance(data) {
+  const release = data.dataset_release || {};
+  const notes = data.method_notes || {};
+  const curve = data.precision_thermal_expansion;
+  const checksum = release.source_sha256 ? String(release.source_sha256).slice(0, 16) + "…" : "未记录";
+  const curveSource = curve
+    ? escapeHtml(displaySourceName(curve.source_path)) + " · " +
+      escapeHtml(curve.model_name || "模型未记录")
+    : "暂无已关联的精确QHA曲线";
+  return "<section class='provenance-card'><h3>数据来源与方法</h3><dl>" +
+    "<dt>数据版本</dt><dd>" + escapeHtml(release.title || release.slug || "未记录") +
+    " · v" + escapeHtml(release.version || "—") + "</dd>" +
+    "<dt>源数据文件</dt><dd>" + escapeHtml(displaySourceName(release.source_file_name)) +
+    " · SHA256 " + escapeHtml(checksum) + "</dd>" +
+    "<dt>剪切模量 G</dt><dd>" + escapeHtml(notes.G_GPa || "目录字段") + "</dd>" +
+    "<dt>键合模量 Ẽ</dt><dd>" + escapeHtml(notes.E_tilde_GPa || "按论文定义计算") + "</dd>" +
+    "<dt>目录 CTE</dt><dd>" + escapeHtml(notes.CTE_ppm || "目录筛选字段") + "</dd>" +
+    "<dt>QHA 曲线</dt><dd>" + curveSource + "</dd></dl></section>";
 }
 
 async function loadDetail(key) {
@@ -470,19 +602,187 @@ async function loadDetail(key) {
     .map(name => "<div><dt>" + escapeHtml(name) + "</dt><dd>" +
       propertyText(data.properties[name]) + "</dd></div>")
     .join("");
+  const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
   document.querySelector("#material-detail").innerHTML =
-    "<p><strong>" + escapeHtml(data.material.material_key) + "</strong> · " +
-    escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
+    "<div class='compare-summary'><p><strong>" + escapeHtml(data.material.material_key) +
+    "</strong> · " + escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
+    "<button class='compare-toggle' data-compare-key='" + encodedKey + "' type='button'>收藏</button></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
-    "<p class='muted'>结构：" +
-    escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
-    "</dl><div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
+    "<p class='muted'>结构：" + escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
+    "</dl>" + renderMaterialProvenance(data) +
+    "<div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
     renderPrecisionThermalExpansion(data.precision_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
     escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
+  const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
+  detailCompareButton.addEventListener("click", () => toggleComparisonMaterial(data.material.material_key));
+  updateComparisonButtons();
   drawMaterialStructure(data.material, data.structures?.[0], data.structure_view);
   drawPrecisionThermalExpansion(data.precision_thermal_expansion);
   selectLandscapeMaterial(data);
+}
+
+function comparisonMetric(value, unit = "") {
+  return Number.isFinite(Number(value)) ? numeric(value) + (unit ? " " + unit : "") : "—";
+}
+
+function renderMaterialComparison(payload) {
+  const result = document.querySelector("#material-compare-result");
+  const temperature = Number(payload.temperature_k);
+  const columns = payload.materials.map(item =>
+    "<th>" + escapeHtml(item.material.material_key) + "</th>"
+  ).join("");
+  const metricRows = [
+    ["G", "G_GPa", "GPa"],
+    ["Ẽ", "E_tilde_GPa", "GPa"],
+    ["ξ = G/Ẽ", "xi", ""],
+    ["目录 CTE", "CTE_ppm", "ppm/K"],
+    [temperature.toFixed(0) + " K 曲线 α", "alpha_at_temperature_ppm_per_k", "ppm/K"],
+    ["体积模量 K", "K_GPa", "GPa"],
+    ["内聚能", "E_coh_eV_per_atom", "eV/atom"],
+    ["平均配位数", "avg_cn", ""],
+  ].map(([label, key, unit]) =>
+    "<tr><th>" + escapeHtml(label) + "</th>" + payload.materials.map(item =>
+      "<td>" + comparisonMetric(item.metrics[key], unit) + "</td>"
+    ).join("") + "</tr>"
+  ).join("");
+  const detailButtons = payload.materials.map(item =>
+    "<td><button type='button' data-comparison-detail='" +
+    escapeHtml(encodeURIComponent(item.material.material_key)) + "'>查看详情</button></td>"
+  ).join("");
+  const curveCount = payload.materials.filter(item => item.curve?.points?.length >= 2).length;
+  result.className = "compare-result";
+  result.innerHTML =
+    "<div class='compare-summary'><strong>已比较 " + payload.material_count + " 个材料</strong>" +
+    "<span>" + escapeHtml(payload.method_note) + "</span></div>" +
+    "<div class='table-wrap'><table class='comparison-table'><thead><tr><th>指标</th>" + columns +
+    "</tr></thead><tbody>" + metricRows + "<tr><th>材料详情</th>" + detailButtons +
+    "</tr></tbody></table></div>" +
+    (curveCount
+      ? "<canvas id='material-comparison-chart' class='comparison-chart' width='1100' height='480' " +
+        "aria-label='收藏材料的QHA热膨胀曲线对比'></canvas>"
+      : "<p class='muted'>所选材料暂无可共同展示的已关联QHA曲线。</p>");
+  result.querySelectorAll("button[data-comparison-detail]").forEach(button => {
+    button.addEventListener("click", async () => {
+      await loadDetail(decodeURIComponent(button.dataset.comparisonDetail));
+      document.querySelector(".detail-panel").scrollIntoView({behavior: "smooth", block: "start"});
+    });
+  });
+  if (curveCount) drawMaterialComparisonCurves(payload);
+}
+
+function drawMaterialComparisonCurves(payload) {
+  const canvas = document.querySelector("#material-comparison-chart");
+  if (!canvas) return;
+  const series = payload.materials
+    .map((item, index) => ({
+      key: item.material.material_key,
+      color: COMPARISON_COLORS[index % COMPARISON_COLORS.length],
+      points: (item.curve?.points || [])
+        .map(point => ({x: Number(point.temperature_k), y: Number(point.alpha_ppm_per_k)}))
+        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)),
+    }))
+    .filter(item => item.points.length >= 2);
+  if (!series.length) return;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  const margin = {left: 66, right: 20, top: 46, bottom: 50};
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const plotHeight = Math.max(1, height - margin.top - margin.bottom);
+  const allPoints = series.flatMap(item => item.points);
+  let xMin = Math.min(...allPoints.map(point => point.x));
+  let xMax = Math.max(...allPoints.map(point => point.x));
+  let yMin = Math.min(0, ...allPoints.map(point => point.y));
+  let yMax = Math.max(0, ...allPoints.map(point => point.y));
+  if (xMax === xMin) xMax = xMin + 1;
+  if (yMax === yMin) yMax = yMin + 1;
+  const yPadding = Math.max(1, (yMax - yMin) * .08);
+  yMin -= yPadding;
+  yMax += yPadding;
+  const xScale = value => margin.left + (value - xMin) / (xMax - xMin) * plotWidth;
+  const yScale = value => margin.top + plotHeight - (value - yMin) / (yMax - yMin) * plotHeight;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let index = 0; index <= 5; index += 1) {
+    const xValue = xMin + (xMax - xMin) * index / 5;
+    const yValue = yMin + (yMax - yMin) * index / 5;
+    const x = xScale(xValue);
+    const y = yScale(yValue);
+    ctx.strokeStyle = "#e7edf2";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top);
+    ctx.lineTo(x, margin.top + plotHeight);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(margin.left + plotWidth, y);
+    ctx.stroke();
+    ctx.fillStyle = "#657889";
+    ctx.fillText(xValue.toFixed(0), x, height - 28);
+    ctx.textAlign = "right";
+    ctx.fillText(yValue.toFixed(1), margin.left - 9, y);
+    ctx.textAlign = "center";
+  }
+  if (yMin <= 0 && yMax >= 0) {
+    ctx.strokeStyle = "#9aa8b4";
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(margin.left, yScale(0));
+    ctx.lineTo(margin.left + plotWidth, yScale(0));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  series.forEach(item => {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    item.points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
+      else ctx.lineTo(xScale(point.x), yScale(point.y));
+    });
+    ctx.stroke();
+  });
+  ctx.fillStyle = "#445b6d";
+  ctx.fillText("温度 T (K)", margin.left + plotWidth / 2, height - 10);
+  ctx.save();
+  ctx.translate(16, margin.top + plotHeight / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("体热膨胀系数 α (ppm/K)", 0, 0);
+  ctx.restore();
+  let legendX = margin.left;
+  series.forEach(item => {
+    const label = item.key.length > 24 ? item.key.slice(0, 22) + "…" : item.key;
+    ctx.fillStyle = item.color;
+    ctx.fillRect(legendX, 18, 14, 3);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#40586a";
+    ctx.fillText(label, legendX + 19, 20);
+    legendX += Math.min(230, 38 + ctx.measureText(label).width);
+  });
+  ctx.textAlign = "center";
+  canvas.teRedraw = () => drawMaterialComparisonCurves(payload);
+}
+
+async function loadMaterialComparison() {
+  if (comparisonMaterialKeys.length < 2) return;
+  const result = document.querySelector("#material-compare-result");
+  result.className = "compare-result placeholder";
+  result.textContent = "正在读取材料属性和真实QHA曲线…";
+  const temperature = Number(document.querySelector("#material-compare-temperature").value);
+  const params = new URLSearchParams({
+    material_keys: comparisonMaterialKeys.join("|"),
+    temperature_k: Number.isFinite(temperature) && temperature >= 0 ? String(temperature) : "300",
+  });
+  try {
+    renderMaterialComparison(await api("/api/materials/compare?" + params.toString()));
+  } catch (error) {
+    result.className = "compare-result";
+    result.textContent = error.message;
+  }
 }
 
 function renderStructureViewer(structures) {
@@ -1716,6 +2016,8 @@ async function designZteComposite() {
 
 async function initialize() {
   restoreLandscapeContext();
+  restoreComparisonMaterials();
+  renderComparisonSelection();
   setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
@@ -1743,6 +2045,17 @@ async function initialize() {
   document.querySelector("#search-button").addEventListener("click", searchMaterials);
   document.querySelector("#search-input").addEventListener("keydown", event => {
     if (event.key === "Enter") searchMaterials();
+  });
+  ["#material-sort-by", "#material-sort-order", "#material-cte-filter", "#material-limit"]
+    .forEach(selector => document.querySelector(selector).addEventListener("change", searchMaterials));
+  document.querySelector("#material-compare-run").addEventListener("click", loadMaterialComparison);
+  document.querySelector("#material-compare-clear").addEventListener("click", () => {
+    comparisonMaterialKeys = [];
+    persistComparisonMaterials();
+    renderComparisonSelection();
+    const result = document.querySelector("#material-compare-result");
+    result.className = "compare-result placeholder";
+    result.textContent = "至少收藏两个材料后即可生成对比。";
   });
   document.querySelector("#pte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));

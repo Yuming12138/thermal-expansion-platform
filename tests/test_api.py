@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from te_platform.api.app import create_app
+from te_platform.agent.tools import default_registry
 from te_platform.config import DEFAULT_CATALOG_DATABASE_PATH
 from te_platform.workers.alignn_runner import AlignnWorkerPrediction
 from te_platform.workers.mattersim_runner import MatterSimPrediction
@@ -67,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-2", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -138,6 +139,12 @@ class ApiTests(unittest.TestCase):
         self.assertAlmostEqual(properties["E_tilde_GPa"]["value"], expected_bonding)
         self.assertAlmostEqual(material_summary["E_tilde_GPa"], expected_bonding)
         self.assertEqual(material_summary["E_tilde_source"], "paper_definition_UV_over_n")
+        self.assertAlmostEqual(
+            material_summary["xi"],
+            material_summary["G_GPa"] / material_summary["E_tilde_GPa"],
+        )
+        self.assertEqual(detail.json()["dataset_release"]["version"], "1.1.0")
+        self.assertIn("ALIGNN", detail.json()["method_notes"]["G_GPa"])
         structure = detail.json()["structures"][0]
         self.assertEqual(structure["format"], "POSCAR")
         self.assertGreater(len(structure["content"]), 100)
@@ -149,6 +156,45 @@ class ApiTests(unittest.TestCase):
         curve = detail.json()["precision_thermal_expansion"]
         self.assertIsNotNone(curve)
         self.assertGreaterEqual(len(curve["points"]), 2)
+
+        ranked = self.client.get(
+            "/api/materials",
+            params={
+                "limit": 5,
+                "sort_by": "CTE_ppm",
+                "sort_order": "ascending",
+                "cte_max_ppm": -5,
+            },
+        )
+        self.assertEqual(ranked.status_code, 200)
+        ranked_items = ranked.json()
+        self.assertEqual(len(ranked_items), 5)
+        self.assertTrue(all(item["CTE_ppm"] <= -5 for item in ranked_items))
+        self.assertEqual(
+            [item["CTE_ppm"] for item in ranked_items],
+            sorted(item["CTE_ppm"] for item in ranked_items),
+        )
+        compare_keys = [ranked_items[0]["material_key"], ranked_items[1]["material_key"]]
+        comparison = self.client.get(
+            "/api/materials/compare",
+            params={"material_keys": "|".join(compare_keys), "temperature_k": 300},
+        )
+        self.assertEqual(comparison.status_code, 200)
+        self.assertEqual(comparison.json()["material_count"], 2)
+        self.assertIn("alpha(T)", comparison.json()["method_note"])
+        self.assertEqual(
+            [item["material"]["material_key"] for item in comparison.json()["materials"]],
+            compare_keys,
+        )
+        registry = default_registry(DEFAULT_CATALOG_DATABASE_PATH)
+        self.assertIn("compare_catalog_materials", registry.names())
+        agent_comparison = registry.call(
+            "compare_catalog_materials",
+            role="nte",
+            material_keys=compare_keys,
+            temperature_k=300,
+        )
+        self.assertEqual(agent_comparison["material_count"], 2)
 
         landscape = self.client.get("/api/materials/landscape", params={"limit": 10})
         self.assertEqual(landscape.status_code, 200)

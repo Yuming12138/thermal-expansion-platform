@@ -66,6 +66,25 @@ class DatasetImporterTests(unittest.TestCase):
             self.assertEqual(found[0]["external_id"], "mp-1")
             self.assertAlmostEqual(found[0]["E_tilde_GPa"], 16.021766208)
             self.assertEqual(found[0]["E_tilde_source"], "paper_definition_UV_over_n")
+            self.assertAlmostEqual(found[0]["xi"], 20.0 / 16.021766208)
+            cte_descending = search_materials(
+                database,
+                "test-v1",
+                limit=10,
+                sort_by="CTE_ppm",
+                sort_order="descending",
+            )
+            self.assertEqual(
+                [item["material_key"] for item in cte_descending],
+                ["Al2O3-mp-2", "ZrW2O8-mp-1"],
+            )
+            negative_only = search_materials(
+                database,
+                "test-v1",
+                limit=10,
+                cte_max_ppm=-1,
+            )
+            self.assertEqual([item["material_key"] for item in negative_only], ["ZrW2O8-mp-1"])
             oxygen_materials = search_materials(
                 database,
                 "test-v1",

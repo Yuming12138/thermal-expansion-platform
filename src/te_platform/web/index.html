@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-2">
   </head>
   <body>
     <header>
@@ -56,6 +56,39 @@
               <input id="search-input" placeholder="化学式、MP ID或材料名称">
               <button id="search-button">检索</button>
             </div>
+            <div class="catalog-analysis-toolbar" aria-label="材料排序与筛选">
+              <label>排序字段
+                <select id="material-sort-by">
+                  <option value="material_key">材料名称</option>
+                  <option value="CTE_ppm">热膨胀系数 CTE</option>
+                  <option value="G_GPa">剪切模量 G</option>
+                  <option value="E_tilde_GPa">键合模量 Ẽ</option>
+                  <option value="xi">剪切—键合比 ξ</option>
+                </select>
+              </label>
+              <label>顺序
+                <select id="material-sort-order">
+                  <option value="ascending">从小到大</option>
+                  <option value="descending">从大到小</option>
+                </select>
+              </label>
+              <label>CTE 范围
+                <select id="material-cte-filter">
+                  <option value="all">全部</option>
+                  <option value="strong">强 NTE（≤ -20）</option>
+                  <option value="moderate">-20 ～ -5</option>
+                  <option value="near-zero">近零（-5 ～ 5）</option>
+                  <option value="positive">正膨胀（≥ 5）</option>
+                </select>
+              </label>
+              <label>显示数量
+                <select id="material-limit">
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                </select>
+              </label>
+            </div>
             <div id="element-filter" class="element-filter">
             <div class="element-filter-toolbar">
               <div class="element-mode" role="group" aria-label="元素筛选方式">
@@ -76,10 +109,27 @@
             <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
           </article>
         </section>
+        <section id="material-compare-panel" class="panel material-compare-panel">
+          <div class="compare-heading">
+            <div>
+              <h2>收藏与材料对比</h2>
+              <p class="muted">收藏 2–4 个材料，对比 G、Ẽ、ξ、目录 CTE 和真实 QHA 热膨胀曲线。</p>
+            </div>
+            <div class="compare-actions">
+              <label>比较温度
+                <span><input id="material-compare-temperature" type="number" min="0" max="2000" step="10" value="300"> K</span>
+              </label>
+              <button id="material-compare-run" type="button" disabled>生成对比</button>
+              <button id="material-compare-clear" class="secondary-button" type="button" disabled>清空</button>
+            </div>
+          </div>
+          <div id="material-compare-selection" class="compare-selection muted">尚未收藏材料。</div>
+          <div id="material-compare-result" class="compare-result placeholder">至少收藏两个材料后即可生成对比。</div>
+        </section>
       </div>
       <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
-        <h2>上传结构与分级预测</h2>
-        <p class="muted">上传 CIF 或 POSCAR 后选择计算层级。快速预测适合初筛；精准预测计算完整弹性张量；QHA 直接给出热膨胀曲线。</p>
+        <h2>上传结构与分级预测（实验性扩展）</h2>
+        <p class="muted">该工作区用于展示软件的未来扩展能力，当前版本的重点是内置数据库查询与分析；没有配置科研计算环境时不会执行真实任务。</p>
         <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
         <div id="structure-summary" class="structure-summary muted">选择文件后将自动检查结构。</div>
         <div class="prediction-actions">
@@ -201,6 +251,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0"></script>
+    <script src="/static/app.js?v=0.10.0-2"></script>
   </body>
 </html>

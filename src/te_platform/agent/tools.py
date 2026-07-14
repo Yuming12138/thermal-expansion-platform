@@ -5,7 +5,7 @@ from pathlib import Path
 from te_platform.agent.actions import create_action_request
 from te_platform.agent.registry import ToolRegistry
 from te_platform.agent.uploads import inspect_agent_structure
-from te_platform.catalog.queries import material_detail, search_materials
+from te_platform.catalog.queries import compare_materials, material_detail, search_materials
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.material_pair import (
     curve_materials,
@@ -85,10 +85,29 @@ def default_registry(
                 raise ValueError("role must be 'nte' or 'pte'")
             return material_detail(catalog_database, releases[normalized_role], material_key)
 
+        def compare_catalog_materials(
+            role: str,
+            material_keys: list[str],
+            temperature_k: float = 300.0,
+        ):
+            normalized_role = role.lower()
+            if normalized_role not in releases:
+                raise ValueError("role must be 'nte' or 'pte'")
+            return compare_materials(
+                catalog_database,
+                releases[normalized_role],
+                material_keys,
+                temperature_k=temperature_k,
+            )
+
         registry.register(
             "search_catalog",
             search_catalog,
-            description="搜索平台内置的NTE或PTE材料目录，返回可用于进一步查询的material_key。",
+            description=(
+                "仅在用户尚未给出准确material_key时搜索NTE或PTE目录，返回候选material_key。"
+                "若用户已经给出两个以上完整material_key并要求比较，应直接调用compare_catalog_materials，"
+                "不要重复搜索。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -111,6 +130,31 @@ def default_registry(
                     "material_key": {"type": "string"},
                 },
                 "required": ["role", "material_key"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "compare_catalog_materials",
+            compare_catalog_materials,
+            description=(
+                "严格比较2到6个指定材料的G、论文定义E_tilde、xi、目录CTE以及指定温度下"
+                "由真实QHA曲线插值得到的alpha。用户提出多个材料谁更强、曲线有何差异、"
+                "在某温度如何排序时使用此工具。若输入已经是完整material_key，直接调用本工具，"
+                "不要先调用search_catalog。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "enum": ["nte", "pte"]},
+                    "material_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 6,
+                    },
+                    "temperature_k": {"type": "number", "minimum": 0, "default": 300},
+                },
+                "required": ["role", "material_keys"],
                 "additionalProperties": False,
             },
         )
