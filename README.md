@@ -22,6 +22,8 @@
 - SQLite数据模型、数据集版本和来源记录；
 - G、Ẽ、ξ和CTE全库排序、CTE区间筛选，以及最多4个材料的持久化收藏对比；
 - 收藏材料的属性表和真实QHA `alpha(T)`曲线叠加，并区分目录CTE与指定温度下曲线插值结果；
+- 收藏组合可保存为命名分析项目，并导出CSV、JSON、独立HTML和离线PDF分析报告；
+- 材料详情可下载数据库内POSCAR、完整 `thermal_expansion.dat`（`1/K`）和QHA曲线PDF；
 - 材料详情展示数据版本、源文件SHA256、ALIGNN字段说明、Ẽ标准公式和QHA曲线来源；
 - JSON/JSON.GZ数据导入、唯一性和结构完整性校验；
 - 剪切—键合比 `xi = G / E_tilde` 判别，其中 `E_tilde = U_V/n = 160.21766208*abs(E_coh)/(AAV*avg_cn)`；

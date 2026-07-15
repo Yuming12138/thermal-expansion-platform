@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-3", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-4", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -195,6 +195,45 @@ class ApiTests(unittest.TestCase):
             temperature_k=300,
         )
         self.assertEqual(agent_comparison["material_count"], 2)
+
+        poscar_download = self.client.get(
+            f"/api/materials/{material_key}/download/POSCAR"
+        )
+        self.assertEqual(poscar_download.status_code, 200)
+        self.assertIn("attachment", poscar_download.headers["content-disposition"])
+        self.assertIn("Ba", poscar_download.text)
+
+        dat_download = self.client.get(
+            f"/api/materials/{material_key}/download/thermal_expansion.dat"
+        )
+        self.assertEqual(dat_download.status_code, 200)
+        self.assertIn("temperature_K", dat_download.text)
+        data_lines = [
+            line for line in dat_download.text.splitlines() if line and not line.startswith("#")
+        ]
+        self.assertGreaterEqual(len(data_lines), 2)
+        self.assertLess(abs(float(data_lines[0].split()[1])), 1)
+
+        curve_pdf = self.client.get(
+            f"/api/materials/{material_key}/download/thermal_expansion.pdf"
+        )
+        self.assertEqual(curve_pdf.status_code, 200)
+        self.assertTrue(curve_pdf.content.startswith(b"%PDF"))
+        self.assertGreater(len(curve_pdf.content), 5_000)
+
+        comparison_pdf = self.client.get(
+            "/api/materials/compare/report.pdf",
+            params={
+                "material_keys": "|".join(compare_keys),
+                "temperature_k": 300,
+                "project_name": "强 NTE 候选对比",
+            },
+        )
+        self.assertEqual(comparison_pdf.status_code, 200)
+        self.assertTrue(comparison_pdf.content.startswith(b"%PDF"))
+        self.assertGreater(len(comparison_pdf.content), 8_000)
+        self.assertIn("filename*=UTF-8''", comparison_pdf.headers["content-disposition"])
+        self.assertIn("%E5%BC%BA%20NTE", comparison_pdf.headers["content-disposition"])
 
         landscape = self.client.get("/api/materials/landscape", params={"limit": 10})
         self.assertEqual(landscape.status_code, 200)

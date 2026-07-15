@@ -30,10 +30,14 @@ let catalogElementMode = "contains";
 let catalogElementCounts = {};
 let catalogSearchSequence = 0;
 let comparisonMaterialKeys = [];
+let analysisProjects = [];
+let activeAnalysisProjectId = null;
+let lastComparisonPayload = null;
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
 const MATERIAL_COMPARE_STORAGE_KEY = "tep.material-compare.v1";
+const ANALYSIS_PROJECT_STORAGE_KEY = "tep.analysis-projects.v1";
 const COMPARISON_COLORS = ["#d84a3a", "#2864c7", "#15906f", "#d98624", "#7b57b2", "#5d6a76"];
 
 const PERIODIC_MAIN_ROWS = [
@@ -437,6 +441,109 @@ function persistComparisonMaterials() {
   }
 }
 
+function restoreAnalysisProjects() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(ANALYSIS_PROJECT_STORAGE_KEY));
+    analysisProjects = Array.isArray(stored)
+      ? stored.filter(project => project && typeof project.id === "string" &&
+        typeof project.name === "string" && Array.isArray(project.material_keys)).slice(0, 30)
+      : [];
+  } catch (error) {
+    console.warn("无法恢复分析项目", error);
+    analysisProjects = [];
+  }
+}
+
+function persistAnalysisProjects() {
+  try {
+    window.localStorage.setItem(ANALYSIS_PROJECT_STORAGE_KEY, JSON.stringify(analysisProjects));
+  } catch (error) {
+    console.warn("无法保存分析项目", error);
+  }
+}
+
+function renderAnalysisProjectList() {
+  const select = document.querySelector("#analysis-project-select");
+  const sorted = [...analysisProjects].sort((left, right) =>
+    String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
+  );
+  select.innerHTML = "<option value=''>选择已保存项目…</option>" + sorted.map(project =>
+    "<option value='" + escapeHtml(project.id) + "'>" + escapeHtml(project.name) +
+    "（" + project.material_keys.length + "个材料）</option>"
+  ).join("");
+  if (activeAnalysisProjectId && analysisProjects.some(item => item.id === activeAnalysisProjectId)) {
+    select.value = activeAnalysisProjectId;
+  } else {
+    activeAnalysisProjectId = null;
+    select.value = "";
+  }
+  const hasSelection = Boolean(select.value);
+  document.querySelector("#analysis-project-load").disabled = !hasSelection;
+  document.querySelector("#analysis-project-delete").disabled = !hasSelection;
+}
+
+function saveAnalysisProject() {
+  const input = document.querySelector("#analysis-project-name");
+  const name = input.value.trim();
+  if (comparisonMaterialKeys.length < 2) return;
+  if (!name) {
+    input.focus();
+    input.placeholder = "请先输入分析项目名称";
+    return;
+  }
+  const now = new Date().toISOString();
+  let project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
+  if (!project) project = analysisProjects.find(item => item.name === name);
+  if (project) {
+    project.name = name;
+    project.material_keys = [...comparisonMaterialKeys];
+    project.temperature_k = Number(document.querySelector("#material-compare-temperature").value) || 300;
+    project.updated_at = now;
+  } else {
+    project = {
+      id: "analysis-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
+      name,
+      material_keys: [...comparisonMaterialKeys],
+      temperature_k: Number(document.querySelector("#material-compare-temperature").value) || 300,
+      created_at: now,
+      updated_at: now,
+    };
+    analysisProjects.push(project);
+  }
+  activeAnalysisProjectId = project.id;
+  persistAnalysisProjects();
+  renderAnalysisProjectList();
+  const result = document.querySelector("#material-compare-result");
+  if (!lastComparisonPayload) {
+    result.className = "compare-result placeholder";
+    result.textContent = "分析项目已保存。点击“生成对比”读取属性和真实QHA曲线。";
+  }
+}
+
+async function loadAnalysisProject() {
+  const selectedId = document.querySelector("#analysis-project-select").value;
+  const project = analysisProjects.find(item => item.id === selectedId);
+  if (!project) return;
+  activeAnalysisProjectId = project.id;
+  document.querySelector("#analysis-project-name").value = project.name;
+  document.querySelector("#material-compare-temperature").value = String(project.temperature_k || 300);
+  comparisonMaterialKeys = [...new Set(project.material_keys)].slice(0, 4);
+  persistComparisonMaterials();
+  renderComparisonSelection();
+  renderAnalysisProjectList();
+  await loadMaterialComparison();
+}
+
+function deleteAnalysisProject() {
+  const selectedId = document.querySelector("#analysis-project-select").value;
+  if (!selectedId) return;
+  analysisProjects = analysisProjects.filter(item => item.id !== selectedId);
+  if (activeAnalysisProjectId === selectedId) activeAnalysisProjectId = null;
+  persistAnalysisProjects();
+  document.querySelector("#analysis-project-name").value = "";
+  renderAnalysisProjectList();
+}
+
 function comparisonSelected(materialKey) {
   return comparisonMaterialKeys.includes(materialKey);
 }
@@ -452,11 +559,13 @@ function updateComparisonButtons() {
 }
 
 function renderComparisonSelection() {
+  lastComparisonPayload = null;
   const selection = document.querySelector("#material-compare-selection");
   const runButton = document.querySelector("#material-compare-run");
   const clearButton = document.querySelector("#material-compare-clear");
   runButton.disabled = comparisonMaterialKeys.length < 2;
   clearButton.disabled = comparisonMaterialKeys.length === 0;
+  document.querySelector("#analysis-project-save").disabled = comparisonMaterialKeys.length < 2;
   if (!comparisonMaterialKeys.length) {
     selection.className = "compare-selection muted";
     selection.textContent = "尚未收藏材料。";
@@ -590,6 +699,28 @@ function renderMaterialProvenance(data) {
     "<dt>QHA 曲线</dt><dd>" + curveSource + "</dd></dl></section>";
 }
 
+function renderMaterialDownloads(data) {
+  const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
+  const hasPoscar = data.structures?.some(item =>
+    String(item.format || "").toUpperCase() === "POSCAR" && item.content
+  );
+  const hasCurve = Boolean(data.precision_thermal_expansion?.points?.length >= 2);
+  const links = [];
+  if (hasPoscar) {
+    links.push("<a href='/api/materials/" + encodedKey +
+      "/download/POSCAR' download>下载 POSCAR</a>");
+  }
+  if (hasCurve) {
+    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
+      "/download/thermal_expansion.dat' download>下载 thermal_expansion.dat</a>");
+    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
+      "/download/thermal_expansion.pdf' download>下载曲线 PDF</a>");
+  }
+  return links.length
+    ? "<div class='material-download-actions'>" + links.join("") + "</div>"
+    : "";
+}
+
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
   const structures = data.structures.map(s => s.format + " (" + s.content_characters + " chars)").join(", ");
@@ -608,6 +739,7 @@ async function loadDetail(key) {
     "</strong> · " + escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
     "<button class='compare-toggle' data-compare-key='" + encodedKey + "' type='button'>收藏</button></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
+    renderMaterialDownloads(data) +
     "<p class='muted'>结构：" + escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
     "</dl>" + renderMaterialProvenance(data) +
     "<div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
@@ -626,7 +758,131 @@ function comparisonMetric(value, unit = "") {
   return Number.isFinite(Number(value)) ? numeric(value) + (unit ? " " + unit : "") : "—";
 }
 
+function safeExportStem(value) {
+  return String(value || "material-analysis")
+    .trim()
+    .replaceAll(/[^a-zA-Z0-9._\u4e00-\u9fff-]+/g, "_")
+    .replaceAll(/^[_ .]+|[_ .]+$/g, "") || "material-analysis";
+}
+
+function downloadBlob(content, mediaType, filename) {
+  const blob = content instanceof Blob ? content : new Blob([content], {type: mediaType});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function comparisonProjectName() {
+  return document.querySelector("#analysis-project-name").value.trim() || "material-comparison";
+}
+
+function comparisonExportPayload(payload) {
+  return {
+    report: {
+      project_name: comparisonProjectName(),
+      generated_at: new Date().toISOString(),
+      platform: "Thermal Expansion Materials Platform",
+      descriptor_definition: "E_tilde=160.21766208*abs(E_coh)/(AAV*avg_cn)",
+    },
+    comparison: payload,
+  };
+}
+
+function comparisonCsv(payload) {
+  const columns = [
+    "material_key", "formula", "external_id", "G_GPa", "E_tilde_GPa", "xi",
+    "catalog_CTE_ppm_per_K", "alpha_at_temperature_ppm_per_K", "temperature_K",
+    "K_GPa", "E_coh_eV_per_atom", "avg_cn", "dataset_version", "curve_job_id",
+  ];
+  const csvCell = value => {
+    const text = String(value ?? "");
+    return /[\",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+  };
+  const rows = payload.materials.map(item => [
+    item.material.material_key,
+    item.material.formula,
+    item.material.external_id,
+    item.metrics.G_GPa,
+    item.metrics.E_tilde_GPa,
+    item.metrics.xi,
+    item.metrics.CTE_ppm,
+    item.metrics.alpha_at_temperature_ppm_per_k,
+    payload.temperature_k,
+    item.metrics.K_GPa,
+    item.metrics.E_coh_eV_per_atom,
+    item.metrics.avg_cn,
+    item.dataset_release?.version,
+    item.curve?.job_id,
+  ]);
+  return [columns, ...rows].map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+function comparisonHtml(payload) {
+  const chart = document.querySelector("#material-comparison-chart");
+  const chartImage = chart ? chart.toDataURL("image/png") : "";
+  const headers = payload.materials.map(item =>
+    "<th>" + escapeHtml(item.material.material_key) + "</th>"
+  ).join("");
+  const rows = [
+    ["G (GPa)", "G_GPa"],
+    ["Ẽ (GPa)", "E_tilde_GPa"],
+    ["ξ = G/Ẽ", "xi"],
+    ["目录 CTE (ppm/K)", "CTE_ppm"],
+    ["α(" + numeric(payload.temperature_k) + " K) (ppm/K)", "alpha_at_temperature_ppm_per_k"],
+  ].map(([label, key]) => "<tr><th>" + escapeHtml(label) + "</th>" +
+    payload.materials.map(item => "<td>" + comparisonMetric(item.metrics[key]) + "</td>").join("") +
+    "</tr>").join("");
+  return "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>" +
+    escapeHtml(comparisonProjectName()) + "</title><style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;" +
+    "max-width:1100px;margin:32px auto;color:#21384a}table{width:100%;border-collapse:collapse}" +
+    "th,td{border:1px solid #d9e3ea;padding:8px;text-align:center}th{background:#eef5f7}" +
+    "img{width:100%;margin-top:18px;border:1px solid #d9e3ea}small{color:#687b8a}</style></head><body>" +
+    "<h1>" + escapeHtml(comparisonProjectName()) + "</h1><p><small>生成时间：" +
+    escapeHtml(new Date().toLocaleString()) + " · 数据版本：" +
+    escapeHtml(payload.materials[0]?.dataset_release?.version || "—") +
+    " · Ẽ=160.21766208×|E_coh|/(AAV×avg_cn)</small></p><table><thead><tr><th>指标</th>" +
+    headers + "</tr></thead><tbody>" + rows + "</tbody></table>" +
+    (chartImage ? "<img src='" + chartImage + "' alt='QHA曲线对比'>" : "") +
+    "</body></html>";
+}
+
+function exportComparisonPdf(payload) {
+  const params = new URLSearchParams({
+    material_keys: payload.materials.map(item => item.material.material_key).join("|"),
+    temperature_k: String(payload.temperature_k),
+    project_name: comparisonProjectName(),
+  });
+  const link = document.createElement("a");
+  link.href = "/api/materials/compare/report.pdf?" + params.toString();
+  link.download = safeExportStem(comparisonProjectName()) + "_comparison_report.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function bindComparisonExports(payload) {
+  const stem = safeExportStem(comparisonProjectName());
+  document.querySelector("#comparison-export-json").addEventListener("click", () =>
+    downloadBlob(
+      JSON.stringify(comparisonExportPayload(payload), null, 2),
+      "application/json;charset=utf-8",
+      stem + "_comparison.json",
+    ));
+  document.querySelector("#comparison-export-csv").addEventListener("click", () =>
+    downloadBlob(comparisonCsv(payload), "text/csv;charset=utf-8", stem + "_comparison.csv"));
+  document.querySelector("#comparison-export-html").addEventListener("click", () =>
+    downloadBlob(comparisonHtml(payload), "text/html;charset=utf-8", stem + "_report.html"));
+  document.querySelector("#comparison-export-pdf").addEventListener("click", () =>
+    exportComparisonPdf(payload));
+}
+
 function renderMaterialComparison(payload) {
+  lastComparisonPayload = payload;
   const result = document.querySelector("#material-compare-result");
   const temperature = Number(payload.temperature_k);
   const columns = payload.materials.map(item =>
@@ -661,7 +917,12 @@ function renderMaterialComparison(payload) {
     (curveCount
       ? "<canvas id='material-comparison-chart' class='comparison-chart' width='1100' height='480' " +
         "aria-label='收藏材料的QHA热膨胀曲线对比'></canvas>"
-      : "<p class='muted'>所选材料暂无可共同展示的已关联QHA曲线。</p>");
+      : "<p class='muted'>所选材料暂无可共同展示的已关联QHA曲线。</p>") +
+    "<div class='comparison-export-actions'><span>导出分析结果</span>" +
+    "<button id='comparison-export-csv' type='button'>CSV</button>" +
+    "<button id='comparison-export-json' type='button'>JSON</button>" +
+    "<button id='comparison-export-html' type='button'>HTML报告</button>" +
+    "<button id='comparison-export-pdf' type='button'>PDF报告</button></div>";
   result.querySelectorAll("button[data-comparison-detail]").forEach(button => {
     button.addEventListener("click", async () => {
       await loadDetail(decodeURIComponent(button.dataset.comparisonDetail));
@@ -669,6 +930,7 @@ function renderMaterialComparison(payload) {
     });
   });
   if (curveCount) drawMaterialComparisonCurves(payload);
+  bindComparisonExports(payload);
 }
 
 function drawMaterialComparisonCurves(payload) {
@@ -2017,7 +2279,9 @@ async function designZteComposite() {
 async function initialize() {
   restoreLandscapeContext();
   restoreComparisonMaterials();
+  restoreAnalysisProjects();
   renderComparisonSelection();
+  renderAnalysisProjectList();
   setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
@@ -2056,6 +2320,19 @@ async function initialize() {
     const result = document.querySelector("#material-compare-result");
     result.className = "compare-result placeholder";
     result.textContent = "至少收藏两个材料后即可生成对比。";
+  });
+  document.querySelector("#analysis-project-save").addEventListener("click", saveAnalysisProject);
+  document.querySelector("#analysis-project-load").addEventListener("click", () =>
+    loadAnalysisProject().catch(error => {
+      document.querySelector("#material-compare-result").textContent = error.message;
+    }));
+  document.querySelector("#analysis-project-delete").addEventListener("click", deleteAnalysisProject);
+  document.querySelector("#analysis-project-select").addEventListener("change", event => {
+    activeAnalysisProjectId = event.target.value || null;
+    const project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
+    if (project) document.querySelector("#analysis-project-name").value = project.name;
+    document.querySelector("#analysis-project-load").disabled = !activeAnalysisProjectId;
+    document.querySelector("#analysis-project-delete").disabled = !activeAnalysisProjectId;
   });
   document.querySelector("#pte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));

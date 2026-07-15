@@ -3,11 +3,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from hashlib import sha256
 from pathlib import Path
+import re
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -70,9 +72,25 @@ from te_platform.jobs.precision_runner import (
 )
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
+from te_platform.reports import build_comparison_report_pdf, build_material_curve_pdf
 
 
 WEB_DIRECTORY = Path(__file__).resolve().parents[1] / "web"
+
+
+def _download_filename(material_key: str, suffix: str) -> str:
+    stem = re.sub(r'[\x00-\x1f<>:"/\\|?*]+', "_", material_key).strip(" ._") or "material"
+    return f"{stem}_{suffix}"
+
+
+def _attachment_headers(filename: str) -> dict[str, str]:
+    ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("._") or "download"
+    encoded_filename = quote(filename, safe="")
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        )
+    }
 
 
 class SBRRequest(BaseModel):
@@ -394,6 +412,100 @@ def create_app(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/api/materials/compare/report.pdf")
+    def material_comparison_pdf(
+        material_keys: str = Query(min_length=3, max_length=2048),
+        temperature_k: float = Query(default=300.0, ge=0),
+        project_name: str = Query(default="Material comparison", min_length=1, max_length=120),
+    ) -> Response:
+        ensure_catalog_database(catalog_db)
+        try:
+            comparison = compare_materials(
+                catalog_db,
+                DEFAULT_RELEASE_SLUG,
+                material_keys.split("|"),
+                temperature_k=temperature_k,
+            )
+            content = build_comparison_report_pdf(comparison, project_name=project_name.strip())
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        filename = _download_filename(project_name, "comparison_report.pdf")
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers=_attachment_headers(filename),
+        )
+
+    @app.get("/api/materials/{material_key}/download/POSCAR")
+    def material_poscar_download(material_key: str) -> Response:
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        structure = next(
+            (
+                item
+                for item in detail["structures"]
+                if str(item.get("format", "")).upper() == "POSCAR" and item.get("content")
+            ),
+            None,
+        )
+        if structure is None:
+            raise HTTPException(status_code=404, detail="Material has no stored POSCAR")
+        filename = _download_filename(material_key, "POSCAR")
+        content = str(structure["content"])
+        if not content.endswith("\n"):
+            content += "\n"
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(filename),
+        )
+
+    @app.get("/api/materials/{material_key}/download/thermal_expansion.dat")
+    def material_thermal_expansion_download(material_key: str) -> Response:
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        curve = detail.get("precision_thermal_expansion")
+        if not curve:
+            raise HTTPException(status_code=404, detail="Material has no stored thermal-expansion curve")
+        release = detail.get("dataset_release") or {}
+        lines = [
+            f"# material_key: {material_key}",
+            f"# dataset_release: {release.get('slug', '')} version={release.get('version', '')}",
+            f"# qha_job_id: {curve.get('job_id', '')}",
+            "# columns: temperature_K volumetric_thermal_expansion_coefficient_1_per_K",
+        ]
+        lines.extend(
+            f"{float(point['temperature_k']):.8f} {float(point['alpha_ppm_per_k']) / 1_000_000:.12e}"
+            for point in curve["points"]
+        )
+        filename = _download_filename(material_key, "thermal_expansion.dat")
+        return Response(
+            content="\n".join(lines) + "\n",
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(filename),
+        )
+
+    @app.get("/api/materials/{material_key}/download/thermal_expansion.pdf")
+    def material_thermal_expansion_pdf(material_key: str) -> Response:
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            content = build_material_curve_pdf(detail)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        filename = _download_filename(material_key, "thermal_expansion.pdf")
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers=_attachment_headers(filename),
+        )
 
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:
