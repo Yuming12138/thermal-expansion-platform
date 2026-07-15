@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-4", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-5", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -304,6 +304,30 @@ class ApiTests(unittest.TestCase):
         tools = self.client.get("/api/agent/tools")
         self.assertEqual(tools.status_code, 200)
         self.assertIn("classify_sbr", tools.json()["tools"])
+        self.assertIn("describe_database", tools.json()["tools"])
+        self.assertIn("query_database", tools.json()["tools"])
+        self.assertIn("request_calculation_task", tools.json()["tools"])
+        self.assertNotIn("query_thermal_expansion_catalog", tools.json()["tools"])
+        schema = self.client.post(
+            "/api/agent/call",
+            json={"tool": "describe_database", "arguments": {}},
+        )
+        self.assertEqual(schema.status_code, 200)
+        self.assertEqual(schema.json()["result"]["access"], "read_only")
+        query = self.client.post(
+            "/api/agent/call",
+            json={
+                "tool": "query_database",
+                "arguments": {"sql": "SELECT COUNT(*) AS material_count FROM materials"},
+            },
+        )
+        self.assertEqual(query.status_code, 200)
+        self.assertGreater(query.json()["result"]["rows"][0]["material_count"], 0)
+        mutation = self.client.post(
+            "/api/agent/call",
+            json={"tool": "query_database", "arguments": {"sql": "DELETE FROM materials"}},
+        )
+        self.assertEqual(mutation.status_code, 422)
         allowed = self.client.post(
             "/api/agent/call",
             json={"tool": "classify_sbr", "arguments": {"shear_modulus_gpa": 20, "bonding_modulus_gpa": 10}},
@@ -349,14 +373,23 @@ class ApiTests(unittest.TestCase):
         request = self.client.post(
             "/api/agent/call",
             json={
-                "tool": "request_qha_calculation",
-                "arguments": {"structure_id": structure_id, "qha_points": 7},
+                "tool": "request_calculation_task",
+                "arguments": {"structure_id": structure_id, "mode": "qha", "qha_points": 7},
             },
         )
         self.assertEqual(request.status_code, 200)
         approval = request.json()["result"]
         self.assertTrue(approval["approval_required"])
         self.assertEqual(approval["status"], "PENDING_APPROVAL")
+        pending = self.client.get(
+            "/api/agent/approvals",
+            params={"status": "PENDING_APPROVAL"},
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertIn(
+            approval["approval_id"],
+            [item["id"] for item in pending.json()["requests"]],
+        )
 
         fake_job = {
             "id": "agent-qha-123",
@@ -372,6 +405,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(approved.json()["job"]["id"], "agent-qha-123")
         self.assertEqual(submit_mock.call_args.args[0], self.workspace_database)
         self.assertEqual(submit_mock.call_args.args[2].qha_points, 7)
+        pending_after_approval = self.client.get(
+            "/api/agent/approvals",
+            params={"status": "PENDING_APPROVAL"},
+        )
+        self.assertNotIn(
+            approval["approval_id"],
+            [item["id"] for item in pending_after_approval.json()["requests"]],
+        )
 
         duplicate = self.client.post(
             f"/api/agent/approvals/{approval['approval_id']}/approve"
@@ -393,7 +434,7 @@ class ApiTests(unittest.TestCase):
                 request = self.client.post(
                     "/api/agent/call",
                     json={
-                        "tool": "request_structure_calculation",
+                        "tool": "request_calculation_task",
                         "arguments": {"structure_id": structure_id, "mode": mode},
                     },
                 )
@@ -418,8 +459,8 @@ class ApiTests(unittest.TestCase):
         request = self.client.post(
             "/api/agent/call",
             json={
-                "tool": "request_qha_calculation",
-                "arguments": {"structure_id": structure_id},
+                "tool": "request_calculation_task",
+                "arguments": {"structure_id": structure_id, "mode": "qha"},
             },
         ).json()["result"]
         rejected = self.client.post(

@@ -10,13 +10,15 @@ from te_platform.agent.registry import ToolRegistry
 from te_platform.config import AgentSettings, agent_settings
 
 
-SYSTEM_PROMPT = """你是热膨胀材料智能计算与复合设计平台的科学助手。
-优先调用白名单工具查询真实数据库和执行可复核计算，不要编造材料数据。
-回答时区分数据库事实、模型预测和科学建议，并注明热膨胀系数单位。
-你应自主规划并连续调用通用工具解决问题。只要数据库工具能够完成检索、全库排序、筛选或比较，就直接完成，不要反问用户提供平台已有的数据或专用接口。
-涉及“最大、最小、排名、前N名”等问题时，必须使用全库热膨胀查询工具，并报告实际参与排名的材料数量；不能把有限搜索结果称为全库结论。
-数据库读取和分析工具可以自动执行；耗时计算必须先创建审批请求，并由用户在界面中明确批准。
-当用户上传结构并请求计算时，先检查结构，再自主选择计算层级并创建审批请求：快速初筛或NTE/PTE倾向选择fast；完整弹性矩阵或精准SBR选择elastic；直接热膨胀系数或alpha(T)曲线选择qha。若用户明确指定层级，服从用户。审批请求本身不会启动计算；明确告诉用户需要点击确认按钮。不要声称任务已经运行。
+MAX_AGENT_STEPS = 12
+
+
+SYSTEM_PROMPT = """你是热膨胀材料科研工作台的自主科学Agent。
+围绕用户目标持续执行“理解问题—选择工具—观察结果—修正方案—验证结论”的循环，直到完成或遇到必须由用户决定的边界。
+优先使用少量通用工具，不要因为没有某个专用函数就停止：先用describe_database理解表结构，再自行编写只读SQL并用query_database完成检索、关联、统计、任意温度插值和全库排名。SQL失败时根据错误修改后重试。
+数据库目录库永远只读。回答必须区分数据库事实、模型预测和科学建议，注明热膨胀系数单位；全库排名必须报告实际覆盖目标温度并参与排序的材料数量，不能把有限候选称为全库结论。
+涉及上传结构的fast、elastic或qha任务时，先检查结构，必要时查看任务能力，再调用request_calculation_task创建审批请求。fast用于快速NTE/PTE倾向，elastic用于完整弹性张量和精准SBR，qha用于alpha(T)曲线。审批请求不等于任务已提交；必须等待用户确认。创建一个审批请求后不要继续创建其他任务，只需说明任务类型、参数和确认步骤。
+用户批准后，使用对话历史中的job_id调用get_calculation_job查询状态和结果。数据库读取可自动执行，目录库写入、耗时计算和其他副作用不得绕过审批。
 保持回答简洁、明确，默认使用中文。"""
 
 
@@ -55,6 +57,8 @@ def capability(settings: AgentSettings | None = None) -> dict[str, object]:
         "base_url": current.base_url,
         "model": current.model,
         "tool_calling": True,
+        "agent_loop": True,
+        "max_tool_steps": MAX_AGENT_STEPS,
         "api_key_source": "process_environment" if current.configured else None,
     }
 
@@ -75,6 +79,7 @@ async def chat_with_model(
     *,
     history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    pending_actions: list[dict[str, Any]] | None = None,
     settings: AgentSettings | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, object]:
@@ -95,6 +100,17 @@ async def chat_with_model(
                 ),
             }
         )
+    if pending_actions:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "当前工作区已有以下待用户确认的计算审批。不要重复创建任务；"
+                    "若用户询问提交状态，说明需要先在界面确认或取消：\n"
+                    + json.dumps(pending_actions, ensure_ascii=False)
+                ),
+            }
+        )
     for item in (history or [])[-12:]:
         role = item.get("role")
         content = item.get("content", "")
@@ -102,10 +118,12 @@ async def chat_with_model(
             messages.append({"role": role, "content": content[:4000]})
     messages.append({"role": "user", "content": message})
     executed: list[dict[str, object]] = []
+    call_counts: dict[str, int] = {}
+    approval_pending = bool(pending_actions)
     owns_client = client is None
     active_client = client or httpx.AsyncClient(timeout=current.timeout_seconds)
     try:
-        for _ in range(8):
+        for step in range(1, MAX_AGENT_STEPS + 1):
             try:
                 response = await active_client.post(
                     f"{current.base_url}/chat/completions",
@@ -113,7 +131,9 @@ async def chat_with_model(
                     json={
                         "model": current.model,
                         "messages": messages,
-                        "tools": registry.openai_tools(),
+                        "tools": registry.openai_tools(
+                            include_side_effecting=not approval_pending
+                        ),
                         "tool_choice": "auto",
                         "temperature": 0.2,
                     },
@@ -153,12 +173,30 @@ async def chat_with_model(
                     if not isinstance(decoded_arguments, dict):
                         raise TypeError("Tool arguments must be a JSON object")
                     arguments = decoded_arguments
-                    result = registry.call(name, **arguments)
-                    tool_result: object = result
+                    fingerprint = name + ":" + json.dumps(
+                        arguments, ensure_ascii=False, sort_keys=True
+                    )
+                    call_counts[fingerprint] = call_counts.get(fingerprint, 0) + 1
+                    if call_counts[fingerprint] >= 3:
+                        raise ValueError(
+                            "The same tool call has already failed or repeated twice; revise the plan"
+                        )
+                    if approval_pending and registry.is_side_effecting(name):
+                        raise ValueError(
+                            "A task approval is already pending; do not create another side effect"
+                        )
+                    tool_result = registry.call(name, **arguments)
+                    if isinstance(tool_result, dict) and tool_result.get("approval_required"):
+                        approval_pending = True
                 except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
                     tool_result = {"error": str(error)}
                 executed.append(
-                    {"tool": name, "arguments": arguments, "result": tool_result}
+                    {
+                        "step": step,
+                        "tool": name,
+                        "arguments": arguments,
+                        "result": tool_result,
+                    }
                 )
                 messages.append(
                     {
@@ -167,7 +205,19 @@ async def chat_with_model(
                         "content": json.dumps(tool_result, ensure_ascii=False),
                     }
                 )
-        raise AgentUpstreamError("AI助手连续调用工具次数过多，请缩小问题范围后重试。")
+            if approval_pending:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "当前已有待用户确认的任务审批。不要再创建任务；"
+                            "请向用户概括审批内容并说明点击确认后才会提交。"
+                        ),
+                    }
+                )
+        raise AgentUpstreamError(
+            f"AI助手已达到{MAX_AGENT_STEPS}步工具预算，仍未形成结论。请缩小问题范围后重试。"
+        )
     finally:
         if owns_client:
             await active_client.aclose()

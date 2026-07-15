@@ -45,9 +45,11 @@ from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
 from te_platform.agent.actions import (
+    PENDING_APPROVAL,
     claim_action_request,
     complete_action_request,
     fail_action_request,
+    list_action_requests,
     reject_action_request,
 )
 from te_platform.agent.uploads import (
@@ -236,7 +238,10 @@ def create_app(
 
     @app.get("/api/agent/tools")
     def agent_tool_names() -> dict[str, object]:
-        return {"tools": agent_tools.names()}
+        return {
+            "tools": agent_tools.names(model_visible_only=True),
+            "architecture": "general_primitives_with_approval_gated_tasks",
+        }
 
     @app.get("/api/agent/capability")
     def agent_model_capability() -> dict[str, object]:
@@ -264,6 +269,18 @@ def create_app(
                 agent_tools,
                 history=[item.model_dump() for item in request.history],
                 attachments=attachments,
+                pending_actions=[
+                    {
+                        "approval_id": item["id"],
+                        "summary": item["summary"],
+                        "created_at": item["created_at"],
+                    }
+                    for item in list_action_requests(
+                        workspace_db,
+                        status=PENDING_APPROVAL,
+                        limit=5,
+                    )
+                ],
             )
         except AgentNotConfiguredError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
@@ -340,6 +357,18 @@ def create_app(
                 except ValueError:
                     pass
             raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/api/agent/approvals")
+    def agent_action_requests(
+        status: Literal[
+            "PENDING_APPROVAL", "APPROVED", "EXECUTED", "REJECTED", "FAILED"
+        ] = "PENDING_APPROVAL",
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> dict[str, object]:
+        return {
+            "status": status,
+            "requests": list_action_requests(workspace_db, status=status, limit=limit),
+        }
 
     @app.post("/api/agent/approvals/{action_id}/reject")
     def reject_agent_action(action_id: str) -> dict[str, object]:

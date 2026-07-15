@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from te_platform.agent.actions import create_action_request
+from te_platform.agent.actions import create_action_request, get_action_request
+from te_platform.agent.database_tools import describe_catalog_database, execute_catalog_sql
 from te_platform.agent.registry import ToolRegistry
 from te_platform.agent.uploads import inspect_agent_structure
 from te_platform.catalog.queries import compare_materials, material_detail, search_materials
@@ -48,6 +49,7 @@ def default_registry(
             "用内聚能、平均原子体积和平均配位数计算E_tilde=U_V/n，"
             "再结合预测剪切模量执行快速SBR筛选。"
         ),
+        model_visible=False,
     )
     registry.register(
         "optimize_composite",
@@ -66,6 +68,41 @@ def default_registry(
     )
     if catalog_database is not None:
         releases = {"nte": DEFAULT_RELEASE_SLUG, "pte": DEFAULT_PTE_RELEASE_SLUG}
+
+        registry.register(
+            "describe_database",
+            lambda: describe_catalog_database(catalog_database),
+            description=(
+                "检查内置材料目录库的表、字段、外键、单位和可用SQL函数。"
+                "当问题需要新的查询方式或不清楚数据结构时先调用本工具。"
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        )
+        registry.register(
+            "query_database",
+            lambda **kwargs: execute_catalog_sql(catalog_database, **kwargs),
+            description=(
+                "执行模型自行编写的单条只读SQLite SELECT/WITH查询。目录库不可修改。"
+                "支持alpha_at_temperature(points_json, temperature_k)将真实QHA曲线线性插值为1/K；"
+                "乘以1e6得到ppm/K。优先用本工具自行完成任意温度排名、组合筛选、统计和关联查询，"
+                "不要要求开发者为每种问题增加专用工具。SQL失败时阅读错误并修正后重试。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "minLength": 1, "maxLength": 20000},
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": {"type": ["string", "number", "null"]},
+                        "default": {},
+                    },
+                    "max_rows": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                    "timeout_ms": {"type": "integer", "minimum": 100, "maximum": 5000, "default": 2000},
+                },
+                "required": ["sql"],
+                "additionalProperties": False,
+            },
+        )
 
         def search_catalog(role: str, query: str = "", limit: int = 10):
             normalized_role = role.lower()
@@ -118,6 +155,7 @@ def default_registry(
                 "required": ["role"],
                 "additionalProperties": False,
             },
+            model_visible=False,
         )
         registry.register(
             "get_material",
@@ -132,6 +170,7 @@ def default_registry(
                 "required": ["role", "material_key"],
                 "additionalProperties": False,
             },
+            model_visible=False,
         )
         registry.register(
             "compare_catalog_materials",
@@ -157,6 +196,7 @@ def default_registry(
                 "required": ["role", "material_keys"],
                 "additionalProperties": False,
             },
+            model_visible=False,
         )
         registry.register(
             "query_thermal_expansion_catalog",
@@ -183,6 +223,7 @@ def default_registry(
                 },
                 "additionalProperties": False,
             },
+            model_visible=False,
         )
         registry.register(
             "design_zte_material_pair",
@@ -219,7 +260,44 @@ def default_registry(
             },
         )
 
-        def request_structure_calculation(
+        calculation_capabilities = {
+            "fast": {
+                "label": "快速预测",
+                "workflow": "fast_structure_screening",
+                "purpose": "ALIGNN预测G、MatterSim得到E_tilde并用SBR判断NTE/PTE倾向。",
+                "typical_cost": "低",
+            },
+            "elastic": {
+                "label": "精准弹性预测",
+                "workflow": "precision_elastic",
+                "purpose": "MatterSim完整弹性张量、Hill剪切模量、E_tilde和SBR。",
+                "typical_cost": "中",
+            },
+            "qha": {
+                "label": "QHA热膨胀计算",
+                "workflow": "precision_qha",
+                "purpose": "MatterSim QHA计算完整alpha(T)曲线。",
+                "typical_cost": "高",
+            },
+        }
+
+        registry.register(
+            "describe_calculation_tasks",
+            lambda: {
+                "tasks": calculation_capabilities,
+                "submission_policy": (
+                    "所有任务先创建PENDING_APPROVAL审批请求；用户确认后才会生成计算任务。"
+                ),
+                "required_input": "已上传CIF/POSCAR的structure_id",
+            },
+            description=(
+                "查看可提交的fast、elastic和qha任务、用途、成本层级及审批规则。"
+                "当用户目标含糊或需要权衡计算层级时调用。"
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        )
+
+        def request_calculation_task(
             structure_id: str,
             mode: str,
             qha_points: int = 11,
@@ -235,18 +313,14 @@ def default_registry(
                 parallel_workers=parallel_workers,
             )
             config.validate()
-            labels = {
-                "fast": "快速预测（ALIGNN G + MatterSim E_tilde + SBR）",
-                "elastic": "精准弹性预测（完整弹性张量 + Hill G + SBR）",
-                "qha": "MatterSim QHA 热膨胀曲线计算",
-            }
-            if mode not in labels:
+            if mode not in calculation_capabilities:
                 raise ValueError("mode must be 'fast', 'elastic', or 'qha'")
+            capability = calculation_capabilities[mode]
             action = create_action_request(
                 workspace_database,
                 action="submit_structure_calculation",
                 summary=(
-                    f"对上传结构 {structure_id[:12]}… 提交{labels[mode]}"
+                    f"对上传结构 {structure_id[:12]}… 提交{capability['label']}"
                     + (
                         f"；qha_points={qha_points}, mesh={qha_mesh}, scale={qha_scale}, "
                         f"parallel_workers={parallel_workers}"
@@ -269,13 +343,14 @@ def default_registry(
                 "summary": action["summary"],
                 "status": action["status"],
                 "structure": structure,
+                "next_step": "等待用户在对话窗口点击确认并提交。",
             }
 
         registry.register(
-            "request_structure_calculation",
-            request_structure_calculation,
+            "request_calculation_task",
+            request_calculation_task,
             description=(
-                "为已上传结构创建计算审批请求。根据用户目标自主选择mode："
+                "为已上传结构统一创建计算任务审批请求。根据用户目标自主选择mode："
                 "fast用于快速判断NTE/PTE倾向，elastic用于完整弹性张量和精准SBR，"
                 "qha用于直接计算alpha(T)热膨胀曲线。此工具不会直接启动计算，必须由用户批准。"
             ),
@@ -292,11 +367,33 @@ def default_registry(
                 "required": ["structure_id", "mode"],
                 "additionalProperties": False,
             },
+            side_effecting=True,
+        )
+
+        registry.register(
+            "request_structure_calculation",
+            request_calculation_task,
+            description="兼容工具：创建结构计算审批请求。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "structure_id": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha"]},
+                    "qha_points": {"type": "integer", "enum": [7, 9, 11], "default": 11},
+                    "qha_mesh": {"type": "integer", "minimum": 10, "maximum": 60, "default": 30},
+                    "qha_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01, "default": 0.003},
+                    "parallel_workers": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+                },
+                "required": ["structure_id", "mode"],
+                "additionalProperties": False,
+            },
+            model_visible=False,
+            side_effecting=True,
         )
 
         registry.register(
             "request_qha_calculation",
-            lambda structure_id, **kwargs: request_structure_calculation(
+            lambda structure_id, **kwargs: request_calculation_task(
                 structure_id=structure_id, mode="qha", **kwargs
             ),
             description="兼容工具：为上传结构创建QHA热膨胀计算审批请求。",
@@ -310,6 +407,20 @@ def default_registry(
                     "parallel_workers": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
                 },
                 "required": ["structure_id"],
+                "additionalProperties": False,
+            },
+            model_visible=False,
+            side_effecting=True,
+        )
+
+        registry.register(
+            "get_task_request",
+            lambda approval_id: get_action_request(workspace_database, approval_id),
+            description="查询计算任务审批请求的状态、参数、执行结果或失败原因。",
+            parameters={
+                "type": "object",
+                "properties": {"approval_id": {"type": "string"}},
+                "required": ["approval_id"],
                 "additionalProperties": False,
             },
         )

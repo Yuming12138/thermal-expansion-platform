@@ -76,6 +76,124 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_calls"][0]["tool"], "echo_number")
         self.assertEqual(request_count, 2)
 
+    async def test_pending_approval_hides_additional_side_effect_tools(self) -> None:
+        request_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            payload = json.loads(request.content)
+            tool_names = {
+                item["function"]["name"] for item in payload.get("tools", [])
+            }
+            if request_count == 1:
+                self.assertIn("request_task", tool_names)
+                return httpx.Response(
+                    200,
+                    json={
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    "tool_calls": [
+                                        {
+                                            "id": "call-task",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "request_task",
+                                                "arguments": "{}",
+                                            },
+                                        }
+                                    ],
+                                }
+                            }
+                        ]
+                    },
+                )
+            self.assertNotIn("request_task", tool_names)
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "已创建审批请求，请确认后提交。",
+                            }
+                        }
+                    ]
+                },
+            )
+
+        registry = ToolRegistry()
+        registry.register(
+            "request_task",
+            lambda: {"approval_required": True, "approval_id": "approval-1"},
+            side_effecting=True,
+        )
+        registry.register("read_status", lambda: {"status": "ok"})
+        settings = AgentSettings(
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            api_key="local-test-key",
+            timeout_seconds=10,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await chat_with_model(
+                "提交任务",
+                registry,
+                settings=settings,
+                client=client,
+            )
+
+        self.assertEqual(result["answer"], "已创建审批请求，请确认后提交。")
+        self.assertEqual(result["tool_calls"][0]["result"]["approval_id"], "approval-1")
+        self.assertEqual(request_count, 2)
+
+    async def test_existing_pending_action_hides_side_effects_from_first_step(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content)
+            tool_names = {
+                item["function"]["name"] for item in payload.get("tools", [])
+            }
+            self.assertNotIn("request_task", tool_names)
+            self.assertIn("approval-previous", json.dumps(payload["messages"]))
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "已有待确认任务，请先确认或取消。",
+                            }
+                        }
+                    ]
+                },
+            )
+
+        registry = ToolRegistry()
+        registry.register("request_task", lambda: {}, side_effecting=True)
+        registry.register("read_status", lambda: {"status": "ok"})
+        settings = AgentSettings(
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            api_key="local-test-key",
+            timeout_seconds=10,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await chat_with_model(
+                "再提交一个任务",
+                registry,
+                pending_actions=[
+                    {"approval_id": "approval-previous", "summary": "QHA task"}
+                ],
+                settings=settings,
+                client=client,
+            )
+        self.assertEqual(result["answer"], "已有待确认任务，请先确认或取消。")
+
     def test_capability_never_returns_key(self) -> None:
         settings = AgentSettings(
             base_url="https://example.invalid/v1",
@@ -85,6 +203,7 @@ class AgentLlmTests(unittest.IsolatedAsyncioTestCase):
         )
         result = capability(settings)
         self.assertTrue(result["configured"])
+        self.assertTrue(result["agent_loop"])
         self.assertNotIn("api_key", result)
         self.assertNotIn("local-test-key", json.dumps(result))
 

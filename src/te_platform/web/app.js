@@ -23,6 +23,7 @@ let selectedLandscapePoint = null;
 let landscapeHitPoints = [];
 let agentHistory = [];
 let agentAttachments = [];
+const renderedAgentApprovalIds = new Set();
 let materialStructureViewer = null;
 let materialStructureAxisViewer = null;
 let structureFullscreenHandlerInstalled = false;
@@ -2509,6 +2510,8 @@ async function initialize() {
   }
 
   function appendAgentApproval(approval) {
+    if (!approval?.approval_id || renderedAgentApprovalIds.has(approval.approval_id)) return;
+    renderedAgentApprovalIds.add(approval.approval_id);
     const bubble = appendAgentMessage("assistant", "", "wide");
     const card = document.createElement("div");
     card.className = "agent-approval-card";
@@ -2543,7 +2546,7 @@ async function initialize() {
           "/api/agent/approvals/" + encodeURIComponent(approval.approval_id) + "/approve",
           {method: "POST"},
         );
-        bubble.textContent = `已批准并提交 QHA 任务：${result.job.id}`;
+        bubble.textContent = `已批准并提交${modeLabel}任务：${result.job.id}`;
         agentHistory.push({
           role: "assistant",
           content: `用户已批准${modeLabel}，任务job_id=${result.job.id}，后续可查询任务进度。`,
@@ -2566,7 +2569,7 @@ async function initialize() {
           "/api/agent/approvals/" + encodeURIComponent(approval.approval_id) + "/reject",
           {method: "POST"},
         );
-        bubble.textContent = "已取消本次 QHA 计算请求。";
+        bubble.textContent = `已取消本次${modeLabel}请求。`;
       } catch (error) {
         summary.textContent = error.message;
       }
@@ -2582,7 +2585,11 @@ async function initialize() {
     appendAgentMessage("user", message);
     input.value = "";
     sendButton.disabled = true;
-    const pending = appendAgentMessage("assistant", "正在查询数据库并分析…", "pending");
+    const pending = appendAgentMessage(
+      "assistant",
+      "正在自主规划，并调用只读数据库或任务工具…",
+      "pending",
+    );
     try {
       const result = await api("/api/agent/chat", {
         method: "POST",
@@ -2628,6 +2635,13 @@ async function initialize() {
       ? `${capability.model} · 已连接`
       : `尚未配置 AI 密钥`;
     statusDot.classList.add(capability.configured ? "online" : "offline");
+    const pendingApprovals = await api("/api/agent/approvals?status=PENDING_APPROVAL&limit=10");
+    (pendingApprovals.requests || []).forEach(item => appendAgentApproval({
+      approval_id: item.id,
+      mode: item.arguments?.mode || "qha",
+      summary: item.summary,
+      status: item.status,
+    }));
   } catch (error) {
     document.querySelector("#agent-status").textContent = error.message;
     document.querySelector("#agent-status-dot").classList.add("offline");

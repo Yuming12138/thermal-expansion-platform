@@ -10,6 +10,8 @@ class RegisteredTool:
     callback: Callable[..., Any]
     description: str
     parameters: dict[str, Any]
+    model_visible: bool
+    side_effecting: bool
 
 
 class ToolRegistry:
@@ -25,6 +27,8 @@ class ToolRegistry:
         *,
         description: str = "",
         parameters: dict[str, Any] | None = None,
+        model_visible: bool = True,
+        side_effecting: bool = False,
     ) -> None:
         if not name or name.startswith("_"):
             raise ValueError("Tool name must be public and non-empty")
@@ -34,10 +38,16 @@ class ToolRegistry:
             callback=tool,
             description=description or name,
             parameters=parameters or {"type": "object", "properties": {}},
+            model_visible=model_visible,
+            side_effecting=side_effecting,
         )
 
-    def names(self) -> tuple[str, ...]:
-        return tuple(sorted(self._tools))
+    def names(self, *, model_visible_only: bool = False) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, tool in sorted(self._tools.items())
+            if not model_visible_only or tool.model_visible
+        )
 
     def call(self, name: str, **arguments: Any) -> Any:
         try:
@@ -46,7 +56,13 @@ class ToolRegistry:
             raise KeyError(f"Unknown Agent tool: {name}") from error
         return tool.callback(**arguments)
 
-    def openai_tools(self) -> list[dict[str, Any]]:
+    def is_side_effecting(self, name: str) -> bool:
+        try:
+            return self._tools[name].side_effecting
+        except KeyError as error:
+            raise KeyError(f"Unknown Agent tool: {name}") from error
+
+    def openai_tools(self, *, include_side_effecting: bool = True) -> list[dict[str, Any]]:
         return [
             {
                 "type": "function",
@@ -57,4 +73,5 @@ class ToolRegistry:
                 },
             }
             for name, tool in sorted(self._tools.items())
+            if tool.model_visible and (include_side_effecting or not tool.side_effecting)
         ]

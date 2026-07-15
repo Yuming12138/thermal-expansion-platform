@@ -72,6 +72,28 @@ def get_action_request(database: str | Path, action_id: str) -> dict[str, Any]:
     return _row_to_action(row)
 
 
+def list_action_requests(
+    database: str | Path,
+    *,
+    status: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    initialize_database(database)
+    row_limit = max(1, min(int(limit), 100))
+    query = "SELECT * FROM agent_action_requests"
+    parameters: tuple[Any, ...] = ()
+    if status is not None:
+        if status not in {PENDING_APPROVAL, APPROVED, EXECUTED, REJECTED, FAILED}:
+            raise ValueError(f"Unknown Agent action status: {status}")
+        query += " WHERE status = ?"
+        parameters = (status,)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    parameters += (row_limit,)
+    with connect_database(database) as connection:
+        rows = connection.execute(query, parameters).fetchall()
+    return [_row_to_action(row) for row in rows]
+
+
 def claim_action_request(database: str | Path, action_id: str) -> dict[str, Any]:
     failure_status: str | None = None
     with connect_database(database) as connection:
