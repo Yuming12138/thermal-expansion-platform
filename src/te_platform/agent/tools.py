@@ -233,7 +233,10 @@ def default_registry(
                 nte_release_slug=DEFAULT_RELEASE_SLUG,
                 **kwargs,
             ),
-            description="使用数据库中的真实PTE/NTE热膨胀曲线优化指定温区的ZTE固定体积分数。",
+            description=(
+                "使用数据库中的真实PTE/NTE热膨胀曲线，在指定温区比较线性ROM与Turner模型，"
+                "优化固定体积分数并返回质量分数、误差和ZTE温区覆盖率。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -242,6 +245,23 @@ def default_registry(
                     "temperature_min_k": {"type": "number", "minimum": 0, "default": 300},
                     "temperature_max_k": {"type": "number", "minimum": 1, "default": 800},
                     "target_alpha_ppm_per_k": {"type": "number", "default": 0},
+                    "model": {
+                        "type": "string",
+                        "enum": ["linear_rom", "turner"],
+                        "default": "linear_rom",
+                    },
+                    "temperature_step_k": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 100,
+                        "default": 10,
+                    },
+                    "zte_tolerance_ppm_per_k": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 100,
+                        "default": 5,
+                    },
                 },
                 "required": ["pte_material_key", "nte_material_key"],
                 "additionalProperties": False,

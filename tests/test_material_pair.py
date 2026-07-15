@@ -81,8 +81,15 @@ class MaterialPairTests(unittest.TestCase):
             self.assertEqual(result["temperature_max_k"], 600.0)
             self.assertEqual(result["curve_temperature_min_k"], 0.0)
             self.assertEqual(result["curve_temperature_max_k"], 600.0)
-            self.assertEqual(result["temperatures_k"], [0.0, 300.0, 600.0])
-            self.assertEqual(result["mixed_alpha_ppm_per_k"], [0.0, 0.0, 0.0])
+            self.assertEqual(result["temperatures_k"][0], 0.0)
+            self.assertEqual(result["temperatures_k"][-1], 600.0)
+            self.assertEqual(len(result["temperatures_k"]), 32)
+            self.assertTrue(all(value == 0.0 for value in result["mixed_alpha_ppm_per_k"]))
+            self.assertEqual(result["selected_model"], "linear_rom")
+            self.assertIn("linear_rom", result["model_results"])
+            self.assertEqual(len(result["optimization_temperatures_k"]), 31)
+            self.assertEqual(len(result["optimization_pte_alpha_ppm_per_k"]), 31)
+            self.assertEqual(len(result["optimization_nte_alpha_ppm_per_k"]), 31)
 
     def test_queries_and_ranks_complete_curve_scope_at_arbitrary_temperature(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

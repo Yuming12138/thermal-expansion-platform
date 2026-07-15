@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-5", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-8", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -273,6 +273,19 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(curve.status_code, 200)
         self.assertAlmostEqual(curve.json()["nte_volume_fraction"], 0.4)
+        turner_curve = self.client.post(
+            "/api/composites/curve-rom",
+            json={
+                "pte_alpha": [10, 10],
+                "nte_alpha": [-10, -10],
+                "model": "turner",
+                "temperatures_k": [300, 600],
+                "pte_bulk_modulus_gpa": 100,
+                "nte_bulk_modulus_gpa": 50,
+            },
+        )
+        self.assertEqual(turner_curve.status_code, 200)
+        self.assertAlmostEqual(turner_curve.json()["nte_volume_fraction"], 2 / 3)
 
     @patch("te_platform.api.app.optimize_material_pair")
     @patch("te_platform.api.app.curve_materials")

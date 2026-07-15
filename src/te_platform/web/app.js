@@ -2089,8 +2089,10 @@ function drawZteCurves(result) {
   const nte = result.nte_alpha_ppm_per_k.map(Number);
   const mixed = result.mixed_alpha_ppm_per_k.map(Number);
   const target = Number(result.target_alpha_ppm_per_k);
-  const zteLimit = 5;
-  const allY = [...pte, ...nte, ...mixed, target, -zteLimit, zteLimit];
+  const zteTolerance = Number(result.zte_tolerance_ppm_per_k || 5);
+  const zteLower = target - zteTolerance;
+  const zteUpper = target + zteTolerance;
+  const allY = [...pte, ...nte, ...mixed, target, zteLower, zteUpper];
   const xMin = 0;
   const xMax = 1000;
   const rawYMin = Math.min(...allY);
@@ -2101,17 +2103,28 @@ function drawZteCurves(result) {
   const x = value => margin.left + (value - xMin) / (xMax - xMin || 1) * (width - margin.left - margin.right);
   const y = value => height - margin.bottom - (value - yMin) / (yMax - yMin || 1) * (height - margin.top - margin.bottom);
   ctx.clearRect(0, 0, width, height);
+  const windowStart = Math.max(xMin, Number(result.temperature_min_k));
+  const windowEnd = Math.min(xMax, Number(result.temperature_max_k));
+  if (windowEnd > windowStart) {
+    ctx.fillStyle = "rgba(46, 115, 170, 0.07)";
+    ctx.fillRect(
+      x(windowStart),
+      margin.top,
+      x(windowEnd) - x(windowStart),
+      height - margin.top - margin.bottom,
+    );
+  }
   ctx.fillStyle = "rgba(22, 131, 106, 0.14)";
   ctx.fillRect(
     margin.left,
-    y(zteLimit),
+    y(zteUpper),
     width - margin.left - margin.right,
-    y(-zteLimit) - y(zteLimit)
+    y(zteLower) - y(zteUpper)
   );
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = "rgba(22, 131, 106, 0.72)";
   ctx.lineWidth = 1;
-  for (const limit of [-zteLimit, zteLimit]) {
+  for (const limit of [zteLower, zteUpper]) {
     ctx.beginPath();
     ctx.moveTo(margin.left, y(limit));
     ctx.lineTo(width - margin.right, y(limit));
@@ -2190,60 +2203,173 @@ function drawZteCurves(result) {
   ctx.strokeStyle = "rgba(22, 131, 106, 0.72)";
   ctx.strokeRect(bandLegendX, legendY - 7, 20, 10);
   ctx.fillStyle = "#516476";
-  ctx.fillText("ZTE ±5 ppm/K", bandLegendX + 25, legendY + 4);
+  ctx.fillText("目标 ±" + numeric(zteTolerance) + " ppm/K", bandLegendX + 25, legendY + 4);
+}
+
+function zteMixedCurve(result, fraction, pte, nte) {
+  if (result.selected_model !== "turner") {
+    return pte.map((pteValue, index) =>
+      (1 - fraction) * pteValue + fraction * nte[index]
+    );
+  }
+  const pteBulk = Number(result.pte_material.bulk_modulus_gpa);
+  const nteBulk = Number(result.nte_material.bulk_modulus_gpa);
+  const denominator = (1 - fraction) * pteBulk + fraction * nteBulk;
+  return pte.map((pteValue, index) => (
+    (1 - fraction) * pteBulk * pteValue + fraction * nteBulk * nte[index]
+  ) / denominator);
+}
+
+function zteMassFraction(result, fraction) {
+  const pteDensity = Number(result.pte_material.density_g_cm3);
+  const nteDensity = Number(result.nte_material.density_g_cm3);
+  if (!(pteDensity > 0 && nteDensity > 0)) return null;
+  return fraction * nteDensity /
+    (fraction * nteDensity + (1 - fraction) * pteDensity);
+}
+
+function zteModelComparison(result) {
+  const rows = Object.values(result.model_results || {}).map(model => {
+    const mass = Number.isFinite(Number(model.nte_mass_fraction))
+      ? (Number(model.nte_mass_fraction) * 100).toFixed(2) + "%" : "—";
+    const selected = model.model === result.selected_model ? " class='selected-model'" : "";
+    return "<tr" + selected + "><td>" + escapeHtml(model.model_label) +
+      "</td><td>" + (Number(model.nte_volume_fraction) * 100).toFixed(2) + "%" +
+      "</td><td>" + mass +
+      "</td><td>" + numeric(model.rms_error_ppm_per_k) +
+      "</td><td>" + numeric(model.max_absolute_error_ppm_per_k) +
+      "</td><td>" + (Number(model.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</td></tr>";
+  }).join("");
+  return "<div class='zte-model-comparison'><table><thead><tr><th>模型</th>" +
+    "<th>NTE体积分数</th><th>NTE质量分数</th><th>RMS</th><th>最大偏差</th>" +
+    "<th>ZTE温区覆盖</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    "<p class='curve-note'>说明：在体积模量视为常数且配比不受额外约束时，两种模型可通过不同体积分数获得相同的有效热权重，因此最优曲线误差可能相同；模型比较的重点是所需体积/质量配比及其物理假设。</p>";
+}
+
+function zteRangeText(ranges) {
+  if (!ranges?.length) return "无连续满足区间";
+  return ranges.map(range => numeric(range[0]) + "–" + numeric(range[1]) + " K").join("；");
+}
+
+function zteIntervalMetrics(temperatures, errors, tolerance) {
+  if (temperatures.length !== errors.length || temperatures.length < 2) {
+    return {coverage: 0, ranges: []};
+  }
+  const totalSpan = temperatures[temperatures.length - 1] - temperatures[0];
+  if (!(totalSpan > 0)) {
+    return {coverage: Math.abs(errors[0]) <= tolerance ? 1 : 0, ranges: []};
+  }
+  let coveredSpan = 0;
+  const ranges = [];
+  for (let index = 0; index < temperatures.length - 1; index += 1) {
+    const leftTemperature = temperatures[index];
+    const rightTemperature = temperatures[index + 1];
+    const leftError = errors[index];
+    const rightError = errors[index + 1];
+    const fractions = [0, 1];
+    if (rightError !== leftError) {
+      [-tolerance, tolerance].forEach(boundary => {
+        const crossing = (boundary - leftError) / (rightError - leftError);
+        if (crossing > 0 && crossing < 1) fractions.push(crossing);
+      });
+    }
+    const uniqueFractions = [...new Set(fractions)].sort((left, right) => left - right);
+    for (let part = 0; part < uniqueFractions.length - 1; part += 1) {
+      const startFraction = uniqueFractions[part];
+      const endFraction = uniqueFractions[part + 1];
+      const middleFraction = (startFraction + endFraction) / 2;
+      const middleError = leftError + middleFraction * (rightError - leftError);
+      if (Math.abs(middleError) > tolerance) continue;
+      const startTemperature = leftTemperature + startFraction * (rightTemperature - leftTemperature);
+      const endTemperature = leftTemperature + endFraction * (rightTemperature - leftTemperature);
+      coveredSpan += endTemperature - startTemperature;
+      const previous = ranges[ranges.length - 1];
+      if (previous && Math.abs(previous[1] - startTemperature) < 1e-9) {
+        previous[1] = endTemperature;
+      } else {
+        ranges.push([startTemperature, endTemperature]);
+      }
+    }
+  }
+  return {coverage: coveredSpan / totalSpan, ranges};
 }
 
 function renderZteDesign(result) {
   const ntePercent = Number(result.nte_volume_fraction) * 100;
   const ptePercent = 100 - ntePercent;
+  const massPercent = Number.isFinite(Number(result.nte_mass_fraction))
+    ? (Number(result.nte_mass_fraction) * 100).toFixed(2) + "%" : "—";
+  const coveragePercent = (Number(result.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%";
+  const warnings = (result.quality_warnings || []).length
+    ? "<p class='structure-error'>注意：" + escapeHtml(result.quality_warnings.join("；")) + "</p>"
+    : "";
   document.querySelector("#zte-result").innerHTML =
-    "<h3>曲线配比优化结果</h3>" + metricCards([
+    "<h3>" + escapeHtml(result.model_label) + "温区配比优化结果</h3>" + metricCards([
       ["PTE 体积分数", ptePercent.toFixed(2) + "%", "zte-pte-fraction"],
       ["NTE 体积分数", ntePercent.toFixed(2) + "%", "zte-nte-fraction"],
+      ["NTE 质量分数", massPercent, "zte-nte-mass-fraction"],
       ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K", "zte-rms"],
       ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K", "zte-max-error"],
+      ["ZTE 温区覆盖率", coveragePercent, "zte-coverage"],
     ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
-    "；NTE：" + escapeHtml(result.nte_material.material_key) + "；优化温区：" +
+    "（K=" + numeric(result.pte_material.bulk_modulus_gpa) + " GPa，ρ=" +
+    numeric(result.pte_material.density_g_cm3) + " g/cm³）；NTE：" +
+    escapeHtml(result.nte_material.material_key) + "（K=" + numeric(result.nte_material.bulk_modulus_gpa) +
+    " GPa，ρ=" + numeric(result.nte_material.density_g_cm3) + " g/cm³）；优化温区：" +
     numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) +
-    " K；完整曲线：" + numeric(result.curve_temperature_min_k) + "–" +
-    numeric(result.curve_temperature_max_k) + " K</p>" +
+    " K，步长 " + numeric(result.temperature_step_k) + " K；ZTE判据：目标值 ±" +
+    numeric(result.zte_tolerance_ppm_per_k) + " ppm/K。</p>" +
+    "<p class='curve-note'>满足判据的连续温区：<span id='zte-ranges'>" +
+    escapeHtml(zteRangeText(result.zte_temperature_ranges_k)) + "</span></p>" +
+    zteModelComparison(result) +
+    "<div class='zte-model-note'><strong>当前模型假设：</strong> " +
+    escapeHtml(result.assumptions) + "<br><code>" + escapeHtml(result.formula) + "</code></div>" +
+    warnings +
     "<div class='zte-fraction-control'><div class='zte-fraction-heading'>" +
-    "<strong>NTE 掺杂浓度</strong><span>算法最佳：" + ntePercent.toFixed(2) + "%</span>" +
+    "<strong>NTE 掺杂浓度</strong><span>当前模型最佳：" + ntePercent.toFixed(2) + "%</span>" +
     "<button id='zte-reset-fraction' type='button'>恢复最佳比例</button></div>" +
     "<div class='zte-slider-wrap'><input id='zte-fraction-slider' type='range' min='0' max='100' step='0.01' " +
     "value='" + ntePercent.toFixed(2) + "' aria-label='NTE 掺杂浓度百分比'>" +
     "<span class='zte-best-marker' style='left:" + ntePercent.toFixed(3) +
-    "%' title='算法最佳比例 " + ntePercent.toFixed(2) + "%'></span></div>" +
+    "%' title='当前模型最佳比例 " + ntePercent.toFixed(2) + "%'></span></div>" +
     "<div class='zte-slider-scale'><span>0% NTE</span><strong id='zte-current-fraction'>当前：" +
     ntePercent.toFixed(1) + "% NTE</strong><span>100% NTE</span></div></div>" +
     "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>";
   const slider = document.querySelector("#zte-fraction-slider");
-  const applyFraction = value => {
-    const fraction = Math.min(1, Math.max(0, Number(value) / 100));
+  const applyFraction = fractionValue => {
+    const fraction = Math.min(1, Math.max(0, Number(fractionValue)));
     const pte = result.pte_alpha_ppm_per_k.map(Number);
     const nte = result.nte_alpha_ppm_per_k.map(Number);
-    const mixed = pte.map((pteValue, index) =>
-      (1 - fraction) * pteValue + fraction * nte[index]
-    );
-    const errors = mixed.filter((_, index) => {
-      const temperature = Number(result.temperatures_k[index]);
-      return temperature >= Number(result.temperature_min_k) &&
-        temperature <= Number(result.temperature_max_k);
-    }).map(value => value - Number(result.target_alpha_ppm_per_k));
-    const rms = Math.sqrt(errors.reduce((total, value) => total + value * value, 0) / errors.length);
+    const mixed = zteMixedCurve(result, fraction, pte, nte);
+    const optimizationTemperatures = result.optimization_temperatures_k.map(Number);
+    const optimizationPte = result.optimization_pte_alpha_ppm_per_k.map(Number);
+    const optimizationNte = result.optimization_nte_alpha_ppm_per_k.map(Number);
+    const optimizationMixed = zteMixedCurve(result, fraction, optimizationPte, optimizationNte);
+    const errors = optimizationMixed.map(value => value - Number(result.target_alpha_ppm_per_k));
+    const rms = Math.sqrt(errors.reduce((total, error) => total + error * error, 0) / errors.length);
     const maxError = Math.max(...errors.map(Math.abs));
+    const intervalMetrics = zteIntervalMetrics(
+      optimizationTemperatures,
+      errors,
+      Number(result.zte_tolerance_ppm_per_k)
+    );
+    const massFraction = zteMassFraction(result, fraction);
     document.querySelector("#zte-pte-fraction").textContent = ((1 - fraction) * 100).toFixed(2) + "%";
     document.querySelector("#zte-nte-fraction").textContent = (fraction * 100).toFixed(2) + "%";
+    document.querySelector("#zte-nte-mass-fraction").textContent = massFraction === null
+      ? "—" : (massFraction * 100).toFixed(2) + "%";
     document.querySelector("#zte-rms").textContent = numeric(rms) + " ppm/K";
     document.querySelector("#zte-max-error").textContent = numeric(maxError) + " ppm/K";
+    document.querySelector("#zte-coverage").textContent = (intervalMetrics.coverage * 100).toFixed(1) + "%";
+    document.querySelector("#zte-ranges").textContent = zteRangeText(intervalMetrics.ranges);
     document.querySelector("#zte-current-fraction").textContent =
       "当前：" + (fraction * 100).toFixed(1) + "% NTE";
     drawZteCurves({...result, mixed_alpha_ppm_per_k: mixed, nte_volume_fraction: fraction});
   };
-  slider.addEventListener("input", () => applyFraction(slider.value));
+  slider.addEventListener("input", () => applyFraction(Number(slider.value) / 100));
   document.querySelector("#zte-reset-fraction").addEventListener("click", () => {
     slider.value = ntePercent.toFixed(2);
-    applyFraction(slider.value);
+    applyFraction(Number(result.nte_volume_fraction));
   });
   drawZteCurves(result);
 }
@@ -2267,6 +2393,9 @@ async function designZteComposite() {
         temperature_min_k: Number(document.querySelector("#zte-t-min").value),
         temperature_max_k: Number(document.querySelector("#zte-t-max").value),
         target_alpha_ppm_per_k: Number(document.querySelector("#zte-target").value),
+        model: document.querySelector("#zte-model").value,
+        temperature_step_k: Number(document.querySelector("#zte-step").value),
+        zte_tolerance_ppm_per_k: Number(document.querySelector("#zte-tolerance").value),
       }),
     });
     renderZteDesign(result);

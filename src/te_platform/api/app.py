@@ -29,7 +29,7 @@ from te_platform.catalog.queries import (
     search_materials,
 )
 from te_platform.composites.rom import optimize_zte_fraction
-from te_platform.composites.curve_rom import optimize_curve_rom
+from te_platform.composites.curve_rom import optimize_curve_model
 from te_platform.composites.material_pair import curve_materials, optimize_material_pair
 from te_platform.config import (
     DEFAULT_PTE_RELEASE_SLUG,
@@ -119,8 +119,13 @@ class CurveROMRequest(BaseModel):
     pte_alpha: list[float] = Field(min_length=2)
     nte_alpha: list[float] = Field(min_length=2)
     target_alpha: float = 0.0
+    model: Literal["linear_rom", "turner"] = "linear_rom"
+    temperatures_k: list[float] | None = None
     pte_density: float | None = Field(default=None, gt=0)
     nte_density: float | None = Field(default=None, gt=0)
+    pte_bulk_modulus_gpa: float | None = Field(default=None, gt=0)
+    nte_bulk_modulus_gpa: float | None = Field(default=None, gt=0)
+    zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0)
 
 
 class MaterialPairCurveRequest(BaseModel):
@@ -129,6 +134,9 @@ class MaterialPairCurveRequest(BaseModel):
     temperature_min_k: float = Field(default=300.0, ge=0)
     temperature_max_k: float = Field(default=800.0, gt=0)
     target_alpha_ppm_per_k: float = 0.0
+    model: Literal["linear_rom", "turner"] = "linear_rom"
+    temperature_step_k: float = Field(default=10.0, gt=0, le=100)
+    zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
 
 
 class AgentToolRequest(BaseModel):
@@ -587,12 +595,17 @@ def create_app(
     @app.post("/api/composites/curve-rom")
     def composite_curve_rom(request: CurveROMRequest) -> dict[str, object]:
         try:
-            return optimize_curve_rom(
+            return optimize_curve_model(
                 request.pte_alpha,
                 request.nte_alpha,
                 request.target_alpha,
+                model=request.model,
+                temperatures_k=request.temperatures_k,
                 pte_density=request.pte_density,
                 nte_density=request.nte_density,
+                pte_bulk_modulus_gpa=request.pte_bulk_modulus_gpa,
+                nte_bulk_modulus_gpa=request.nte_bulk_modulus_gpa,
+                zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
             ).to_dict()
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -632,6 +645,9 @@ def create_app(
                 temperature_min_k=request.temperature_min_k,
                 temperature_max_k=request.temperature_max_k,
                 target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                model=request.model,
+                temperature_step_k=request.temperature_step_k,
+                zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error

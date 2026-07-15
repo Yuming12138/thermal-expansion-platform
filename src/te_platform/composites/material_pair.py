@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from te_platform.composites.curve_rom import optimize_curve_rom
+from te_platform.composites.curve_rom import mix_curve, optimize_curve_model
 from te_platform.db.schema import connect_readonly_database
 
 
@@ -205,7 +205,7 @@ def _material_curve(
 ) -> dict[str, Any]:
     with connect_readonly_database(database) as connection:
         row = connection.execute(
-            """SELECT m.id, m.material_key, m.formula
+            """SELECT m.id, m.material_key, m.formula, dr.id AS dataset_release_id
             FROM dataset_releases dr
             JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
             JOIN materials m ON m.id = dm.material_id
@@ -222,8 +222,35 @@ def _material_curve(
             ORDER BY j.updated_at DESC LIMIT 1""",
             (row["id"],),
         ).fetchone()
+        bulk_modulus = connection.execute(
+            """SELECT numeric_value
+            FROM material_properties
+            WHERE dataset_release_id = ? AND material_id = ? AND name = 'K_GPa'""",
+            (row["dataset_release_id"], row["id"]),
+        ).fetchone()
+        structure = connection.execute(
+            """SELECT format, content
+            FROM structures
+            WHERE dataset_release_id = ? AND material_id = ?
+            ORDER BY CASE WHEN UPPER(format) = 'POSCAR' THEN 0 ELSE 1 END, id
+            LIMIT 1""",
+            (row["dataset_release_id"], row["id"]),
+        ).fetchone()
     if curve is None:
         raise ValueError(f"Material has no stored thermal-expansion curve: {material_key}")
+    density = None
+    density_warning = None
+    if structure is not None:
+        try:
+            from pymatgen.core import Structure
+
+            structure_format = str(structure["format"] or "").lower()
+            parser_format = "poscar" if structure_format in {"poscar", "vasp"} else structure_format
+            density = float(Structure.from_str(structure["content"], fmt=parser_format).density)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+            density_warning = f"无法从结构计算密度：{error}"
+    else:
+        density_warning = "没有可用于质量分数换算的结构文件"
     return {
         "material_id": row["id"],
         "material_key": row["material_key"],
@@ -231,7 +258,27 @@ def _material_curve(
         "points": json.loads(curve["points_json"]),
         "source_path": curve["source_path"],
         "job_id": curve["job_id"],
+        "bulk_modulus_gpa": (
+            float(bulk_modulus["numeric_value"])
+            if bulk_modulus is not None and bulk_modulus["numeric_value"] is not None
+            else None
+        ),
+        "density_g_cm3": density,
+        "density_warning": density_warning,
     }
+
+
+def _uniform_temperatures(start: float, end: float, step: float) -> list[float]:
+    if step <= 0:
+        raise ValueError("temperature_step_k must be positive")
+    temperatures = [start]
+    current = start + step
+    while current < end - 1e-9:
+        temperatures.append(current)
+        current += step
+    if end > start:
+        temperatures.append(end)
+    return temperatures
 
 
 def optimize_material_pair(
@@ -244,6 +291,9 @@ def optimize_material_pair(
     temperature_min_k: float,
     temperature_max_k: float,
     target_alpha_ppm_per_k: float = 0.0,
+    model: str = "linear_rom",
+    temperature_step_k: float = 10.0,
+    zte_tolerance_ppm_per_k: float = 5.0,
 ) -> dict[str, Any]:
     if temperature_max_k <= temperature_min_k:
         raise ValueError("temperature_max_k must be greater than temperature_min_k")
@@ -253,14 +303,10 @@ def optimize_material_pair(
     overlap_max = min(float(pte["points"][-1][0]), float(nte["points"][-1][0]), temperature_max_k)
     if overlap_max <= overlap_min:
         raise ValueError("Selected materials have no overlapping curve points in the requested temperature range")
-    optimization_temperatures = sorted(
-        {
-            float(point[0])
-            for curve in (pte["points"], nte["points"])
-            for point in curve
-            if overlap_min <= float(point[0]) <= overlap_max
-        }
-        | {overlap_min, overlap_max}
+    optimization_temperatures = _uniform_temperatures(
+        overlap_min,
+        overlap_max,
+        temperature_step_k,
     )
     if len(optimization_temperatures) < 2:
         raise ValueError("At least two common temperature samples are required")
@@ -272,10 +318,6 @@ def optimize_material_pair(
         _interpolate(nte["points"], temperature) * 1_000_000
         for temperature in optimization_temperatures
     ]
-    result = optimize_curve_rom(
-        optimization_pte_alpha, optimization_nte_alpha, target_alpha_ppm_per_k
-    )
-
     curve_min = max(float(pte["points"][0][0]), float(nte["points"][0][0]))
     curve_max = min(float(pte["points"][-1][0]), float(nte["points"][-1][0]))
     temperatures = sorted(
@@ -285,27 +327,91 @@ def optimize_material_pair(
             for point in curve
             if curve_min <= float(point[0]) <= curve_max
         }
+        | set(optimization_temperatures)
         | {curve_min, curve_max}
     )
     pte_alpha = [_interpolate(pte["points"], temperature) * 1_000_000 for temperature in temperatures]
     nte_alpha = [_interpolate(nte["points"], temperature) * 1_000_000 for temperature in temperatures]
-    mixed_alpha = [
-        (1.0 - result.nte_volume_fraction) * pte_value
-        + result.nte_volume_fraction * nte_value
-        for pte_value, nte_value in zip(pte_alpha, nte_alpha)
+    model_results: dict[str, dict[str, Any]] = {}
+    warnings = [
+        warning
+        for warning in (pte.get("density_warning"), nte.get("density_warning"))
+        if warning
     ]
-    result_data = result.to_dict()
-    result_data["mixed_alpha_ppm_per_k"] = mixed_alpha
+    for model_name in ("linear_rom", "turner"):
+        try:
+            result = optimize_curve_model(
+                optimization_pte_alpha,
+                optimization_nte_alpha,
+                target_alpha_ppm_per_k,
+                model=model_name,
+                temperatures_k=optimization_temperatures,
+                pte_density=pte.get("density_g_cm3"),
+                nte_density=nte.get("density_g_cm3"),
+                pte_bulk_modulus_gpa=pte.get("bulk_modulus_gpa"),
+                nte_bulk_modulus_gpa=nte.get("bulk_modulus_gpa"),
+                zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+            )
+        except ValueError as error:
+            if model_name == model:
+                raise
+            warnings.append(f"{model_name}不可用：{error}")
+            continue
+        result_data = result.to_dict()
+        result_data["optimization_temperatures_k"] = optimization_temperatures
+        result_data["optimization_pte_alpha_ppm_per_k"] = optimization_pte_alpha
+        result_data["optimization_nte_alpha_ppm_per_k"] = optimization_nte_alpha
+        result_data["optimization_mixed_alpha_ppm_per_k"] = result_data.pop(
+            "mixed_alpha_ppm_per_k"
+        )
+        result_data["mixed_alpha_ppm_per_k"] = list(
+            mix_curve(
+                pte_alpha,
+                nte_alpha,
+                result.nte_volume_fraction,
+                model=model_name,
+                pte_bulk_modulus_gpa=pte.get("bulk_modulus_gpa"),
+                nte_bulk_modulus_gpa=nte.get("bulk_modulus_gpa"),
+            )
+        )
+        model_results[model_name] = result_data
+    if model not in model_results:
+        raise ValueError(f"Requested model is unavailable: {model}")
+    selected_result = model_results[model]
     return {
-        "pte_material": {key: pte[key] for key in ("material_key", "formula", "job_id", "source_path")},
-        "nte_material": {key: nte[key] for key in ("material_key", "formula", "job_id", "source_path")},
+        "pte_material": {
+            key: pte[key]
+            for key in (
+                "material_key",
+                "formula",
+                "job_id",
+                "source_path",
+                "bulk_modulus_gpa",
+                "density_g_cm3",
+            )
+        },
+        "nte_material": {
+            key: nte[key]
+            for key in (
+                "material_key",
+                "formula",
+                "job_id",
+                "source_path",
+                "bulk_modulus_gpa",
+                "density_g_cm3",
+            )
+        },
+        "selected_model": model,
+        "model_results": model_results,
+        "quality_warnings": warnings,
         "temperature_min_k": overlap_min,
         "temperature_max_k": overlap_max,
+        "temperature_step_k": float(temperature_step_k),
         "curve_temperature_min_k": curve_min,
         "curve_temperature_max_k": curve_max,
         "temperatures_k": temperatures,
         "pte_alpha_ppm_per_k": pte_alpha,
         "nte_alpha_ppm_per_k": nte_alpha,
         "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
-        **result_data,
+        **selected_result,
     }
