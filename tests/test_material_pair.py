@@ -42,6 +42,15 @@ class MaterialPairTests(unittest.TestCase):
                 "INSERT INTO dataset_memberships VALUES (?,?,0,'hash')",
                 (release_id, material_id),
             )
+            bulk_modulus = 100.0 if release_slug == "pte" else 50.0
+            shear_modulus = 40.0 if release_slug == "pte" else 20.0
+            connection.executemany(
+                "INSERT INTO material_properties VALUES (?,?,?,?,NULL,'GPa')",
+                (
+                    (release_id, material_id, "K_GPa", bulk_modulus),
+                    (release_id, material_id, "G_GPa", shear_modulus),
+                ),
+            )
             import_historical_thermal_expansion_curve(
                 connection,
                 material_id=material_id,
@@ -71,6 +80,17 @@ class MaterialPairTests(unittest.TestCase):
                 temperature_min_k=300,
                 temperature_max_k=600,
             )
+            kerner_result = optimize_material_pair(
+                database,
+                pte_release_slug="pte",
+                nte_release_slug="nte",
+                pte_material_key="1.CaO",
+                nte_material_key="NTE-mp-1",
+                temperature_min_k=300,
+                temperature_max_k=600,
+                model="kerner",
+                matrix_phase="pte",
+            )
 
             self.assertEqual(choices[0]["material_key"], "1.CaO")
             self.assertEqual(positive_choices[0]["formula"], "CaO")
@@ -87,9 +107,15 @@ class MaterialPairTests(unittest.TestCase):
             self.assertTrue(all(value == 0.0 for value in result["mixed_alpha_ppm_per_k"]))
             self.assertEqual(result["selected_model"], "linear_rom")
             self.assertIn("linear_rom", result["model_results"])
+            self.assertIn("turner", result["model_results"])
+            self.assertIn("kerner", result["model_results"])
             self.assertEqual(len(result["optimization_temperatures_k"]), 31)
             self.assertEqual(len(result["optimization_pte_alpha_ppm_per_k"]), 31)
             self.assertEqual(len(result["optimization_nte_alpha_ppm_per_k"]), 31)
+            self.assertEqual(result["pte_material"]["shear_modulus_gpa"], 40.0)
+            self.assertEqual(result["nte_material"]["shear_modulus_gpa"], 20.0)
+            self.assertEqual(kerner_result["matrix_phase"], "pte")
+            self.assertTrue(any("数学外推" in warning for warning in kerner_result["quality_warnings"]))
 
     def test_queries_and_ranks_complete_curve_scope_at_arbitrary_temperature(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-6">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-8">
   </head>
   <body>
     <header>
@@ -165,7 +165,7 @@
       </section>
       <section class="panel workspace-page" data-page="zte" hidden>
         <h2>ZTE 复合材料曲线设计</h2>
-        <p class="muted">从独立 PTE/NTE 数据集中选择两种材料，在完整温区内比较线性 ROM 与 Turner 体积模量加权模型，并优化一个固定配比使混合曲线接近目标值。</p>
+        <p class="muted">从独立 PTE/NTE 数据集中选择两种材料，在完整温区内比较线性 ROM、Turner 体积模量加权与 Kerner 基体约束模型，并优化一个固定配比使混合曲线接近目标值。</p>
         <div class="composite-pickers">
           <div>
             <label>PTE 材料搜索</label>
@@ -179,7 +179,8 @@
           </div>
         </div>
         <div class="composite-window">
-          <label>复合模型<select id="zte-model"><option value="linear_rom">线性 ROM</option><option value="turner">Turner 模型</option></select></label>
+          <label>复合模型<select id="zte-model"><option value="linear_rom">线性 ROM</option><option value="turner">Turner 模型</option><option value="kerner">Kerner 模型</option></select></label>
+          <label id="zte-matrix-control" hidden>Kerner 基体相<select id="zte-matrix-phase"><option value="pte">PTE 连续基体</option><option value="nte">NTE 连续基体</option></select></label>
           <label>最低温度 (K)<input id="zte-t-min" type="number" value="300" min="0" step="10"></label>
           <label>最高温度 (K)<input id="zte-t-max" type="number" value="800" min="10" step="10"></label>
           <label>目标 α (ppm/K)<input id="zte-target" type="number" value="0" step="any"></label>
@@ -263,6 +264,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-8"></script>
+    <script src="/static/app.js?v=0.10.0-9"></script>
   </body>
 </html>

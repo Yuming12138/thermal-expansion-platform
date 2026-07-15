@@ -1,6 +1,11 @@
 import unittest
 
-from te_platform.composites.curve_rom import optimize_curve_rom, optimize_curve_turner
+from te_platform.composites.curve_rom import (
+    mix_curve,
+    optimize_curve_kerner,
+    optimize_curve_rom,
+    optimize_curve_turner,
+)
 
 
 class CurveROMTests(unittest.TestCase):
@@ -38,6 +43,51 @@ class CurveROMTests(unittest.TestCase):
         self.assertAlmostEqual(result.nte_volume_fraction, 1.0)
         self.assertAlmostEqual(result.zte_temperature_coverage_fraction, 1.0)
         self.assertAlmostEqual(result.zte_temperature_span_k, 200.0)
+
+    def test_kerner_uses_matrix_shear_constraint(self) -> None:
+        mixed = mix_curve(
+            [10, 10],
+            [-10, -10],
+            0.5,
+            model="kerner",
+            pte_bulk_modulus_gpa=100,
+            nte_bulk_modulus_gpa=50,
+            pte_shear_modulus_gpa=40,
+            nte_shear_modulus_gpa=20,
+            matrix_phase="pte",
+        )
+        self.assertAlmostEqual(mixed[0], 1.4814814815)
+
+    def test_kerner_optimizes_fraction_and_records_matrix_phase(self) -> None:
+        result = optimize_curve_kerner(
+            [10, 10, 10],
+            [-10, -10, -10],
+            temperatures_k=[300, 400, 500],
+            pte_bulk_modulus_gpa=100,
+            nte_bulk_modulus_gpa=50,
+            pte_shear_modulus_gpa=40,
+            nte_shear_modulus_gpa=20,
+            matrix_phase="pte",
+        )
+        self.assertGreater(result.nte_volume_fraction, 0.5)
+        self.assertAlmostEqual(result.rms_error_ppm_per_k, 0.0, places=8)
+        self.assertAlmostEqual(result.effective_nte_thermal_weight, 0.5, places=8)
+        self.assertEqual(result.matrix_phase, "pte")
+        self.assertEqual(result.model_label, "Kerner 模型（PTE基体）")
+
+    def test_kerner_reduces_to_linear_rom_when_bulk_moduli_match(self) -> None:
+        mixed = mix_curve(
+            [10, 20],
+            [-10, -20],
+            0.25,
+            model="kerner",
+            pte_bulk_modulus_gpa=80,
+            nte_bulk_modulus_gpa=80,
+            pte_shear_modulus_gpa=30,
+            nte_shear_modulus_gpa=25,
+            matrix_phase="nte",
+        )
+        self.assertEqual(mixed, (5.0, 10.0))
 
 
 if __name__ == "__main__":

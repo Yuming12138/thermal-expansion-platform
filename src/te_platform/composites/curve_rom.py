@@ -18,6 +18,18 @@ MODEL_METADATA = {
         ),
         "assumptions": "各相承受一致静水压力，以体积模量加权；不显式描述形貌和界面。",
     },
+    "kerner": {
+        "label": "Kerner 模型",
+        "formula": (
+            "alpha_c=V_m*alpha_m+V_p*alpha_p+"
+            "V_m*V_p*(alpha_p-alpha_m)*(K_p-K_m)/"
+            "(V_m*K_m+V_p*K_p+3*K_m*K_p/(4*G_m))"
+        ),
+        "assumptions": (
+            "各向同性连续基体中分散近球形颗粒，界面完全结合；"
+            "基体相选择会改变结果，不考虑孔隙、团聚和界面反应。"
+        ),
+    },
 }
 
 
@@ -27,6 +39,7 @@ class CurveROMResult:
     model_label: str
     formula: str
     assumptions: str
+    matrix_phase: str | None
     nte_volume_fraction: float
     nte_mass_fraction: float | None
     effective_nte_thermal_weight: float
@@ -80,6 +93,9 @@ def mix_curve(
     model: str = "linear_rom",
     pte_bulk_modulus_gpa: float | None = None,
     nte_bulk_modulus_gpa: float | None = None,
+    pte_shear_modulus_gpa: float | None = None,
+    nte_shear_modulus_gpa: float | None = None,
+    matrix_phase: str = "pte",
 ) -> tuple[float, ...]:
     _validate_curves(pte_alpha, nte_alpha)
     fraction = float(nte_volume_fraction)
@@ -87,20 +103,65 @@ def mix_curve(
         raise ValueError("NTE volume fraction must be between 0 and 1")
     if model == "linear_rom":
         return tuple((1.0 - fraction) * p + fraction * n for p, n in zip(pte_alpha, nte_alpha))
-    if model != "turner":
-        raise ValueError(f"Unknown composite thermal-expansion model: {model}")
-    if not pte_bulk_modulus_gpa or not nte_bulk_modulus_gpa:
-        raise ValueError("Turner model requires positive bulk moduli for both phases")
-    denominator = (1.0 - fraction) * pte_bulk_modulus_gpa + fraction * nte_bulk_modulus_gpa
-    if denominator <= 0:
-        raise ValueError("Turner model produced a non-positive effective bulk modulus")
-    return tuple(
-        (
-            (1.0 - fraction) * pte_bulk_modulus_gpa * p
-            + fraction * nte_bulk_modulus_gpa * n
+    if model == "turner":
+        if not pte_bulk_modulus_gpa or not nte_bulk_modulus_gpa:
+            raise ValueError("Turner model requires positive bulk moduli for both phases")
+        denominator = (
+            (1.0 - fraction) * pte_bulk_modulus_gpa
+            + fraction * nte_bulk_modulus_gpa
         )
+        if denominator <= 0:
+            raise ValueError("Turner model produced a non-positive effective bulk modulus")
+        return tuple(
+            (
+                (1.0 - fraction) * pte_bulk_modulus_gpa * p
+                + fraction * nte_bulk_modulus_gpa * n
+            )
+            / denominator
+            for p, n in zip(pte_alpha, nte_alpha)
+        )
+    if model != "kerner":
+        raise ValueError(f"Unknown composite thermal-expansion model: {model}")
+    if matrix_phase not in {"pte", "nte"}:
+        raise ValueError("Kerner matrix_phase must be 'pte' or 'nte'")
+    if not pte_bulk_modulus_gpa or not nte_bulk_modulus_gpa:
+        raise ValueError("Kerner model requires positive bulk moduli for both phases")
+    if matrix_phase == "pte":
+        matrix_fraction = 1.0 - fraction
+        particle_fraction = fraction
+        matrix_bulk = pte_bulk_modulus_gpa
+        particle_bulk = nte_bulk_modulus_gpa
+        matrix_shear = pte_shear_modulus_gpa
+        matrix_alpha = pte_alpha
+        particle_alpha = nte_alpha
+    else:
+        matrix_fraction = fraction
+        particle_fraction = 1.0 - fraction
+        matrix_bulk = nte_bulk_modulus_gpa
+        particle_bulk = pte_bulk_modulus_gpa
+        matrix_shear = nte_shear_modulus_gpa
+        matrix_alpha = nte_alpha
+        particle_alpha = pte_alpha
+    if not matrix_shear or matrix_shear <= 0:
+        raise ValueError("Kerner model requires a positive shear modulus for the selected matrix phase")
+    denominator = (
+        matrix_fraction * matrix_bulk
+        + particle_fraction * particle_bulk
+        + 3.0 * matrix_bulk * particle_bulk / (4.0 * matrix_shear)
+    )
+    if denominator <= 0:
+        raise ValueError("Kerner model produced a non-positive constraint denominator")
+    correction_factor = (
+        matrix_fraction
+        * particle_fraction
+        * (particle_bulk - matrix_bulk)
         / denominator
-        for p, n in zip(pte_alpha, nte_alpha)
+    )
+    return tuple(
+        matrix_fraction * matrix_value
+        + particle_fraction * particle_value
+        + correction_factor * (particle_value - matrix_value)
+        for matrix_value, particle_value in zip(matrix_alpha, particle_alpha)
     )
 
 
@@ -163,6 +224,95 @@ def _zte_intervals(
     return covered_span / total_span, covered_span, tuple(intervals)
 
 
+def _curve_mse(curve: tuple[float, ...], target_alpha: float) -> float:
+    return sum((value - target_alpha) ** 2 for value in curve) / len(curve)
+
+
+def _optimize_fraction_numerically(
+    pte_alpha: list[float],
+    nte_alpha: list[float],
+    target_alpha: float,
+    *,
+    model: str,
+    pte_bulk_modulus_gpa: float | None,
+    nte_bulk_modulus_gpa: float | None,
+    pte_shear_modulus_gpa: float | None,
+    nte_shear_modulus_gpa: float | None,
+    matrix_phase: str,
+) -> float:
+    def objective(fraction: float) -> float:
+        return _curve_mse(
+            mix_curve(
+                pte_alpha,
+                nte_alpha,
+                fraction,
+                model=model,
+                pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+                nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+                pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+                nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+                matrix_phase=matrix_phase,
+            ),
+            target_alpha,
+        )
+
+    divisions = 2000
+    coarse = [(index / divisions, objective(index / divisions)) for index in range(divisions + 1)]
+    best_index = min(range(len(coarse)), key=lambda index: coarse[index][1])
+    left = coarse[max(0, best_index - 1)][0]
+    right = coarse[min(divisions, best_index + 1)][0]
+    golden_ratio = (sqrt(5.0) - 1.0) / 2.0
+    x1 = right - golden_ratio * (right - left)
+    x2 = left + golden_ratio * (right - left)
+    y1 = objective(x1)
+    y2 = objective(x2)
+    for _ in range(60):
+        if y1 <= y2:
+            right = x2
+            x2, y2 = x1, y1
+            x1 = right - golden_ratio * (right - left)
+            y1 = objective(x1)
+        else:
+            left = x1
+            x1, y1 = x2, y2
+            x2 = left + golden_ratio * (right - left)
+            y2 = objective(x2)
+    candidates = [coarse[best_index][0], left, right, (left + right) / 2.0]
+    return min(candidates, key=objective)
+
+
+def _effective_nte_weight(
+    fraction: float,
+    *,
+    model: str,
+    pte_bulk_modulus_gpa: float | None,
+    nte_bulk_modulus_gpa: float | None,
+    pte_shear_modulus_gpa: float | None,
+    nte_shear_modulus_gpa: float | None,
+    matrix_phase: str,
+) -> float:
+    if model == "linear_rom":
+        return fraction
+    if model == "turner":
+        denominator = (
+            (1.0 - fraction) * float(pte_bulk_modulus_gpa)
+            + fraction * float(nte_bulk_modulus_gpa)
+        )
+        return fraction * float(nte_bulk_modulus_gpa) / denominator
+    basis = mix_curve(
+        [0.0, 0.0],
+        [1.0, 1.0],
+        fraction,
+        model=model,
+        pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+        nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+        nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+        matrix_phase=matrix_phase,
+    )
+    return basis[0]
+
+
 def optimize_curve_model(
     pte_alpha: list[float],
     nte_alpha: list[float],
@@ -174,6 +324,9 @@ def optimize_curve_model(
     nte_density: float | None = None,
     pte_bulk_modulus_gpa: float | None = None,
     nte_bulk_modulus_gpa: float | None = None,
+    pte_shear_modulus_gpa: float | None = None,
+    nte_shear_modulus_gpa: float | None = None,
+    matrix_phase: str = "pte",
     zte_tolerance_ppm_per_k: float = 5.0,
 ) -> CurveROMResult:
     _validate_curves(pte_alpha, nte_alpha)
@@ -182,21 +335,43 @@ def optimize_curve_model(
     if zte_tolerance_ppm_per_k <= 0:
         raise ValueError("ZTE tolerance must be positive")
 
-    delta = [n - p for p, n in zip(pte_alpha, nte_alpha)]
-    offset = [p - target_alpha for p in pte_alpha]
-    denominator = sum(value * value for value in delta)
-    thermal_weight = (
-        0.0
-        if denominator == 0
-        else -sum(a * b for a, b in zip(offset, delta)) / denominator
-    )
-    thermal_weight = min(1.0, max(0.0, thermal_weight))
-    fraction = _thermal_weight_to_volume_fraction(
-        thermal_weight,
-        model=model,
-        pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-        nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-    )
+    if model == "kerner":
+        fraction = _optimize_fraction_numerically(
+            pte_alpha,
+            nte_alpha,
+            target_alpha,
+            model=model,
+            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+            matrix_phase=matrix_phase,
+        )
+        thermal_weight = _effective_nte_weight(
+            fraction,
+            model=model,
+            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+            matrix_phase=matrix_phase,
+        )
+    else:
+        delta = [n - p for p, n in zip(pte_alpha, nte_alpha)]
+        offset = [p - target_alpha for p in pte_alpha]
+        denominator = sum(value * value for value in delta)
+        thermal_weight = (
+            0.0
+            if denominator == 0
+            else -sum(a * b for a, b in zip(offset, delta)) / denominator
+        )
+        thermal_weight = min(1.0, max(0.0, thermal_weight))
+        fraction = _thermal_weight_to_volume_fraction(
+            thermal_weight,
+            model=model,
+            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        )
     mixed = mix_curve(
         pte_alpha,
         nte_alpha,
@@ -204,6 +379,9 @@ def optimize_curve_model(
         model=model,
         pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
         nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+        nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+        matrix_phase=matrix_phase,
     )
     errors = [value - target_alpha for value in mixed]
     coverage, temperature_span, ranges = _zte_intervals(
@@ -212,11 +390,17 @@ def optimize_curve_model(
         zte_tolerance_ppm_per_k,
     )
     metadata = MODEL_METADATA[model]
+    model_label = metadata["label"]
+    result_matrix_phase = None
+    if model == "kerner":
+        result_matrix_phase = matrix_phase
+        model_label = f"{model_label}（{matrix_phase.upper()}基体）"
     return CurveROMResult(
         model=model,
-        model_label=metadata["label"],
+        model_label=model_label,
         formula=metadata["formula"],
         assumptions=metadata["assumptions"],
+        matrix_phase=result_matrix_phase,
         nte_volume_fraction=fraction,
         nte_mass_fraction=_mass_fraction(fraction, pte_density, nte_density),
         effective_nte_thermal_weight=thermal_weight,
@@ -276,5 +460,37 @@ def optimize_curve_turner(
         nte_density=nte_density,
         pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
         nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+    )
+
+
+def optimize_curve_kerner(
+    pte_alpha: list[float],
+    nte_alpha: list[float],
+    target_alpha: float = 0.0,
+    *,
+    temperatures_k: list[float] | None = None,
+    pte_density: float | None = None,
+    nte_density: float | None = None,
+    pte_bulk_modulus_gpa: float,
+    nte_bulk_modulus_gpa: float,
+    pte_shear_modulus_gpa: float,
+    nte_shear_modulus_gpa: float,
+    matrix_phase: str = "pte",
+    zte_tolerance_ppm_per_k: float = 5.0,
+) -> CurveROMResult:
+    return optimize_curve_model(
+        pte_alpha,
+        nte_alpha,
+        target_alpha,
+        model="kerner",
+        temperatures_k=temperatures_k,
+        pte_density=pte_density,
+        nte_density=nte_density,
+        pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+        nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+        nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+        matrix_phase=matrix_phase,
         zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
     )

@@ -228,6 +228,12 @@ def _material_curve(
             WHERE dataset_release_id = ? AND material_id = ? AND name = 'K_GPa'""",
             (row["dataset_release_id"], row["id"]),
         ).fetchone()
+        shear_modulus = connection.execute(
+            """SELECT numeric_value
+            FROM material_properties
+            WHERE dataset_release_id = ? AND material_id = ? AND name = 'G_GPa'""",
+            (row["dataset_release_id"], row["id"]),
+        ).fetchone()
         structure = connection.execute(
             """SELECT format, content
             FROM structures
@@ -263,6 +269,11 @@ def _material_curve(
             if bulk_modulus is not None and bulk_modulus["numeric_value"] is not None
             else None
         ),
+        "shear_modulus_gpa": (
+            float(shear_modulus["numeric_value"])
+            if shear_modulus is not None and shear_modulus["numeric_value"] is not None
+            else None
+        ),
         "density_g_cm3": density,
         "density_warning": density_warning,
     }
@@ -292,6 +303,7 @@ def optimize_material_pair(
     temperature_max_k: float,
     target_alpha_ppm_per_k: float = 0.0,
     model: str = "linear_rom",
+    matrix_phase: str = "pte",
     temperature_step_k: float = 10.0,
     zte_tolerance_ppm_per_k: float = 5.0,
 ) -> dict[str, Any]:
@@ -338,7 +350,7 @@ def optimize_material_pair(
         for warning in (pte.get("density_warning"), nte.get("density_warning"))
         if warning
     ]
-    for model_name in ("linear_rom", "turner"):
+    for model_name in ("linear_rom", "turner", "kerner"):
         try:
             result = optimize_curve_model(
                 optimization_pte_alpha,
@@ -350,6 +362,9 @@ def optimize_material_pair(
                 nte_density=nte.get("density_g_cm3"),
                 pte_bulk_modulus_gpa=pte.get("bulk_modulus_gpa"),
                 nte_bulk_modulus_gpa=nte.get("bulk_modulus_gpa"),
+                pte_shear_modulus_gpa=pte.get("shear_modulus_gpa"),
+                nte_shear_modulus_gpa=nte.get("shear_modulus_gpa"),
+                matrix_phase=matrix_phase,
                 zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
             )
         except ValueError as error:
@@ -372,12 +387,26 @@ def optimize_material_pair(
                 model=model_name,
                 pte_bulk_modulus_gpa=pte.get("bulk_modulus_gpa"),
                 nte_bulk_modulus_gpa=nte.get("bulk_modulus_gpa"),
+                pte_shear_modulus_gpa=pte.get("shear_modulus_gpa"),
+                nte_shear_modulus_gpa=nte.get("shear_modulus_gpa"),
+                matrix_phase=matrix_phase,
             )
         )
         model_results[model_name] = result_data
     if model not in model_results:
         raise ValueError(f"Requested model is unavailable: {model}")
     selected_result = model_results[model]
+    if model == "kerner":
+        matrix_fraction = (
+            1.0 - float(selected_result["nte_volume_fraction"])
+            if matrix_phase == "pte"
+            else float(selected_result["nte_volume_fraction"])
+        )
+        if matrix_fraction < 0.5:
+            warnings.append(
+                f"Kerner所选{matrix_phase.upper()}连续基体仅占{matrix_fraction * 100:.2f}%；"
+                "少数相未必能形成连续基体，该结果应视为数学外推。"
+            )
     return {
         "pte_material": {
             key: pte[key]
@@ -387,6 +416,7 @@ def optimize_material_pair(
                 "job_id",
                 "source_path",
                 "bulk_modulus_gpa",
+                "shear_modulus_gpa",
                 "density_g_cm3",
             )
         },
@@ -398,10 +428,12 @@ def optimize_material_pair(
                 "job_id",
                 "source_path",
                 "bulk_modulus_gpa",
+                "shear_modulus_gpa",
                 "density_g_cm3",
             )
         },
         "selected_model": model,
+        "matrix_phase": matrix_phase if model == "kerner" else None,
         "model_results": model_results,
         "quality_warnings": warnings,
         "temperature_min_k": overlap_min,

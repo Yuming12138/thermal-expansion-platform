@@ -2207,17 +2207,37 @@ function drawZteCurves(result) {
 }
 
 function zteMixedCurve(result, fraction, pte, nte) {
-  if (result.selected_model !== "turner") {
+  if (result.selected_model === "linear_rom") {
     return pte.map((pteValue, index) =>
       (1 - fraction) * pteValue + fraction * nte[index]
     );
   }
   const pteBulk = Number(result.pte_material.bulk_modulus_gpa);
   const nteBulk = Number(result.nte_material.bulk_modulus_gpa);
-  const denominator = (1 - fraction) * pteBulk + fraction * nteBulk;
-  return pte.map((pteValue, index) => (
-    (1 - fraction) * pteBulk * pteValue + fraction * nteBulk * nte[index]
-  ) / denominator);
+  if (result.selected_model === "turner") {
+    const denominator = (1 - fraction) * pteBulk + fraction * nteBulk;
+    return pte.map((pteValue, index) => (
+      (1 - fraction) * pteBulk * pteValue + fraction * nteBulk * nte[index]
+    ) / denominator);
+  }
+  const matrixIsPte = result.matrix_phase !== "nte";
+  const matrixFraction = matrixIsPte ? 1 - fraction : fraction;
+  const particleFraction = 1 - matrixFraction;
+  const matrixBulk = matrixIsPte ? pteBulk : nteBulk;
+  const particleBulk = matrixIsPte ? nteBulk : pteBulk;
+  const matrixShear = Number(matrixIsPte
+    ? result.pte_material.shear_modulus_gpa
+    : result.nte_material.shear_modulus_gpa);
+  const matrixCurve = matrixIsPte ? pte : nte;
+  const particleCurve = matrixIsPte ? nte : pte;
+  const denominator = matrixFraction * matrixBulk + particleFraction * particleBulk +
+    3 * matrixBulk * particleBulk / (4 * matrixShear);
+  const correction = matrixFraction * particleFraction *
+    (particleBulk - matrixBulk) / denominator;
+  return matrixCurve.map((matrixValue, index) =>
+    matrixFraction * matrixValue + particleFraction * particleCurve[index] +
+    correction * (particleCurve[index] - matrixValue)
+  );
 }
 
 function zteMassFraction(result, fraction) {
@@ -2236,14 +2256,15 @@ function zteModelComparison(result) {
     return "<tr" + selected + "><td>" + escapeHtml(model.model_label) +
       "</td><td>" + (Number(model.nte_volume_fraction) * 100).toFixed(2) + "%" +
       "</td><td>" + mass +
+      "</td><td>" + (Number(model.effective_nte_thermal_weight) * 100).toFixed(2) + "%" +
       "</td><td>" + numeric(model.rms_error_ppm_per_k) +
       "</td><td>" + numeric(model.max_absolute_error_ppm_per_k) +
       "</td><td>" + (Number(model.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</td></tr>";
   }).join("");
   return "<div class='zte-model-comparison'><table><thead><tr><th>模型</th>" +
-    "<th>NTE体积分数</th><th>NTE质量分数</th><th>RMS</th><th>最大偏差</th>" +
+    "<th>NTE体积分数</th><th>NTE质量分数</th><th>有效NTE热权重</th><th>RMS</th><th>最大偏差</th>" +
     "<th>ZTE温区覆盖</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
-    "<p class='curve-note'>说明：在体积模量视为常数且配比不受额外约束时，两种模型可通过不同体积分数获得相同的有效热权重，因此最优曲线误差可能相同；模型比较的重点是所需体积/质量配比及其物理假设。</p>";
+    "<p class='curve-note'>说明：当 K、G 视为温度无关常数且配比不受约束时，三种模型可能通过不同体积分数获得相同有效NTE热权重，因此最优误差相同并不代表模型等价。Kerner 结果还依赖连续基体选择；应按实际相形貌和可制造配比选择模型。</p>";
 }
 
 function zteRangeText(ranges) {
@@ -2312,10 +2333,12 @@ function renderZteDesign(result) {
       ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K", "zte-max-error"],
       ["ZTE 温区覆盖率", coveragePercent, "zte-coverage"],
     ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
-    "（K=" + numeric(result.pte_material.bulk_modulus_gpa) + " GPa，ρ=" +
+    "（K=" + numeric(result.pte_material.bulk_modulus_gpa) + " GPa，G=" +
+    numeric(result.pte_material.shear_modulus_gpa) + " GPa，ρ=" +
     numeric(result.pte_material.density_g_cm3) + " g/cm³）；NTE：" +
     escapeHtml(result.nte_material.material_key) + "（K=" + numeric(result.nte_material.bulk_modulus_gpa) +
-    " GPa，ρ=" + numeric(result.nte_material.density_g_cm3) + " g/cm³）；优化温区：" +
+    " GPa，G=" + numeric(result.nte_material.shear_modulus_gpa) + " GPa，ρ=" +
+    numeric(result.nte_material.density_g_cm3) + " g/cm³）；优化温区：" +
     numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) +
     " K，步长 " + numeric(result.temperature_step_k) + " K；ZTE判据：目标值 ±" +
     numeric(result.zte_tolerance_ppm_per_k) + " ppm/K。</p>" +
@@ -2394,6 +2417,7 @@ async function designZteComposite() {
         temperature_max_k: Number(document.querySelector("#zte-t-max").value),
         target_alpha_ppm_per_k: Number(document.querySelector("#zte-target").value),
         model: document.querySelector("#zte-model").value,
+        matrix_phase: document.querySelector("#zte-matrix-phase").value,
         temperature_step_k: Number(document.querySelector("#zte-step").value),
         zte_tolerance_ppm_per_k: Number(document.querySelector("#zte-tolerance").value),
       }),
@@ -2469,6 +2493,12 @@ async function initialize() {
   document.querySelector("#nte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("nte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#zte-design-button").addEventListener("click", designZteComposite);
+  const updateZteMatrixControl = () => {
+    document.querySelector("#zte-matrix-control").hidden =
+      document.querySelector("#zte-model").value !== "kerner";
+  };
+  document.querySelector("#zte-model").addEventListener("change", updateZteMatrixControl);
+  updateZteMatrixControl();
   Promise.all([loadCompositeMaterials("pte"), loadCompositeMaterials("nte")])
     .then(() => { document.querySelector("#zte-result").textContent = "请选择材料和目标温区，然后优化配比。"; })
     .catch(error => { document.querySelector("#zte-result").textContent = error.message; });

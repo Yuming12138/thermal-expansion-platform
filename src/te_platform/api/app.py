@@ -119,12 +119,15 @@ class CurveROMRequest(BaseModel):
     pte_alpha: list[float] = Field(min_length=2)
     nte_alpha: list[float] = Field(min_length=2)
     target_alpha: float = 0.0
-    model: Literal["linear_rom", "turner"] = "linear_rom"
+    model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     temperatures_k: list[float] | None = None
     pte_density: float | None = Field(default=None, gt=0)
     nte_density: float | None = Field(default=None, gt=0)
     pte_bulk_modulus_gpa: float | None = Field(default=None, gt=0)
     nte_bulk_modulus_gpa: float | None = Field(default=None, gt=0)
+    pte_shear_modulus_gpa: float | None = Field(default=None, gt=0)
+    nte_shear_modulus_gpa: float | None = Field(default=None, gt=0)
+    matrix_phase: Literal["pte", "nte"] = "pte"
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0)
 
 
@@ -134,7 +137,8 @@ class MaterialPairCurveRequest(BaseModel):
     temperature_min_k: float = Field(default=300.0, ge=0)
     temperature_max_k: float = Field(default=800.0, gt=0)
     target_alpha_ppm_per_k: float = 0.0
-    model: Literal["linear_rom", "turner"] = "linear_rom"
+    model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
+    matrix_phase: Literal["pte", "nte"] = "pte"
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
 
@@ -605,6 +609,9 @@ def create_app(
                 nte_density=request.nte_density,
                 pte_bulk_modulus_gpa=request.pte_bulk_modulus_gpa,
                 nte_bulk_modulus_gpa=request.nte_bulk_modulus_gpa,
+                pte_shear_modulus_gpa=request.pte_shear_modulus_gpa,
+                nte_shear_modulus_gpa=request.nte_shear_modulus_gpa,
+                matrix_phase=request.matrix_phase,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
             ).to_dict()
         except ValueError as error:
@@ -646,6 +653,7 @@ def create_app(
                 temperature_max_k=request.temperature_max_k,
                 target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
                 model=request.model,
+                matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
             )

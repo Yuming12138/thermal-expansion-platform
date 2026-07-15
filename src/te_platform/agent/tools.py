@@ -234,7 +234,7 @@ def default_registry(
                 **kwargs,
             ),
             description=(
-                "使用数据库中的真实PTE/NTE热膨胀曲线，在指定温区比较线性ROM与Turner模型，"
+                "使用数据库中的真实PTE/NTE热膨胀曲线，在指定温区比较线性ROM、Turner与Kerner模型，"
                 "优化固定体积分数并返回质量分数、误差和ZTE温区覆盖率。"
             ),
             parameters={
@@ -247,8 +247,14 @@ def default_registry(
                     "target_alpha_ppm_per_k": {"type": "number", "default": 0},
                     "model": {
                         "type": "string",
-                        "enum": ["linear_rom", "turner"],
+                        "enum": ["linear_rom", "turner", "kerner"],
                         "default": "linear_rom",
+                    },
+                    "matrix_phase": {
+                        "type": "string",
+                        "enum": ["pte", "nte"],
+                        "default": "pte",
+                        "description": "Kerner模型的连续基体相；其他模型忽略此参数。",
                     },
                     "temperature_step_k": {
                         "type": "number",
