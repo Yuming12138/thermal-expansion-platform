@@ -31,6 +31,7 @@ from te_platform.catalog.queries import (
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.curve_rom import optimize_curve_model
 from te_platform.composites.material_pair import curve_materials, optimize_material_pair
+from te_platform.composites.screening import screen_material_pairs
 from te_platform.config import (
     DEFAULT_PTE_RELEASE_SLUG,
     DEFAULT_RELEASE_SLUG,
@@ -141,6 +142,22 @@ class MaterialPairCurveRequest(BaseModel):
     matrix_phase: Literal["pte", "nte"] = "pte"
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
+
+
+class MaterialPairScreeningRequest(BaseModel):
+    temperature_min_k: float = Field(default=300.0, ge=0)
+    temperature_max_k: float = Field(default=800.0, gt=0)
+    temperature_step_k: float = Field(default=10.0, gt=0, le=100)
+    target_alpha_ppm_per_k: float = 0.0
+    zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
+    model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
+    matrix_phase: Literal["pte", "nte"] = "pte"
+    pte_query: str = Field(default="", max_length=100)
+    nte_query: str = Field(default="", max_length=100)
+    nte_volume_fraction_min: float = Field(default=0.0, ge=0, le=1)
+    nte_volume_fraction_max: float = Field(default=1.0, ge=0, le=1)
+    require_matrix_majority: bool = False
+    limit: int = Field(default=30, ge=1, le=100)
 
 
 class AgentToolRequest(BaseModel):
@@ -656,6 +673,30 @@ def create_app(
                 matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/composites/screen")
+    def composite_pair_screening(request: MaterialPairScreeningRequest) -> dict[str, object]:
+        try:
+            return screen_material_pairs(
+                catalog_db,
+                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
+                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                temperature_min_k=request.temperature_min_k,
+                temperature_max_k=request.temperature_max_k,
+                temperature_step_k=request.temperature_step_k,
+                target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+                model=request.model,
+                matrix_phase=request.matrix_phase,
+                pte_query=request.pte_query,
+                nte_query=request.nte_query,
+                nte_volume_fraction_min=request.nte_volume_fraction_min,
+                nte_volume_fraction_max=request.nte_volume_fraction_max,
+                require_matrix_majority=request.require_matrix_majority,
+                limit=request.limit,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error

@@ -34,6 +34,7 @@ let comparisonMaterialKeys = [];
 let analysisProjects = [];
 let activeAnalysisProjectId = null;
 let lastComparisonPayload = null;
+let zteScreeningResults = [];
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
@@ -2078,6 +2079,127 @@ async function loadCompositeMaterials(role) {
   return materials;
 }
 
+function setZteMode(mode) {
+  const screening = mode === "screen";
+  document.querySelector("#zte-manual-panel").hidden = screening;
+  document.querySelector("#zte-screen-panel").hidden = !screening;
+  document.querySelector("#zte-manual-tab").classList.toggle("active", !screening);
+  document.querySelector("#zte-screen-tab").classList.toggle("active", screening);
+  document.querySelector("#zte-manual-tab").setAttribute("aria-selected", String(!screening));
+  document.querySelector("#zte-screen-tab").setAttribute("aria-selected", String(screening));
+  if (screening) document.querySelector("#zte-screen-results").scrollLeft = 0;
+}
+
+function updateZteScreenMatrixControls() {
+  const isKerner = document.querySelector("#zte-screen-model").value === "kerner";
+  document.querySelector("#zte-screen-matrix-control").hidden = !isKerner;
+  document.querySelector("#zte-screen-majority-control").hidden = !isKerner;
+}
+
+function renderZteScreening(result) {
+  zteScreeningResults = result.results || [];
+  const evaluated = Number(result.evaluated_pair_count || 0).toLocaleString("zh-CN");
+  const matched = Number(result.matched_pair_count || 0).toLocaleString("zh-CN");
+  document.querySelector("#zte-screen-summary").innerHTML =
+    "<h3>全库筛选完成</h3>" + metricCards([
+      ["可用 PTE", Number(result.eligible_pte_count || 0).toLocaleString("zh-CN")],
+      ["可用 NTE", Number(result.eligible_nte_count || 0).toLocaleString("zh-CN")],
+      ["严格评估组合", evaluated],
+      ["满足配比约束", matched],
+      ["计算耗时", numeric(result.elapsed_seconds) + " s"],
+      ["排名范围", result.ranking_is_complete ? "完整全库" : "候选范围"],
+    ]) +
+    "<p class='curve-note'>排名顺序：ZTE温区覆盖率 → 最长连续满足温区 → RMS → 最大偏差。" +
+    "所有组合使用同一温度网格和固定配比进行比较。</p>";
+  const body = document.querySelector("#zte-screen-body");
+  body.innerHTML = zteScreeningResults.map((item, index) => {
+    const applicability = item.model === "kerner"
+      ? (item.model_applicable ? "基体假设满足" : "基体为少数相")
+      : "理想两相估算";
+    const applicabilityClass = item.model_applicable ? "zte-valid" : "zte-warning";
+    const ranges = (item.zte_temperature_ranges_k || [])
+      .map(range => numeric(range[0]) + "–" + numeric(range[1]) + " K").join("；") || "无";
+    return "<tr><td>" + item.rank +
+      "</td><td><strong>" + escapeHtml(item.pte_formula || item.pte_material_key) +
+      "</strong>" +
+      "</td><td><strong>" + escapeHtml(item.nte_formula || item.nte_material_key) +
+      "</strong><small>" + escapeHtml(item.nte_material_key) + "</small>" +
+      "</td><td>" + (Number(item.nte_volume_fraction) * 100).toFixed(2) + "%" +
+      "</td><td>" + (Number(item.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%" +
+      "</td><td title='" + escapeHtml(ranges) + "'>" + numeric(item.longest_zte_temperature_span_k) + " K" +
+      "</td><td>" + numeric(item.rms_error_ppm_per_k) +
+      "</td><td><span class='" + applicabilityClass + "'>" + applicability + "</span>" +
+      "</td><td><button class='zte-open-candidate' type='button' data-index='" + index +
+      "'>查看并调整</button></td></tr>";
+  }).join("");
+  document.querySelector("#zte-screen-results").hidden = !zteScreeningResults.length;
+  if (!zteScreeningResults.length) {
+    document.querySelector("#zte-screen-summary").innerHTML +=
+      "<p class='structure-error'>没有组合同时满足当前温区、模型和配比约束。</p>";
+  }
+}
+
+async function runZteScreening() {
+  const minimumPercent = Number(document.querySelector("#zte-screen-f-min").value);
+  const maximumPercent = Number(document.querySelector("#zte-screen-f-max").value);
+  if (maximumPercent < minimumPercent) {
+    document.querySelector("#zte-screen-summary").textContent = "最高 NTE 体积分数不能低于最低值。";
+    return;
+  }
+  const button = document.querySelector("#zte-screen-button");
+  button.disabled = true;
+  document.querySelector("#zte-screen-results").hidden = true;
+  document.querySelector("#zte-screen-summary").textContent =
+    "正在读取内置曲线并严格评估所有符合条件的 PTE/NTE 组合，请稍候…";
+  try {
+    const result = await api("/api/composites/screen", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        temperature_min_k: Number(document.querySelector("#zte-screen-t-min").value),
+        temperature_max_k: Number(document.querySelector("#zte-screen-t-max").value),
+        temperature_step_k: Number(document.querySelector("#zte-screen-step").value),
+        target_alpha_ppm_per_k: Number(document.querySelector("#zte-screen-target").value),
+        zte_tolerance_ppm_per_k: Number(document.querySelector("#zte-screen-tolerance").value),
+        model: document.querySelector("#zte-screen-model").value,
+        matrix_phase: document.querySelector("#zte-screen-matrix-phase").value,
+        pte_query: document.querySelector("#zte-screen-pte-query").value,
+        nte_query: document.querySelector("#zte-screen-nte-query").value,
+        nte_volume_fraction_min: minimumPercent / 100,
+        nte_volume_fraction_max: maximumPercent / 100,
+        require_matrix_majority: document.querySelector("#zte-screen-majority").checked,
+        limit: Number(document.querySelector("#zte-screen-limit").value),
+      }),
+    });
+    renderZteScreening(result);
+  } catch (error) {
+    document.querySelector("#zte-screen-summary").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openZteScreeningCandidate(index) {
+  const candidate = zteScreeningResults[index];
+  if (!candidate) return;
+  document.querySelector("#pte-search").value = candidate.pte_material_key;
+  document.querySelector("#nte-search").value = candidate.nte_material_key;
+  await Promise.all([loadCompositeMaterials("pte"), loadCompositeMaterials("nte")]);
+  document.querySelector("#pte-material").value = candidate.pte_material_key;
+  document.querySelector("#nte-material").value = candidate.nte_material_key;
+  document.querySelector("#zte-model").value = document.querySelector("#zte-screen-model").value;
+  document.querySelector("#zte-matrix-phase").value =
+    document.querySelector("#zte-screen-matrix-phase").value;
+  document.querySelector("#zte-t-min").value = document.querySelector("#zte-screen-t-min").value;
+  document.querySelector("#zte-t-max").value = document.querySelector("#zte-screen-t-max").value;
+  document.querySelector("#zte-target").value = document.querySelector("#zte-screen-target").value;
+  document.querySelector("#zte-tolerance").value = document.querySelector("#zte-screen-tolerance").value;
+  document.querySelector("#zte-step").value = document.querySelector("#zte-screen-step").value;
+  document.querySelector("#zte-model").dispatchEvent(new Event("change"));
+  setZteMode("manual");
+  await designZteComposite();
+}
+
 function drawZteCurves(result) {
   const canvas = document.querySelector("#zte-curve");
   if (!canvas) return;
@@ -2492,6 +2614,8 @@ async function initialize() {
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#nte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("nte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
+  document.querySelector("#zte-manual-tab").addEventListener("click", () => setZteMode("manual"));
+  document.querySelector("#zte-screen-tab").addEventListener("click", () => setZteMode("screen"));
   document.querySelector("#zte-design-button").addEventListener("click", designZteComposite);
   const updateZteMatrixControl = () => {
     document.querySelector("#zte-matrix-control").hidden =
@@ -2499,6 +2623,16 @@ async function initialize() {
   };
   document.querySelector("#zte-model").addEventListener("change", updateZteMatrixControl);
   updateZteMatrixControl();
+  document.querySelector("#zte-screen-model").addEventListener("change", updateZteScreenMatrixControls);
+  document.querySelector("#zte-screen-button").addEventListener("click", runZteScreening);
+  document.querySelector("#zte-screen-body").addEventListener("click", event => {
+    const button = event.target.closest(".zte-open-candidate");
+    if (!button) return;
+    openZteScreeningCandidate(Number(button.dataset.index)).catch(error => {
+      document.querySelector("#zte-screen-summary").textContent = error.message;
+    });
+  });
+  updateZteScreenMatrixControls();
   Promise.all([loadCompositeMaterials("pte"), loadCompositeMaterials("nte")])
     .then(() => { document.querySelector("#zte-result").textContent = "请选择材料和目标温区，然后优化配比。"; })
     .catch(error => { document.querySelector("#zte-result").textContent = error.message; });

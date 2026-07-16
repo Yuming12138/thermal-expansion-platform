@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-9", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-11", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -330,6 +330,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(design.status_code, 200)
         self.assertAlmostEqual(design.json()["nte_volume_fraction"], 0.4)
 
+    @patch("te_platform.api.app.screen_material_pairs")
+    def test_full_catalog_zte_screening_endpoint(self, screening_mock) -> None:
+        screening_mock.return_value = {
+            "evaluated_pair_count": 123,
+            "ranking_is_complete": True,
+            "results": [{"rank": 1, "pte_material_key": "1.CaO", "nte_material_key": "NTE-1"}],
+        }
+        response = self.client.post(
+            "/api/composites/screen",
+            json={
+                "temperature_min_k": 300,
+                "temperature_max_k": 800,
+                "model": "kerner",
+                "matrix_phase": "nte",
+                "nte_volume_fraction_min": 0.5,
+                "require_matrix_majority": True,
+                "limit": 10,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ranking_is_complete"])
+        self.assertEqual(screening_mock.call_args.kwargs["model"], "kerner")
+        self.assertEqual(screening_mock.call_args.kwargs["matrix_phase"], "nte")
+        self.assertEqual(screening_mock.call_args.kwargs["nte_volume_fraction_min"], 0.5)
+
     def test_agent_tools_are_allowlisted(self) -> None:
         tools = self.client.get("/api/agent/tools")
         self.assertEqual(tools.status_code, 200)
@@ -337,6 +362,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("describe_database", tools.json()["tools"])
         self.assertIn("query_database", tools.json()["tools"])
         self.assertIn("request_calculation_task", tools.json()["tools"])
+        self.assertIn("screen_zte_material_pairs", tools.json()["tools"])
         self.assertNotIn("query_thermal_expansion_catalog", tools.json()["tools"])
         schema = self.client.post(
             "/api/agent/call",

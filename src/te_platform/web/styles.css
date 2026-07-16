@@ -205,6 +205,24 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .zte-model-comparison table { min-width: 850px; }
 .zte-model-comparison tr.selected-model td { background: #edf8f4; font-weight: 600; }
 #zte-matrix-control[hidden] { display: none !important; }
+.zte-mode-tabs { display: inline-flex; gap: 4px; margin: 14px 0 18px; padding: 4px; border: 1px solid #d6e1e8; border-radius: 10px; background: #edf3f6; }
+.zte-mode-tabs button { min-width: 150px; background: transparent; color: #486274; box-shadow: none; }
+.zte-mode-tabs button.active { background: #fff; color: #125d72; box-shadow: 0 3px 12px rgba(35,72,92,.12); }
+.zte-mode-panel[hidden], #zte-screen-results[hidden], #zte-screen-matrix-control[hidden], #zte-screen-majority-control[hidden] { display: none !important; }
+.zte-screen-intro { display: flex; gap: 10px; align-items: baseline; margin-bottom: 14px; padding: 12px 14px; border-left: 4px solid #16836a; border-radius: 7px; background: #f1f9f6; color: #506476; }
+.zte-screen-intro strong { color: #17644f; }
+.zte-screen-controls { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+.zte-checkbox-control { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; align-self: end; min-height: 42px; }
+.zte-checkbox-control input { width: auto; margin: 0; }
+.zte-screen-results { margin-top: 16px; overflow-x: auto; border: 1px solid #dce6ec; border-radius: 10px; }
+.zte-screen-results table { min-width: 1120px; margin: 0; }
+.zte-screen-results th { position: sticky; top: 0; background: #edf5f7; white-space: nowrap; }
+.zte-screen-results td { vertical-align: top; }
+.zte-screen-results td strong, .zte-screen-results td small { display: block; }
+.zte-screen-results td small { max-width: 230px; margin-top: 3px; color: #738491; overflow-wrap: anywhere; }
+.zte-open-candidate { white-space: nowrap; }
+.zte-valid { color: #14735b; }
+.zte-warning { color: #b06024; font-weight: 600; }
 .zte-model-note { margin-top: 12px; padding: 10px 12px; border-left: 3px solid #16836a; background: #f4faf8; color: #506476; font-size: .78rem; line-height: 1.55; }
 .zte-model-note code { white-space: normal; word-break: break-word; }
 .thermal-curve { width: 100%; max-width: 100%; margin-top: 12px; border: 1px solid #ebf0f5; border-radius: 8px; background: #fcfdff; }

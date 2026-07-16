@@ -13,6 +13,7 @@ from te_platform.composites.material_pair import (
     optimize_material_pair,
     query_thermal_expansion_catalog,
 )
+from te_platform.composites.screening import screen_material_pairs
 from te_platform.config import DEFAULT_PTE_RELEASE_SLUG, DEFAULT_RELEASE_SLUG
 from te_platform.jobs.precision_runner import precision_progress
 from te_platform.jobs.repository import get_job
@@ -270,6 +271,67 @@ def default_registry(
                     },
                 },
                 "required": ["pte_material_key", "nte_material_key"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "screen_zte_material_pairs",
+            lambda **kwargs: screen_material_pairs(
+                catalog_database,
+                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
+                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                **kwargs,
+            ),
+            description=(
+                "严格遍历目录库中所有满足温区与筛选条件的PTE/NTE组合，按ZTE覆盖率、"
+                "最长连续温区和误差排名。用于回答全库最佳组合、候选推荐和配比约束问题；"
+                "不要用有限材料搜索结果代替此工具。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "temperature_min_k": {"type": "number", "minimum": 0, "default": 300},
+                    "temperature_max_k": {"type": "number", "minimum": 1, "default": 800},
+                    "temperature_step_k": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 100,
+                        "default": 10,
+                    },
+                    "target_alpha_ppm_per_k": {"type": "number", "default": 0},
+                    "zte_tolerance_ppm_per_k": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 100,
+                        "default": 5,
+                    },
+                    "model": {
+                        "type": "string",
+                        "enum": ["linear_rom", "turner", "kerner"],
+                        "default": "linear_rom",
+                    },
+                    "matrix_phase": {
+                        "type": "string",
+                        "enum": ["pte", "nte"],
+                        "default": "pte",
+                    },
+                    "pte_query": {"type": "string", "default": ""},
+                    "nte_query": {"type": "string", "default": ""},
+                    "nte_volume_fraction_min": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0,
+                    },
+                    "nte_volume_fraction_max": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 1,
+                    },
+                    "require_matrix_majority": {"type": "boolean", "default": False},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                },
                 "additionalProperties": False,
             },
         )

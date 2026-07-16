@@ -62,27 +62,59 @@ def _validate_curves(pte_alpha: list[float], nte_alpha: list[float]) -> None:
         raise ValueError("PTE and NTE curves must have the same length of at least two")
 
 
-def _thermal_weight_to_volume_fraction(
+def volume_fraction_from_thermal_weight(
     thermal_weight: float,
     *,
     model: str,
     pte_bulk_modulus_gpa: float | None,
     nte_bulk_modulus_gpa: float | None,
+    pte_shear_modulus_gpa: float | None = None,
+    nte_shear_modulus_gpa: float | None = None,
+    matrix_phase: str = "pte",
 ) -> float:
+    thermal_weight = min(1.0, max(0.0, float(thermal_weight)))
     if model == "linear_rom":
         return thermal_weight
-    if model != "turner":
+    if model not in {"turner", "kerner"}:
         raise ValueError(f"Unknown composite thermal-expansion model: {model}")
     if not pte_bulk_modulus_gpa or not nte_bulk_modulus_gpa:
-        raise ValueError("Turner model requires positive bulk moduli for both phases")
+        raise ValueError(f"{model.capitalize()} model requires positive bulk moduli for both phases")
     if pte_bulk_modulus_gpa <= 0 or nte_bulk_modulus_gpa <= 0:
-        raise ValueError("Turner model requires positive bulk moduli for both phases")
-    denominator = nte_bulk_modulus_gpa * (1.0 - thermal_weight) + (
-        thermal_weight * pte_bulk_modulus_gpa
+        raise ValueError(f"{model.capitalize()} model requires positive bulk moduli for both phases")
+    if model == "turner":
+        denominator = nte_bulk_modulus_gpa * (1.0 - thermal_weight) + (
+            thermal_weight * pte_bulk_modulus_gpa
+        )
+        if denominator <= 0:
+            return 0.0
+        return thermal_weight * pte_bulk_modulus_gpa / denominator
+    if matrix_phase not in {"pte", "nte"}:
+        raise ValueError("Kerner matrix_phase must be 'pte' or 'nte'")
+    if matrix_phase == "pte":
+        matrix_bulk = pte_bulk_modulus_gpa
+        particle_bulk = nte_bulk_modulus_gpa
+        matrix_shear = pte_shear_modulus_gpa
+        particle_weight = thermal_weight
+        particle_is_nte = True
+    else:
+        matrix_bulk = nte_bulk_modulus_gpa
+        particle_bulk = pte_bulk_modulus_gpa
+        matrix_shear = nte_shear_modulus_gpa
+        particle_weight = 1.0 - thermal_weight
+        particle_is_nte = False
+    if not matrix_shear or matrix_shear <= 0:
+        raise ValueError("Kerner model requires a positive shear modulus for the selected matrix phase")
+    constraint = 3.0 * matrix_bulk * particle_bulk / (4.0 * matrix_shear)
+    denominator = (
+        particle_bulk
+        + constraint
+        - particle_weight * (particle_bulk - matrix_bulk)
     )
     if denominator <= 0:
-        return 0.0
-    return thermal_weight * pte_bulk_modulus_gpa / denominator
+        raise ValueError("Kerner model produced a non-positive fraction denominator")
+    particle_fraction = particle_weight * (matrix_bulk + constraint) / denominator
+    fraction = particle_fraction if particle_is_nte else 1.0 - particle_fraction
+    return min(1.0, max(0.0, fraction))
 
 
 def mix_curve(
@@ -224,95 +256,6 @@ def _zte_intervals(
     return covered_span / total_span, covered_span, tuple(intervals)
 
 
-def _curve_mse(curve: tuple[float, ...], target_alpha: float) -> float:
-    return sum((value - target_alpha) ** 2 for value in curve) / len(curve)
-
-
-def _optimize_fraction_numerically(
-    pte_alpha: list[float],
-    nte_alpha: list[float],
-    target_alpha: float,
-    *,
-    model: str,
-    pte_bulk_modulus_gpa: float | None,
-    nte_bulk_modulus_gpa: float | None,
-    pte_shear_modulus_gpa: float | None,
-    nte_shear_modulus_gpa: float | None,
-    matrix_phase: str,
-) -> float:
-    def objective(fraction: float) -> float:
-        return _curve_mse(
-            mix_curve(
-                pte_alpha,
-                nte_alpha,
-                fraction,
-                model=model,
-                pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-                nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-                pte_shear_modulus_gpa=pte_shear_modulus_gpa,
-                nte_shear_modulus_gpa=nte_shear_modulus_gpa,
-                matrix_phase=matrix_phase,
-            ),
-            target_alpha,
-        )
-
-    divisions = 2000
-    coarse = [(index / divisions, objective(index / divisions)) for index in range(divisions + 1)]
-    best_index = min(range(len(coarse)), key=lambda index: coarse[index][1])
-    left = coarse[max(0, best_index - 1)][0]
-    right = coarse[min(divisions, best_index + 1)][0]
-    golden_ratio = (sqrt(5.0) - 1.0) / 2.0
-    x1 = right - golden_ratio * (right - left)
-    x2 = left + golden_ratio * (right - left)
-    y1 = objective(x1)
-    y2 = objective(x2)
-    for _ in range(60):
-        if y1 <= y2:
-            right = x2
-            x2, y2 = x1, y1
-            x1 = right - golden_ratio * (right - left)
-            y1 = objective(x1)
-        else:
-            left = x1
-            x1, y1 = x2, y2
-            x2 = left + golden_ratio * (right - left)
-            y2 = objective(x2)
-    candidates = [coarse[best_index][0], left, right, (left + right) / 2.0]
-    return min(candidates, key=objective)
-
-
-def _effective_nte_weight(
-    fraction: float,
-    *,
-    model: str,
-    pte_bulk_modulus_gpa: float | None,
-    nte_bulk_modulus_gpa: float | None,
-    pte_shear_modulus_gpa: float | None,
-    nte_shear_modulus_gpa: float | None,
-    matrix_phase: str,
-) -> float:
-    if model == "linear_rom":
-        return fraction
-    if model == "turner":
-        denominator = (
-            (1.0 - fraction) * float(pte_bulk_modulus_gpa)
-            + fraction * float(nte_bulk_modulus_gpa)
-        )
-        return fraction * float(nte_bulk_modulus_gpa) / denominator
-    basis = mix_curve(
-        [0.0, 0.0],
-        [1.0, 1.0],
-        fraction,
-        model=model,
-        pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-        nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-        pte_shear_modulus_gpa=pte_shear_modulus_gpa,
-        nte_shear_modulus_gpa=nte_shear_modulus_gpa,
-        matrix_phase=matrix_phase,
-    )
-    return basis[0]
-
-
 def optimize_curve_model(
     pte_alpha: list[float],
     nte_alpha: list[float],
@@ -335,43 +278,24 @@ def optimize_curve_model(
     if zte_tolerance_ppm_per_k <= 0:
         raise ValueError("ZTE tolerance must be positive")
 
-    if model == "kerner":
-        fraction = _optimize_fraction_numerically(
-            pte_alpha,
-            nte_alpha,
-            target_alpha,
-            model=model,
-            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
-            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
-            matrix_phase=matrix_phase,
-        )
-        thermal_weight = _effective_nte_weight(
-            fraction,
-            model=model,
-            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
-            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
-            matrix_phase=matrix_phase,
-        )
-    else:
-        delta = [n - p for p, n in zip(pte_alpha, nte_alpha)]
-        offset = [p - target_alpha for p in pte_alpha]
-        denominator = sum(value * value for value in delta)
-        thermal_weight = (
-            0.0
-            if denominator == 0
-            else -sum(a * b for a, b in zip(offset, delta)) / denominator
-        )
-        thermal_weight = min(1.0, max(0.0, thermal_weight))
-        fraction = _thermal_weight_to_volume_fraction(
-            thermal_weight,
-            model=model,
-            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
-            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
-        )
+    delta = [n - p for p, n in zip(pte_alpha, nte_alpha)]
+    offset = [p - target_alpha for p in pte_alpha]
+    denominator = sum(value * value for value in delta)
+    thermal_weight = (
+        0.0
+        if denominator == 0
+        else -sum(a * b for a, b in zip(offset, delta)) / denominator
+    )
+    thermal_weight = min(1.0, max(0.0, thermal_weight))
+    fraction = volume_fraction_from_thermal_weight(
+        thermal_weight,
+        model=model,
+        pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+        nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+        pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+        nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+        matrix_phase=matrix_phase,
+    )
     mixed = mix_curve(
         pte_alpha,
         nte_alpha,
