@@ -38,6 +38,7 @@ let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
 let zteComparisonPayload = null;
 let zteScreeningProjects = [];
+let zteParetoHitPoints = [];
 const zteSelectedPairIds = new Set();
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
@@ -2183,6 +2184,9 @@ function drawZtePareto() {
   if (!canvas) return;
   const {ctx, width, height} = prepareHiDpiCanvas(canvas);
   canvas.teRedraw = drawZtePareto;
+  zteParetoHitPoints = [];
+  const tooltip = document.querySelector("#zte-pareto-tooltip");
+  if (tooltip) tooltip.hidden = true;
   ctx.clearRect(0, 0, width, height);
   const margin = {left: 58, right: 22, top: 24, bottom: 48};
   const plotWidth = Math.max(1, width - margin.left - margin.right);
@@ -2219,6 +2223,7 @@ function drawZtePareto() {
     const selected = zteSelectedPairIds.has(ztePairId(item));
     const px = x(Number(item.nte_volume_fraction) * 100);
     const py = y(Number(item.rms_error_ppm_per_k));
+    zteParetoHitPoints.push({canvasX: px, canvasY: py, item});
     ctx.beginPath();
     ctx.arc(px, py, selected ? 6.5 : 4.2, 0, Math.PI * 2);
     ctx.fillStyle = coverageColor(item.zte_temperature_coverage_fraction);
@@ -2248,6 +2253,63 @@ function drawZtePareto() {
   ctx.fillText("0%", legendX, 9);
   ctx.textAlign = "right";
   ctx.fillText("100% 覆盖率", legendX + 100, 9);
+}
+
+function setupZteParetoInteraction() {
+  const canvas = document.querySelector("#zte-pareto");
+  const tooltip = document.querySelector("#zte-pareto-tooltip");
+  if (!canvas || !tooltip) return;
+  const hideTooltip = () => {
+    tooltip.hidden = true;
+    canvas.style.cursor = "default";
+  };
+  canvas.addEventListener("mousemove", event => {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = event.clientX - rect.left - canvas.clientLeft;
+    const canvasY = event.clientY - rect.top - canvas.clientTop;
+    let nearest = null;
+    let nearestDistance = 12;
+    zteParetoHitPoints.forEach(point => {
+      const distance = Math.hypot(point.canvasX - canvasX, point.canvasY - canvasY);
+      if (distance <= nearestDistance) {
+        nearest = point.item;
+        nearestDistance = distance;
+      }
+    });
+    if (!nearest) {
+      hideTooltip();
+      return;
+    }
+    const ranges = (nearest.zte_temperature_ranges_k || [])
+      .map(range => numeric(range[0]) + "–" + numeric(range[1]) + " K").join("；") || "无";
+    tooltip.innerHTML =
+      "<strong><span>#" + escapeHtml(nearest.rank) + "</span> " +
+      escapeHtml(nearest.pte_formula || nearest.pte_material_key) + " + " +
+      escapeHtml(nearest.nte_formula || nearest.nte_material_key) + "</strong>" +
+      "<small>" + escapeHtml(nearest.nte_material_key) + "</small>" +
+      "<dl><div><dt>NTE体积分数</dt><dd>" +
+      (Number(nearest.nte_volume_fraction) * 100).toFixed(2) + "%</dd></div>" +
+      "<div><dt>ZTE覆盖率</dt><dd>" +
+      (Number(nearest.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</dd></div>" +
+      "<div><dt>RMS</dt><dd>" + numeric(nearest.rms_error_ppm_per_k) + " ppm/K</dd></div>" +
+      "<div><dt>最长连续温区</dt><dd>" + numeric(nearest.longest_zte_temperature_span_k) +
+      " K</dd></div></dl>" +
+      "<p>满足区间：" + escapeHtml(ranges) + "</p>";
+    tooltip.hidden = false;
+    canvas.style.cursor = "help";
+    const tooltipRect = tooltip.getBoundingClientRect();
+    let left = event.clientX + 14;
+    let top = event.clientY + 14;
+    if (left + tooltipRect.width > window.innerWidth - 8) {
+      left = event.clientX - tooltipRect.width - 14;
+    }
+    if (top + tooltipRect.height > window.innerHeight - 8) {
+      top = event.clientY - tooltipRect.height - 14;
+    }
+    tooltip.style.left = Math.max(8, left) + "px";
+    tooltip.style.top = Math.max(8, top) + "px";
+  });
+  canvas.addEventListener("mouseleave", hideTooltip);
 }
 
 function zteDesignLabel(design, index) {
@@ -3088,6 +3150,7 @@ async function initialize() {
   });
   updateZteScreenMatrixControls();
   drawZtePareto();
+  setupZteParetoInteraction();
   drawZteComparisonCurves(null);
   loadZteScreeningProjects().catch(error => {
     console.warn("无法读取ZTE筛选项目", error);
