@@ -133,6 +133,22 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
 
         target = float(parameters.get("target_alpha_ppm_per_k", 0.0))
         tolerance = float(parameters.get("zte_tolerance_ppm_per_k", 5.0))
+        target_points = parameters.get("target_curve_points") or []
+        target_temperatures = []
+        target_values = []
+        if designs:
+            target_temperatures = [
+                float(value) for value in designs[0].get("target_temperatures_k", [])
+            ]
+            target_values = [
+                float(value) for value in designs[0].get("target_alpha_curve_ppm_per_k", [])
+            ]
+        if len(target_temperatures) != len(target_values) or len(target_temperatures) < 2:
+            target_temperatures = [
+                float(parameters.get("temperature_min_k", 300)),
+                float(parameters.get("temperature_max_k", 800)),
+            ]
+            target_values = [target, target]
         if single_model_results:
             design = designs[0]
             temperatures = [float(value) for value in design["temperatures_k"]]
@@ -172,8 +188,21 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
                         f"{(design.get('nte_material') or {}).get('material_key', '-')}"
                     ),
                 )
-        curve_axis.axhspan(target - tolerance, target + tolerance, color="#16836a", alpha=0.12)
-        curve_axis.axhline(target, color="#16836a", linewidth=1, linestyle="--")
+        curve_axis.fill_between(
+            target_temperatures,
+            [value - tolerance for value in target_values],
+            [value + tolerance for value in target_values],
+            color="#16836a",
+            alpha=0.12,
+        )
+        curve_axis.plot(
+            target_temperatures,
+            target_values,
+            color="#16836a",
+            linewidth=1.2,
+            linestyle="--",
+            label="Target alpha(T)",
+        )
         curve_axis.set_xlabel("Temperature T (K)")
         curve_axis.set_ylabel("Composite alpha (ppm/K)")
         curve_axis.set_title("Selected composite curves")
@@ -193,7 +222,7 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
                 alpha=0.78,
                 edgecolors="none",
             )
-            figure.colorbar(scatter, ax=pareto_axis, label="ZTE coverage (%)")
+            figure.colorbar(scatter, ax=pareto_axis, label="Target coverage (%)")
         for index, design in enumerate(designs):
             pareto_axis.scatter(
                 [float(design["nte_volume_fraction"]) * 100],
@@ -220,7 +249,9 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
             0.01,
             0.008,
             (
-                f"Generated {_generated_at()} | target={target:g} ppm/K | tolerance=±{tolerance:g} ppm/K | "
+                f"Generated {_generated_at()} | target="
+                f"{'piecewise alpha(T), ' + str(len(target_points)) + ' points' if target_points else f'{target:g} ppm/K'}"
+                f" | tolerance=±{tolerance:g} ppm/K | "
                 "Ranking: coverage, longest continuous span, RMS, maximum error."
             ),
             fontsize=7.2,

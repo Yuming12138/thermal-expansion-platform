@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import asdict, dataclass
-from math import sqrt
+from math import isfinite, sqrt
+from typing import Any
 
 
 MODEL_METADATA = {
@@ -51,6 +53,7 @@ class CurveROMResult:
     zte_temperature_coverage_fraction: float
     zte_temperature_span_k: float | None
     zte_temperature_ranges_k: tuple[tuple[float, float], ...]
+    target_alpha_curve_ppm_per_k: tuple[float, ...]
     mixed_alpha_ppm_per_k: tuple[float, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -60,6 +63,68 @@ class CurveROMResult:
 def _validate_curves(pte_alpha: list[float], nte_alpha: list[float]) -> None:
     if len(pte_alpha) < 2 or len(pte_alpha) != len(nte_alpha):
         raise ValueError("PTE and NTE curves must have the same length of at least two")
+
+
+def normalize_target_curve_points(
+    target_curve_points: list[Any] | tuple[Any, ...] | None,
+) -> tuple[tuple[float, float], ...]:
+    if not target_curve_points:
+        return ()
+    normalized: list[tuple[float, float]] = []
+    for point in target_curve_points:
+        if isinstance(point, dict):
+            temperature = point.get("temperature_k")
+            alpha = point.get("alpha_ppm_per_k")
+        else:
+            try:
+                temperature, alpha = point
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "Each target curve point must contain temperature_k and alpha_ppm_per_k"
+                ) from error
+        try:
+            numeric_temperature = float(temperature)
+            numeric_alpha = float(alpha)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Target curve temperatures and alpha values must be numeric") from error
+        if not isfinite(numeric_temperature) or numeric_temperature < 0 or not isfinite(numeric_alpha):
+            raise ValueError("Target curve temperatures must be non-negative and all values finite")
+        normalized.append((numeric_temperature, numeric_alpha))
+    if len(normalized) < 2:
+        raise ValueError("A custom target curve requires at least two points")
+    if any(right[0] <= left[0] for left, right in zip(normalized, normalized[1:])):
+        raise ValueError("Target curve temperatures must be strictly increasing")
+    return tuple(normalized)
+
+
+def resolve_target_alpha_curve(
+    temperatures_k: list[float] | tuple[float, ...],
+    target_alpha: float = 0.0,
+    target_curve_points: list[Any] | tuple[Any, ...] | None = None,
+) -> tuple[float, ...]:
+    temperatures = [float(value) for value in temperatures_k]
+    if not temperatures:
+        raise ValueError("At least one temperature is required for the target curve")
+    points = normalize_target_curve_points(target_curve_points)
+    if not points:
+        return tuple(float(target_alpha) for _temperature in temperatures)
+    point_temperatures = [point[0] for point in points]
+    if points[0][0] > min(temperatures) or points[-1][0] < max(temperatures):
+        raise ValueError("Target curve points must cover the requested temperature range")
+    values: list[float] = []
+    for temperature in temperatures:
+        right_index = bisect_right(point_temperatures, temperature)
+        if right_index == 0:
+            values.append(points[0][1])
+            continue
+        if right_index >= len(points):
+            values.append(points[-1][1])
+            continue
+        left_t, left_alpha = points[right_index - 1]
+        right_t, right_alpha = points[right_index]
+        fraction = (temperature - left_t) / (right_t - left_t)
+        values.append(left_alpha + fraction * (right_alpha - left_alpha))
+    return tuple(values)
 
 
 def volume_fraction_from_thermal_weight(
@@ -271,6 +336,7 @@ def optimize_curve_model(
     nte_shear_modulus_gpa: float | None = None,
     matrix_phase: str = "pte",
     zte_tolerance_ppm_per_k: float = 5.0,
+    target_alpha_curve: list[float] | tuple[float, ...] | None = None,
 ) -> CurveROMResult:
     _validate_curves(pte_alpha, nte_alpha)
     if model not in MODEL_METADATA:
@@ -278,8 +344,17 @@ def optimize_curve_model(
     if zte_tolerance_ppm_per_k <= 0:
         raise ValueError("ZTE tolerance must be positive")
 
+    target_values = (
+        tuple(float(value) for value in target_alpha_curve)
+        if target_alpha_curve is not None
+        else tuple(float(target_alpha) for _value in pte_alpha)
+    )
+    if len(target_values) != len(pte_alpha):
+        raise ValueError("target_alpha_curve must have the same length as the phase curves")
+    if not all(isfinite(value) for value in target_values):
+        raise ValueError("target_alpha_curve values must be finite")
     delta = [n - p for p, n in zip(pte_alpha, nte_alpha)]
-    offset = [p - target_alpha for p in pte_alpha]
+    offset = [p - target for p, target in zip(pte_alpha, target_values)]
     denominator = sum(value * value for value in delta)
     thermal_weight = (
         0.0
@@ -307,7 +382,7 @@ def optimize_curve_model(
         nte_shear_modulus_gpa=nte_shear_modulus_gpa,
         matrix_phase=matrix_phase,
     )
-    errors = [value - target_alpha for value in mixed]
+    errors = [value - target for value, target in zip(mixed, target_values)]
     coverage, temperature_span, ranges = _zte_intervals(
         temperatures_k,
         errors,
@@ -336,6 +411,7 @@ def optimize_curve_model(
         zte_temperature_coverage_fraction=coverage,
         zte_temperature_span_k=temperature_span,
         zte_temperature_ranges_k=ranges,
+        target_alpha_curve_ppm_per_k=target_values,
         mixed_alpha_ppm_per_k=mixed,
     )
 
@@ -349,6 +425,7 @@ def optimize_curve_rom(
     pte_density: float | None = None,
     nte_density: float | None = None,
     zte_tolerance_ppm_per_k: float = 5.0,
+    target_alpha_curve: list[float] | tuple[float, ...] | None = None,
 ) -> CurveROMResult:
     return optimize_curve_model(
         pte_alpha,
@@ -359,6 +436,7 @@ def optimize_curve_rom(
         pte_density=pte_density,
         nte_density=nte_density,
         zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+        target_alpha_curve=target_alpha_curve,
     )
 
 
@@ -373,6 +451,7 @@ def optimize_curve_turner(
     pte_bulk_modulus_gpa: float,
     nte_bulk_modulus_gpa: float,
     zte_tolerance_ppm_per_k: float = 5.0,
+    target_alpha_curve: list[float] | tuple[float, ...] | None = None,
 ) -> CurveROMResult:
     return optimize_curve_model(
         pte_alpha,
@@ -385,6 +464,7 @@ def optimize_curve_turner(
         pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
         nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
         zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+        target_alpha_curve=target_alpha_curve,
     )
 
 
@@ -402,6 +482,7 @@ def optimize_curve_kerner(
     nte_shear_modulus_gpa: float,
     matrix_phase: str = "pte",
     zte_tolerance_ppm_per_k: float = 5.0,
+    target_alpha_curve: list[float] | tuple[float, ...] | None = None,
 ) -> CurveROMResult:
     return optimize_curve_model(
         pte_alpha,
@@ -417,4 +498,5 @@ def optimize_curve_kerner(
         nte_shear_modulus_gpa=nte_shear_modulus_gpa,
         matrix_phase=matrix_phase,
         zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+        target_alpha_curve=target_alpha_curve,
     )

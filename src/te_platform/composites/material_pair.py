@@ -5,7 +5,12 @@ import math
 from pathlib import Path
 from typing import Any
 
-from te_platform.composites.curve_rom import mix_curve, optimize_curve_model
+from te_platform.composites.curve_rom import (
+    mix_curve,
+    normalize_target_curve_points,
+    optimize_curve_model,
+    resolve_target_alpha_curve,
+)
 from te_platform.db.schema import connect_readonly_database
 
 
@@ -302,6 +307,7 @@ def optimize_material_pair(
     temperature_min_k: float,
     temperature_max_k: float,
     target_alpha_ppm_per_k: float = 0.0,
+    target_curve_points: list[dict[str, float]] | list[tuple[float, float]] | None = None,
     model: str = "linear_rom",
     matrix_phase: str = "pte",
     temperature_step_k: float = 10.0,
@@ -330,6 +336,12 @@ def optimize_material_pair(
         _interpolate(nte["points"], temperature) * 1_000_000
         for temperature in optimization_temperatures
     ]
+    normalized_target_points = normalize_target_curve_points(target_curve_points)
+    optimization_target_alpha = resolve_target_alpha_curve(
+        optimization_temperatures,
+        target_alpha_ppm_per_k,
+        normalized_target_points,
+    )
     curve_min = max(float(pte["points"][0][0]), float(nte["points"][0][0]))
     curve_max = min(float(pte["points"][-1][0]), float(nte["points"][-1][0]))
     temperatures = sorted(
@@ -366,6 +378,7 @@ def optimize_material_pair(
                 nte_shear_modulus_gpa=nte.get("shear_modulus_gpa"),
                 matrix_phase=matrix_phase,
                 zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+                target_alpha_curve=optimization_target_alpha,
             )
         except ValueError as error:
             if model_name == model:
@@ -445,5 +458,11 @@ def optimize_material_pair(
         "pte_alpha_ppm_per_k": pte_alpha,
         "nte_alpha_ppm_per_k": nte_alpha,
         "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
+        "target_curve_points": [
+            {"temperature_k": temperature, "alpha_ppm_per_k": alpha}
+            for temperature, alpha in normalized_target_points
+        ],
+        "target_temperatures_k": optimization_temperatures,
+        "target_alpha_curve_ppm_per_k": list(optimization_target_alpha),
         **selected_result,
     }

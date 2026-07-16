@@ -68,7 +68,9 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-19", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-20", home.text)
+        self.assertIn("/static/styles.css?v=0.10.0-11", home.text)
+        self.assertIn("分段目标曲线", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
         self.assertIn("zte-candidate-detail", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
@@ -375,6 +377,10 @@ class ApiTests(unittest.TestCase):
             json={
                 "temperature_min_k": 300,
                 "temperature_max_k": 800,
+                "target_curve_points": [
+                    {"temperature_k": 300, "alpha_ppm_per_k": 2},
+                    {"temperature_k": 800, "alpha_ppm_per_k": -1},
+                ],
                 "model": "kerner",
                 "matrix_phase": "nte",
                 "nte_volume_fraction_min": 0.5,
@@ -398,6 +404,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(screening_mock.call_args.kwargs["excluded_elements"], ["Pb"])
         self.assertTrue(screening_mock.call_args.kwargs["require_mass_fraction"])
         self.assertEqual(screening_mock.call_args.kwargs["max_density_ratio"], 2.0)
+        self.assertEqual(
+            screening_mock.call_args.kwargs["target_curve_points"],
+            [(300.0, 2.0), (800.0, -1.0)],
+        )
 
     @patch("te_platform.api.app.optimize_material_pair")
     def test_zte_candidate_comparison_endpoint(self, optimize_mock) -> None:
@@ -415,11 +425,19 @@ class ApiTests(unittest.TestCase):
                     {"pte_material_key": "1.CaO", "nte_material_key": "NTE-1", "rank": 1}
                 ],
                 "model": "turner",
+                "target_curve_points": [
+                    {"temperature_k": 300, "alpha_ppm_per_k": 1},
+                    {"temperature_k": 800, "alpha_ppm_per_k": 3},
+                ],
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["designs"][0]["rank"], 1)
         self.assertEqual(optimize_mock.call_args.kwargs["model"], "turner")
+        self.assertEqual(
+            optimize_mock.call_args.kwargs["target_curve_points"],
+            [(300.0, 1.0), (800.0, 3.0)],
+        )
 
     @patch("te_platform.api.app.build_zte_screening_report_pdf", return_value=b"%PDF-test")
     @patch("te_platform.api.app.optimize_material_pair")

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-10">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-11">
   </head>
   <body>
     <header>
@@ -164,8 +164,8 @@
         <p id="landscape-selection" class="curve-note">尚未选择材料。</p>
       </section>
       <section class="panel workspace-page" data-page="zte" hidden>
-        <h2>ZTE 复合材料曲线设计</h2>
-        <p class="muted">既可以手动选择一组材料精细设计，也可以严格遍历内置目录库中的全部 PTE/NTE 组合并生成可解释排名。</p>
+        <h2>ZTE 与受控热膨胀曲线反向设计</h2>
+        <p class="muted">既可以设计零膨胀材料，也可以输入任意分段目标 α(T) 曲线，反向寻找最匹配的 PTE/NTE 组合和固定配比。</p>
         <div id="zte-design-workspace">
         <div class="zte-mode-tabs" role="tablist" aria-label="ZTE设计模式">
           <button id="zte-manual-tab" class="active" type="button" role="tab" aria-selected="true">手动配对设计</button>
@@ -189,10 +189,16 @@
             <label id="zte-matrix-control" hidden>Kerner 基体相<select id="zte-matrix-phase"><option value="pte">PTE 连续基体</option><option value="nte">NTE 连续基体</option></select></label>
             <label>最低温度 (K)<input id="zte-t-min" type="number" value="300" min="0" step="10"></label>
             <label>最高温度 (K)<input id="zte-t-max" type="number" value="800" min="10" step="10"></label>
-            <label>目标 α (ppm/K)<input id="zte-target" type="number" value="0" step="any"></label>
-            <label>ZTE 容差 (±ppm/K)<input id="zte-tolerance" type="number" value="5" min="0.1" max="100" step="0.5"></label>
+            <label>目标类型<select id="zte-target-mode"><option value="constant">恒定 α</option><option value="curve">分段目标曲线</option></select></label>
+            <label id="zte-target-constant-control">恒定目标 α (ppm/K)<input id="zte-target" type="number" value="0" step="any"></label>
+            <label>目标容差 (±ppm/K)<input id="zte-tolerance" type="number" value="5" min="0.1" max="100" step="0.5"></label>
             <label>温区采样步长 (K)<input id="zte-step" type="number" value="10" min="1" max="100" step="1"></label>
             <button id="zte-design-button" type="button">比较并优化配比</button>
+          </div>
+          <div id="zte-target-curve-panel" class="zte-target-curve-panel" hidden>
+            <div><strong>目标 α(T) 控制点</strong><span>控制点之间采用线性插值，首尾点必须覆盖设计温区。</span></div>
+            <textarea id="zte-target-points" rows="4" placeholder="300, 0&#10;500, 2&#10;800, -1" aria-label="手动设计目标曲线控制点"></textarea>
+            <div class="zte-target-actions"><button id="zte-target-example" type="button">生成温区示例</button><label class="file-button">导入 CSV/TXT<input id="zte-target-file" type="file" accept=".csv,.txt,text/csv,text/plain"></label></div>
           </div>
           <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
         </div>
@@ -208,14 +214,20 @@
             <label>NTE 限定词<input id="zte-screen-nte-query" placeholder="可留空，例如 LiCoPO4"></label>
             <label>最低温度 (K)<input id="zte-screen-t-min" type="number" value="300" min="0" step="10"></label>
             <label>最高温度 (K)<input id="zte-screen-t-max" type="number" value="800" min="10" step="10"></label>
-            <label>目标 α (ppm/K)<input id="zte-screen-target" type="number" value="0" step="any"></label>
-            <label>ZTE 容差 (±ppm/K)<input id="zte-screen-tolerance" type="number" value="5" min="0.1" max="100" step="0.5"></label>
+            <label>目标类型<select id="zte-screen-target-mode"><option value="constant">恒定 α</option><option value="curve">分段目标曲线</option></select></label>
+            <label id="zte-screen-target-constant-control">恒定目标 α (ppm/K)<input id="zte-screen-target" type="number" value="0" step="any"></label>
+            <label>目标容差 (±ppm/K)<input id="zte-screen-tolerance" type="number" value="5" min="0.1" max="100" step="0.5"></label>
             <label>温区步长 (K)<input id="zte-screen-step" type="number" value="10" min="1" max="100" step="1"></label>
             <label>最低 NTE 体积分数 (%)<input id="zte-screen-f-min" type="number" value="0" min="0" max="100" step="1"></label>
             <label>最高 NTE 体积分数 (%)<input id="zte-screen-f-max" type="number" value="100" min="0" max="100" step="1"></label>
             <label>返回数量<select id="zte-screen-limit"><option value="10">10</option><option value="30" selected>30</option><option value="50">50</option><option value="100">100</option></select></label>
             <label id="zte-screen-majority-control" class="zte-checkbox-control" hidden><input id="zte-screen-majority" type="checkbox" checked>仅保留连续基体不少于 50 vol%</label>
             <button id="zte-screen-button" type="button">筛选全库最佳组合</button>
+          </div>
+          <div id="zte-screen-target-curve-panel" class="zte-target-curve-panel" hidden>
+            <div><strong>全库反向设计目标 α(T)</strong><span>每个候选都在同一条分段线性目标曲线上优化并排名。</span></div>
+            <textarea id="zte-screen-target-points" rows="4" placeholder="300, 0&#10;500, 2&#10;800, -1" aria-label="全库筛选目标曲线控制点"></textarea>
+            <div class="zte-target-actions"><button id="zte-screen-target-example" type="button">生成温区示例</button><label class="file-button">导入 CSV/TXT<input id="zte-screen-target-file" type="file" accept=".csv,.txt,text/csv,text/plain"></label></div>
           </div>
           <details class="zte-engineering-constraints">
             <summary>工程约束（可选）</summary>
@@ -249,7 +261,7 @@
             <div class="zte-analysis-grid">
               <article class="zte-analysis-card">
                 <h3>Pareto 多目标景观</h3>
-                <p class="curve-note">横轴为NTE体积分数，纵轴为RMS，颜色表示ZTE覆盖率；勾选组合会高亮。</p>
+                <p class="curve-note">横轴为NTE体积分数，纵轴为RMS，颜色表示目标曲线覆盖率；勾选组合会高亮。</p>
                 <canvas id="zte-pareto" width="900" height="430"></canvas>
                 <div id="zte-pareto-tooltip" class="zte-pareto-tooltip" role="tooltip" hidden></div>
               </article>
@@ -263,7 +275,7 @@
           </div>
           <div id="zte-screen-results" class="zte-screen-results" hidden>
             <table>
-              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>密度比</th><th>K比</th><th>G比</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
+              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>密度比</th><th>K比</th><th>G比</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
               <tbody id="zte-screen-body"></tbody>
             </table>
           </div>
@@ -362,6 +374,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-19"></script>
+    <script src="/static/app.js?v=0.10.0-20"></script>
   </body>
 </html>

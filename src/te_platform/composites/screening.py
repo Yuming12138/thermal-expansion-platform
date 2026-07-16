@@ -12,7 +12,11 @@ from typing import Any
 import numpy as np
 from pymatgen.core import Element
 
-from te_platform.composites.curve_rom import optimize_curve_model
+from te_platform.composites.curve_rom import (
+    normalize_target_curve_points,
+    optimize_curve_model,
+    resolve_target_alpha_curve,
+)
 from te_platform.db.schema import connect_readonly_database
 
 
@@ -308,6 +312,7 @@ def screen_material_pairs(
     temperature_max_k: float = 800.0,
     temperature_step_k: float = 10.0,
     target_alpha_ppm_per_k: float = 0.0,
+    target_curve_points: list[dict[str, float]] | list[tuple[float, float]] | None = None,
     zte_tolerance_ppm_per_k: float = 5.0,
     model: str = "linear_rom",
     matrix_phase: str = "pte",
@@ -370,6 +375,15 @@ def screen_material_pairs(
         temperatures = np.append(temperatures, temperature_max_k)
     else:
         temperatures[-1] = temperature_max_k
+    normalized_target_points = normalize_target_curve_points(target_curve_points)
+    target_curve = np.asarray(
+        resolve_target_alpha_curve(
+            temperatures.tolist(),
+            target_alpha_ppm_per_k,
+            normalized_target_points,
+        ),
+        dtype=float,
+    )
     pte_records, pte_curves = _eligible_records(
         database,
         pte_release_slug,
@@ -396,6 +410,12 @@ def screen_material_pairs(
             "temperature_max_k": temperature_max_k,
             "temperature_step_k": temperature_step_k,
             "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
+            "target_curve_points": [
+                {"temperature_k": temperature, "alpha_ppm_per_k": alpha}
+                for temperature, alpha in normalized_target_points
+            ],
+            "target_temperatures_k": temperatures.tolist(),
+            "target_alpha_curve_ppm_per_k": target_curve.tolist(),
             "zte_tolerance_ppm_per_k": zte_tolerance_ppm_per_k,
             "required_elements": sorted(required_element_set),
             "excluded_elements": sorted(excluded_element_set),
@@ -435,7 +455,7 @@ def screen_material_pairs(
         "shear_modulus": 0,
         "mechanics_completeness": 0,
     }
-    target = float(target_alpha_ppm_per_k)
+    target = target_curve
     for pte_index, (pte_record, pte_curve) in enumerate(zip(pte_records, pte_curves)):
         delta = nte_curves - pte_curve
         denominator = np.einsum("ij,ij->i", delta, delta)
@@ -564,7 +584,7 @@ def screen_material_pairs(
         result = optimize_curve_model(
             pte_curves[pte_index].tolist(),
             nte_curves[nte_index].tolist(),
-            target,
+            target_alpha_ppm_per_k,
             model=model,
             temperatures_k=temperatures.tolist(),
             pte_bulk_modulus_gpa=pte_record.bulk_modulus_gpa,
@@ -575,6 +595,7 @@ def screen_material_pairs(
             nte_density=nte_record.density_g_cm3,
             matrix_phase=matrix_phase,
             zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+            target_alpha_curve=target.tolist(),
         )
         longest_span = max(
             (end - start for start, end in result.zte_temperature_ranges_k),
@@ -646,6 +667,12 @@ def screen_material_pairs(
         "temperature_max_k": temperature_max_k,
         "temperature_step_k": temperature_step_k,
         "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
+        "target_curve_points": [
+            {"temperature_k": temperature, "alpha_ppm_per_k": alpha}
+            for temperature, alpha in normalized_target_points
+        ],
+        "target_temperatures_k": temperatures.tolist(),
+        "target_alpha_curve_ppm_per_k": target.tolist(),
         "zte_tolerance_ppm_per_k": zte_tolerance_ppm_per_k,
         "nte_volume_fraction_min": nte_volume_fraction_min,
         "nte_volume_fraction_max": nte_volume_fraction_max,

@@ -16,6 +16,8 @@ class ZteReportTests(unittest.TestCase):
             "zte_temperature_ranges_k": [[300, 600]],
             "temperatures_k": [300, 400, 500, 600],
             "mixed_alpha_ppm_per_k": [0.2, 0.1, -0.1, -0.2],
+            "target_temperatures_k": [300, 400, 500, 600],
+            "target_alpha_curve_ppm_per_k": [0, 1, 0, -1],
         }
         content = build_zte_screening_report_pdf(
             {
@@ -25,6 +27,10 @@ class ZteReportTests(unittest.TestCase):
                     "temperature_min_k": 300,
                     "temperature_max_k": 600,
                     "target_alpha_ppm_per_k": 0,
+                    "target_curve_points": [
+                        {"temperature_k": 300, "alpha_ppm_per_k": 0},
+                        {"temperature_k": 600, "alpha_ppm_per_k": -1},
+                    ],
                     "zte_tolerance_ppm_per_k": 5,
                 },
                 "ranked_results": [

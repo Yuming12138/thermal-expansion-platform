@@ -17,6 +17,7 @@ class CompositeScreeningTests(unittest.TestCase):
         bulk_modulus_gpa: float,
         shear_modulus_gpa: float,
         *,
+        alpha_end_ppm_per_k: float | None = None,
         formula: str | None = None,
         lattice_a: float | None = None,
         poscar_species: tuple[tuple[str, int], ...] = (("Si", 1),),
@@ -73,7 +74,15 @@ Direct
                 source_path=str(database.parent / material_key / "thermal_expansion.dat"),
                 thermal_expansion_curve=(
                     (300.0, alpha_ppm_per_k * 1e-6),
-                    (600.0, alpha_ppm_per_k * 1e-6),
+                    (
+                        600.0,
+                        (
+                            alpha_ppm_per_k
+                            if alpha_end_ppm_per_k is None
+                            else alpha_end_ppm_per_k
+                        )
+                        * 1e-6,
+                    ),
                 ),
                 alpha_300k_per_k=alpha_ppm_per_k * 1e-6,
             )
@@ -191,6 +200,39 @@ Direct
                     nte_release_slug="nte",
                     required_elements=["Xx"],
                 )
+
+    def test_screens_against_piecewise_target_curve(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "catalog.db"
+            initialize_database(database)
+            self._insert_material(
+                database, "pte", "PTE", 10, 100, 40,
+                alpha_end_ppm_per_k=20,
+            )
+            self._insert_material(
+                database, "nte", "NTE", -10, 50, 20,
+                alpha_end_ppm_per_k=0,
+            )
+            result = screen_material_pairs(
+                database,
+                pte_release_slug="pte",
+                nte_release_slug="nte",
+                temperature_min_k=300,
+                temperature_max_k=600,
+                temperature_step_k=100,
+                target_curve_points=[
+                    {"temperature_k": 300, "alpha_ppm_per_k": 5},
+                    {"temperature_k": 600, "alpha_ppm_per_k": 15},
+                ],
+                limit=10,
+            )
+            self.assertAlmostEqual(result["results"][0]["nte_volume_fraction"], 0.25)
+            self.assertAlmostEqual(result["results"][0]["rms_error_ppm_per_k"], 0.0)
+            for actual, expected in zip(
+                result["target_alpha_curve_ppm_per_k"],
+                [5.0, 8.333333333333332, 11.666666666666666, 15.0],
+            ):
+                self.assertAlmostEqual(actual, expected)
             with self.assertRaisesRegex(ValueError, "overlap"):
                 screen_material_pairs(
                     database,

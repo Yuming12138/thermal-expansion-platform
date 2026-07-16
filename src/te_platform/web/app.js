@@ -2135,12 +2135,74 @@ function nullableRatioInput(selector) {
   return value === "" ? null : Number(value);
 }
 
+function parseTargetCurveText(value) {
+  const points = [];
+  String(value || "").split(/\r?\n/).forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const columns = trimmed.split(/[\s,;，；\t]+/).filter(Boolean);
+    const temperature = Number(columns[0]);
+    const alpha = Number(columns[1]);
+    if (!Number.isFinite(temperature) || !Number.isFinite(alpha)) {
+      if (/temp|alpha|温度|热膨胀/i.test(trimmed)) return;
+      throw new Error("目标曲线第 " + (index + 1) + " 行应为：温度, α(ppm/K)");
+    }
+    if (temperature < 0) throw new Error("目标曲线温度不能小于 0 K。");
+    points.push({temperature_k: temperature, alpha_ppm_per_k: alpha});
+  });
+  if (points.length < 2) throw new Error("分段目标曲线至少需要两个控制点。");
+  if (points.some((point, index) => index > 0 && point.temperature_k <= points[index - 1].temperature_k)) {
+    throw new Error("目标曲线温度必须严格递增。");
+  }
+  return points;
+}
+
+function targetCurvePoints(prefix) {
+  if (document.querySelector("#" + prefix + "-target-mode").value !== "curve") return [];
+  return parseTargetCurveText(document.querySelector("#" + prefix + "-target-points").value);
+}
+
+function validateTargetCurveCoverage(points, minimumTemperature, maximumTemperature) {
+  if (!points.length) return;
+  if (points[0].temperature_k > minimumTemperature || points[points.length - 1].temperature_k < maximumTemperature) {
+    throw new Error("目标曲线首尾控制点必须覆盖完整设计温区。");
+  }
+}
+
+function formatTargetCurvePoints(points) {
+  return (points || []).map(point =>
+    String(Number(point.temperature_k)) + ", " + String(Number(point.alpha_ppm_per_k))).join("\n");
+}
+
+function updateTargetCurveMode(prefix) {
+  const custom = document.querySelector("#" + prefix + "-target-mode").value === "curve";
+  document.querySelector("#" + prefix + "-target-constant-control").hidden = custom;
+  document.querySelector("#" + prefix + "-target-curve-panel").hidden = !custom;
+}
+
+function targetCurveExample(prefix) {
+  const minimum = Number(document.querySelector("#" + prefix + "-t-min").value);
+  const maximum = Number(document.querySelector("#" + prefix + "-t-max").value);
+  const middle = (minimum + maximum) / 2;
+  document.querySelector("#" + prefix + "-target-points").value = [
+    [minimum, 0], [middle, 2], [maximum, 0],
+  ].map(point => point.join(", ")).join("\n");
+}
+
+async function importTargetCurveFile(prefix, file) {
+  if (!file) return;
+  const text = await file.text();
+  const points = parseTargetCurveText(text);
+  document.querySelector("#" + prefix + "-target-points").value = formatTargetCurvePoints(points);
+}
+
 function currentZteScreeningParameters() {
-  return {
+  const parameters = {
     temperature_min_k: Number(document.querySelector("#zte-screen-t-min").value),
     temperature_max_k: Number(document.querySelector("#zte-screen-t-max").value),
     temperature_step_k: Number(document.querySelector("#zte-screen-step").value),
     target_alpha_ppm_per_k: Number(document.querySelector("#zte-screen-target").value),
+    target_curve_points: targetCurvePoints("zte-screen"),
     zte_tolerance_ppm_per_k: Number(document.querySelector("#zte-screen-tolerance").value),
     model: document.querySelector("#zte-screen-model").value,
     matrix_phase: document.querySelector("#zte-screen-matrix-phase").value,
@@ -2158,6 +2220,12 @@ function currentZteScreeningParameters() {
     max_shear_modulus_ratio: nullableRatioInput("#zte-screen-shear-ratio"),
     limit: Number(document.querySelector("#zte-screen-limit").value),
   };
+  validateTargetCurveCoverage(
+    parameters.target_curve_points,
+    parameters.temperature_min_k,
+    parameters.temperature_max_k,
+  );
+  return parameters;
 }
 
 function resultZteScreeningParameters() {
@@ -2180,6 +2248,13 @@ function zteEngineeringConstraintText(parameters) {
     parts.push("G比≤" + parameters.max_shear_modulus_ratio);
   }
   return parts.join("；") || "未启用额外工程约束";
+}
+
+function zteTargetDescription(parameters) {
+  const points = parameters.target_curve_points || [];
+  if (!points.length) return "恒定 α=" + numeric(parameters.target_alpha_ppm_per_k) + " ppm/K";
+  return "分段目标曲线（" + points.length + "个控制点，" +
+    numeric(points[0].temperature_k) + "–" + numeric(points[points.length - 1].temperature_k) + " K）";
 }
 
 function selectedZtePairs() {
@@ -2228,6 +2303,7 @@ function zteComparisonRequest() {
     temperature_max_k: parameters.temperature_max_k,
     temperature_step_k: parameters.temperature_step_k,
     target_alpha_ppm_per_k: parameters.target_alpha_ppm_per_k,
+    target_curve_points: parameters.target_curve_points || [],
     zte_tolerance_ppm_per_k: parameters.zte_tolerance_ppm_per_k,
     model: parameters.model,
     matrix_phase: parameters.matrix_phase,
@@ -2394,7 +2470,7 @@ function setupZteParetoInteraction() {
       "<small>" + escapeHtml(nearest.nte_material_key) + "</small>" +
       "<dl><div><dt>NTE体积分数</dt><dd>" +
       (Number(nearest.nte_volume_fraction) * 100).toFixed(2) + "%</dd></div>" +
-      "<div><dt>ZTE覆盖率</dt><dd>" +
+      "<div><dt>目标覆盖率</dt><dd>" +
       (Number(nearest.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</dd></div>" +
       "<div><dt>RMS</dt><dd>" + numeric(nearest.rms_error_ppm_per_k) + " ppm/K</dd></div>" +
       "<div><dt>最长连续温区</dt><dd>" + numeric(nearest.longest_zte_temperature_span_k) +
@@ -2432,6 +2508,53 @@ function zteDesignLabel(design, index) {
   return "#" + (design.rank || index + 1) + " " + pte + " + " + nte;
 }
 
+function zteTargetCurveData(source) {
+  const temperatures = (source?.target_temperatures_k || source?.optimization_temperatures_k || []).map(Number);
+  const values = (source?.target_alpha_curve_ppm_per_k || []).map(Number);
+  if (temperatures.length === values.length && temperatures.length >= 2) return {temperatures, values};
+  const minimum = Number(source?.temperature_min_k ?? 300);
+  const maximum = Number(source?.temperature_max_k ?? 800);
+  const target = Number(source?.target_alpha_ppm_per_k ?? 0);
+  return {temperatures: [minimum, maximum], values: [target, target]};
+}
+
+function zteTargetAlphaAtTemperature(source, temperature) {
+  const targetData = zteTargetCurveData(source);
+  const {temperatures, values} = targetData;
+  if (temperature < temperatures[0] || temperature > temperatures[temperatures.length - 1]) return null;
+  for (let index = 1; index < temperatures.length; index += 1) {
+    if (temperature > temperatures[index]) continue;
+    const fraction = (temperature - temperatures[index - 1]) /
+      Math.max(temperatures[index] - temperatures[index - 1], Number.EPSILON);
+    return values[index - 1] + fraction * (values[index] - values[index - 1]);
+  }
+  return values[values.length - 1];
+}
+
+function drawTargetCurveBand(ctx, x, y, targetData, tolerance) {
+  const {temperatures, values} = targetData;
+  if (temperatures.length < 2 || temperatures.length !== values.length) return;
+  ctx.beginPath();
+  temperatures.forEach((temperature, index) => index
+    ? ctx.lineTo(x(temperature), y(values[index] + tolerance))
+    : ctx.moveTo(x(temperature), y(values[index] + tolerance)));
+  for (let index = temperatures.length - 1; index >= 0; index -= 1) {
+    ctx.lineTo(x(temperatures[index]), y(values[index] - tolerance));
+  }
+  ctx.closePath();
+  ctx.fillStyle = "rgba(22,131,106,.13)";
+  ctx.fill();
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = "rgba(22,131,106,.88)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  values.forEach((value, index) => index
+    ? ctx.lineTo(x(temperatures[index]), y(value))
+    : ctx.moveTo(x(temperatures[index]), y(value)));
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
 function drawZteComparisonCurves(payload) {
   const canvas = document.querySelector("#zte-comparison-curve");
   if (!canvas) return;
@@ -2448,14 +2571,14 @@ function drawZteComparisonCurves(payload) {
   }
   const margin = {left: 64, right: 24, top: 26, bottom: 50};
   const parameters = payload.screening_parameters || {};
-  const target = Number(parameters.target_alpha_ppm_per_k || 0);
   const tolerance = Number(parameters.zte_tolerance_ppm_per_k || 5);
+  const targetData = zteTargetCurveData(designs[0] || parameters);
   const allTemperatures = designs.flatMap(item => (item.temperatures_k || []).map(Number));
   const allAlpha = designs.flatMap(item => (item.mixed_alpha_ppm_per_k || []).map(Number));
   const xMin = Math.min(...allTemperatures);
   const xMax = Math.max(...allTemperatures);
-  const rawYMin = Math.min(...allAlpha, target - tolerance);
-  const rawYMax = Math.max(...allAlpha, target + tolerance);
+  const rawYMin = Math.min(...allAlpha, ...targetData.values.map(value => value - tolerance));
+  const rawYMax = Math.max(...allAlpha, ...targetData.values.map(value => value + tolerance));
   const yPad = Math.max((rawYMax - rawYMin) * .12, 1);
   const yMin = rawYMin - yPad;
   const yMax = rawYMax + yPad;
@@ -2463,8 +2586,7 @@ function drawZteComparisonCurves(payload) {
   const plotHeight = height - margin.top - margin.bottom;
   const x = value => margin.left + (value - xMin) / Math.max(xMax - xMin, 1) * plotWidth;
   const y = value => margin.top + (yMax - value) / Math.max(yMax - yMin, 1) * plotHeight;
-  ctx.fillStyle = "rgba(22,131,106,.12)";
-  ctx.fillRect(margin.left, y(target + tolerance), plotWidth, y(target - tolerance) - y(target + tolerance));
+  drawTargetCurveBand(ctx, x, y, targetData, tolerance);
   ctx.strokeStyle = "#dce5eb";
   ctx.fillStyle = "#667789";
   ctx.font = "11px Segoe UI, sans-serif";
@@ -2515,7 +2637,7 @@ function renderZteComparison(payload) {
   const comparison = document.querySelector("#zte-selected-comparison");
   comparison.hidden = false;
   comparison.innerHTML = "<h3>候选对比指标</h3><div class='zte-comparison-table'><table><thead><tr>" +
-    "<th>候选</th><th>NTE体积分数</th><th>NTE质量分数</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>最大偏差</th>" +
+    "<th>候选</th><th>NTE体积分数</th><th>NTE质量分数</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>最大偏差</th>" +
     "</tr></thead><tbody>" + designs.map((design, index) => {
       const massFraction = Number.isFinite(Number(design.nte_mass_fraction))
         ? (Number(design.nte_mass_fraction) * 100).toFixed(2) + "%" : "—";
@@ -2660,11 +2782,14 @@ async function saveZteScreeningProject() {
 }
 
 function applyZteScreeningParameters(parameters) {
+  const targetPoints = parameters.target_curve_points || [];
   const values = {
     "#zte-screen-t-min": parameters.temperature_min_k,
     "#zte-screen-t-max": parameters.temperature_max_k,
     "#zte-screen-step": parameters.temperature_step_k,
     "#zte-screen-target": parameters.target_alpha_ppm_per_k,
+    "#zte-screen-target-mode": targetPoints.length ? "curve" : "constant",
+    "#zte-screen-target-points": formatTargetCurvePoints(targetPoints),
     "#zte-screen-tolerance": parameters.zte_tolerance_ppm_per_k,
     "#zte-screen-model": parameters.model,
     "#zte-screen-matrix-phase": parameters.matrix_phase,
@@ -2685,6 +2810,7 @@ function applyZteScreeningParameters(parameters) {
   document.querySelector("#zte-screen-majority").checked = Boolean(parameters.require_matrix_majority);
   document.querySelector("#zte-screen-require-density").checked = Boolean(parameters.require_mass_fraction);
   document.querySelector("#zte-screen-require-mechanics").checked = Boolean(parameters.require_complete_mechanics);
+  updateTargetCurveMode("zte-screen");
   updateZteScreenMatrixControls();
 }
 
@@ -2729,8 +2855,10 @@ function renderZteScreening(result, restoredPairs = []) {
       ["计算耗时", numeric(result.elapsed_seconds) + " s"],
       ["排名范围", result.ranking_is_complete ? "完整全库" : "候选范围"],
     ]) +
-    "<p class='curve-note'>排名顺序：ZTE温区覆盖率 → 最长连续满足温区 → RMS → 最大偏差。" +
+    "<p class='curve-note'>排名顺序：目标曲线覆盖率 → 最长连续满足温区 → RMS → 最大偏差。" +
     "所有组合使用同一温度网格和固定配比进行比较。</p>" +
+    "<p class='zte-engineering-summary'><strong>反向设计目标：</strong>" +
+    escapeHtml(zteTargetDescription(result)) + "</p>" +
     "<p class='zte-engineering-summary'><strong>工程约束：</strong>" +
     escapeHtml(zteEngineeringConstraintText(result)) + "</p>";
   const body = document.querySelector("#zte-screen-body");
@@ -2776,7 +2904,13 @@ async function runZteScreening() {
     document.querySelector("#zte-screen-summary").textContent = "最高 NTE 体积分数不能低于最低值。";
     return;
   }
-  const parameters = currentZteScreeningParameters();
+  let parameters;
+  try {
+    parameters = currentZteScreeningParameters();
+  } catch (error) {
+    document.querySelector("#zte-screen-summary").textContent = error.message;
+    return;
+  }
   const invalidRatio = [parameters.max_density_ratio, parameters.max_bulk_modulus_ratio,
     parameters.max_shear_modulus_ratio].some(value => value !== null && value < 1);
   if (invalidRatio) {
@@ -2830,9 +2964,12 @@ async function openZteScreeningCandidate(index) {
   document.querySelector("#zte-t-min").value = document.querySelector("#zte-screen-t-min").value;
   document.querySelector("#zte-t-max").value = document.querySelector("#zte-screen-t-max").value;
   document.querySelector("#zte-target").value = document.querySelector("#zte-screen-target").value;
+  document.querySelector("#zte-target-mode").value = document.querySelector("#zte-screen-target-mode").value;
+  document.querySelector("#zte-target-points").value = document.querySelector("#zte-screen-target-points").value;
   document.querySelector("#zte-tolerance").value = document.querySelector("#zte-screen-tolerance").value;
   document.querySelector("#zte-step").value = document.querySelector("#zte-screen-step").value;
   document.querySelector("#zte-model").dispatchEvent(new Event("change"));
+  updateTargetCurveMode("zte");
   setZteMode("manual");
   await designZteComposite();
 }
@@ -2849,6 +2986,7 @@ function zteCandidateRequest(candidate) {
     temperature_max_k: parameters.temperature_max_k,
     temperature_step_k: parameters.temperature_step_k,
     target_alpha_ppm_per_k: parameters.target_alpha_ppm_per_k,
+    target_curve_points: parameters.target_curve_points || [],
     zte_tolerance_ppm_per_k: parameters.zte_tolerance_ppm_per_k,
     model: parameters.model,
     matrix_phase: parameters.matrix_phase,
@@ -2865,6 +3003,7 @@ function zteCandidateUrl(candidate, request) {
     tmax: String(request.temperature_max_k),
     step: String(request.temperature_step_k),
     target: String(request.target_alpha_ppm_per_k),
+    targetcurve: JSON.stringify(constraints.target_curve_points || []),
     tolerance: String(request.zte_tolerance_ppm_per_k),
     model: request.model,
     matrix: request.matrix_phase,
@@ -2880,11 +3019,19 @@ function zteCandidateUrl(candidate, request) {
 }
 
 function applyZteCandidateLocationParameters(params) {
+  let targetPoints = [];
+  try {
+    targetPoints = JSON.parse(params.get("targetcurve") || "[]");
+  } catch (_error) {
+    targetPoints = [];
+  }
   const values = {
     "#zte-screen-t-min": params.get("tmin"),
     "#zte-screen-t-max": params.get("tmax"),
     "#zte-screen-step": params.get("step"),
     "#zte-screen-target": params.get("target"),
+    "#zte-screen-target-mode": targetPoints.length ? "curve" : "constant",
+    "#zte-screen-target-points": formatTargetCurvePoints(targetPoints),
     "#zte-screen-tolerance": params.get("tolerance"),
     "#zte-screen-model": params.get("model"),
     "#zte-screen-matrix-phase": params.get("matrix"),
@@ -2899,6 +3046,7 @@ function applyZteCandidateLocationParameters(params) {
   });
   document.querySelector("#zte-screen-require-density").checked = params.get("reqdensity") === "1";
   document.querySelector("#zte-screen-require-mechanics").checked = params.get("reqmech") === "1";
+  updateTargetCurveMode("zte-screen");
   updateZteScreenMatrixControls();
 }
 
@@ -2987,7 +3135,7 @@ function drawZteCandidateStructure(role, detail) {
 function renderZteCandidateModelTable(design) {
   const modelResults = design.model_results || {};
   return "<div class='zte-candidate-model-table'><table><thead><tr><th>模型</th>" +
-    "<th>NTE体积分数</th><th>NTE质量分数</th><th>ZTE覆盖率</th><th>最长连续温区</th>" +
+    "<th>NTE体积分数</th><th>NTE质量分数</th><th>目标覆盖率</th><th>最长连续温区</th>" +
     "<th>RMS</th><th>最大偏差</th><th>模型假设</th></tr></thead><tbody>" +
     Object.entries(modelResults).map(([modelName, result]) => {
       const massFraction = Number.isFinite(Number(result.nte_mass_fraction))
@@ -3013,24 +3161,22 @@ function drawZteCandidateCurves(payload) {
   const margin = {left: 66, right: 24, top: 28, bottom: 52};
   const temperatures = design.temperatures_k.map(Number);
   const models = Object.entries(design.model_results || {});
-  const target = Number(design.target_alpha_ppm_per_k || 0);
   const tolerance = Number(payload.request.zte_tolerance_ppm_per_k || 5);
+  const targetData = zteTargetCurveData(design);
   const curves = [design.pte_alpha_ppm_per_k, design.nte_alpha_ppm_per_k,
     ...models.map(([, result]) => result.mixed_alpha_ppm_per_k)].map(values => values.map(Number));
   const allY = curves.flat();
   const xMin = Math.min(...temperatures);
   const xMax = Math.max(...temperatures);
-  const rawYMin = Math.min(...allY, target - tolerance);
-  const rawYMax = Math.max(...allY, target + tolerance);
+  const rawYMin = Math.min(...allY, ...targetData.values.map(value => value - tolerance));
+  const rawYMax = Math.max(...allY, ...targetData.values.map(value => value + tolerance));
   const yPad = Math.max((rawYMax - rawYMin) * .1, 1);
   const yMin = rawYMin - yPad;
   const yMax = rawYMax + yPad;
   const x = value => margin.left + (value - xMin) / Math.max(xMax - xMin, 1) * (width - margin.left - margin.right);
   const y = value => margin.top + (yMax - value) / Math.max(yMax - yMin, 1) * (height - margin.top - margin.bottom);
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "rgba(22,131,106,.12)";
-  ctx.fillRect(margin.left, y(target + tolerance), width - margin.left - margin.right,
-    y(target - tolerance) - y(target + tolerance));
+  drawTargetCurveBand(ctx, x, y, targetData, tolerance);
   ctx.strokeStyle = "#dce5eb";
   ctx.fillStyle = "#617587";
   ctx.font = "11px Segoe UI, sans-serif";
@@ -3079,7 +3225,7 @@ function renderZteCandidateDetail(payload) {
       ["NTE体积分数", (Number(design.nte_volume_fraction) * 100).toFixed(2) + "%"],
       ["NTE质量分数", Number.isFinite(Number(design.nte_mass_fraction)) ?
         (Number(design.nte_mass_fraction) * 100).toFixed(2) + "%" : "—"],
-      ["ZTE覆盖率", (Number(design.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%"],
+      ["目标覆盖率", (Number(design.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%"],
       ["RMS", numeric(design.rms_error_ppm_per_k) + " ppm/K"],
       ["最长连续温区", numeric(zteModelLongestSpan(design)) + " K"],
     ]) + "<section class='zte-phase-grid'>" +
@@ -3184,12 +3330,13 @@ function exportZteCandidateCsv() {
   if (!payload) return;
   const {design} = payload;
   const models = Object.entries(design.model_results || {});
-  const columns = ["temperature_K", "pte_alpha_ppm_per_K", "nte_alpha_ppm_per_K",
+  const columns = ["temperature_K", "target_alpha_ppm_per_K", "pte_alpha_ppm_per_K", "nte_alpha_ppm_per_K",
     ...models.map(([name]) => name + "_mixed_alpha_ppm_per_K")];
   const lines = [columns.join(",")];
   design.temperatures_k.forEach((temperature, index) => {
     lines.push([
       temperature,
+      zteTargetAlphaAtTemperature(design, Number(temperature)),
       design.pte_alpha_ppm_per_k[index],
       design.nte_alpha_ppm_per_k[index],
       ...models.map(([, result]) => result.mixed_alpha_ppm_per_k[index]),
@@ -3249,11 +3396,13 @@ function drawZteCurves(result) {
   const pte = result.pte_alpha_ppm_per_k.map(Number);
   const nte = result.nte_alpha_ppm_per_k.map(Number);
   const mixed = result.mixed_alpha_ppm_per_k.map(Number);
-  const target = Number(result.target_alpha_ppm_per_k);
   const zteTolerance = Number(result.zte_tolerance_ppm_per_k || 5);
-  const zteLower = target - zteTolerance;
-  const zteUpper = target + zteTolerance;
-  const allY = [...pte, ...nte, ...mixed, target, zteLower, zteUpper];
+  const targetData = zteTargetCurveData(result);
+  const allY = [
+    ...pte, ...nte, ...mixed,
+    ...targetData.values.map(value => value - zteTolerance),
+    ...targetData.values.map(value => value + zteTolerance),
+  ];
   const xMin = 0;
   const xMax = 1000;
   const rawYMin = Math.min(...allY);
@@ -3275,23 +3424,7 @@ function drawZteCurves(result) {
       height - margin.top - margin.bottom,
     );
   }
-  ctx.fillStyle = "rgba(22, 131, 106, 0.14)";
-  ctx.fillRect(
-    margin.left,
-    y(zteUpper),
-    width - margin.left - margin.right,
-    y(zteLower) - y(zteUpper)
-  );
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = "rgba(22, 131, 106, 0.72)";
-  ctx.lineWidth = 1;
-  for (const limit of [zteLower, zteUpper]) {
-    ctx.beginPath();
-    ctx.moveTo(margin.left, y(limit));
-    ctx.lineTo(width - margin.right, y(limit));
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+  drawTargetCurveBand(ctx, x, y, targetData, zteTolerance);
   for (let value = 0; value <= 1000; value += 100) {
     ctx.strokeStyle = "rgba(174, 189, 202, 0.32)";
     ctx.lineWidth = 1;
@@ -3307,13 +3440,6 @@ function drawZteCurves(result) {
   ctx.lineTo(margin.left, height - margin.bottom);
   ctx.lineTo(width - margin.right, height - margin.bottom);
   ctx.stroke();
-  ctx.setLineDash([6, 5]);
-  ctx.strokeStyle = "#2b3642";
-  ctx.beginPath();
-  ctx.moveTo(margin.left, y(target));
-  ctx.lineTo(width - margin.right, y(target));
-  ctx.stroke();
-  ctx.setLineDash([]);
   const drawLine = (values, color, widthValue) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = widthValue;
@@ -3424,7 +3550,7 @@ function zteModelComparison(result) {
   }).join("");
   return "<div class='zte-model-comparison'><table><thead><tr><th>模型</th>" +
     "<th>NTE体积分数</th><th>NTE质量分数</th><th>有效NTE热权重</th><th>RMS</th><th>最大偏差</th>" +
-    "<th>ZTE温区覆盖</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    "<th>目标温区覆盖</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
     "<p class='curve-note'>说明：当 K、G 视为温度无关常数且配比不受约束时，三种模型可能通过不同体积分数获得相同有效NTE热权重，因此最优误差相同并不代表模型等价。Kerner 结果还依赖连续基体选择；应按实际相形貌和可制造配比选择模型。</p>";
 }
 
@@ -3492,7 +3618,7 @@ function renderZteDesign(result) {
       ["NTE 质量分数", massPercent, "zte-nte-mass-fraction"],
       ["温区 RMS 偏差", numeric(result.rms_error_ppm_per_k) + " ppm/K", "zte-rms"],
       ["最大绝对偏差", numeric(result.max_absolute_error_ppm_per_k) + " ppm/K", "zte-max-error"],
-      ["ZTE 温区覆盖率", coveragePercent, "zte-coverage"],
+      ["目标曲线覆盖率", coveragePercent, "zte-coverage"],
     ]) + "<p class='curve-note'>PTE：" + escapeHtml(result.pte_material.formula || result.pte_material.material_key) +
     "（K=" + numeric(result.pte_material.bulk_modulus_gpa) + " GPa，G=" +
     numeric(result.pte_material.shear_modulus_gpa) + " GPa，ρ=" +
@@ -3501,7 +3627,8 @@ function renderZteDesign(result) {
     " GPa，G=" + numeric(result.nte_material.shear_modulus_gpa) + " GPa，ρ=" +
     numeric(result.nte_material.density_g_cm3) + " g/cm³）；优化温区：" +
     numeric(result.temperature_min_k) + "–" + numeric(result.temperature_max_k) +
-    " K，步长 " + numeric(result.temperature_step_k) + " K；ZTE判据：目标值 ±" +
+    " K，步长 " + numeric(result.temperature_step_k) + " K；反向设计目标：" +
+    escapeHtml(zteTargetDescription(result)) + "；目标判据：α(T)曲线 ±" +
     numeric(result.zte_tolerance_ppm_per_k) + " ppm/K。</p>" +
     "<p class='curve-note'>满足判据的连续温区：<span id='zte-ranges'>" +
     escapeHtml(zteRangeText(result.zte_temperature_ranges_k)) + "</span></p>" +
@@ -3529,7 +3656,10 @@ function renderZteDesign(result) {
     const optimizationPte = result.optimization_pte_alpha_ppm_per_k.map(Number);
     const optimizationNte = result.optimization_nte_alpha_ppm_per_k.map(Number);
     const optimizationMixed = zteMixedCurve(result, fraction, optimizationPte, optimizationNte);
-    const errors = optimizationMixed.map(value => value - Number(result.target_alpha_ppm_per_k));
+    const targetValues = (result.target_alpha_curve_ppm_per_k || []).map(Number);
+    const errors = optimizationMixed.map((value, index) =>
+      value - (Number.isFinite(targetValues[index])
+        ? targetValues[index] : Number(result.target_alpha_ppm_per_k)));
     const rms = Math.sqrt(errors.reduce((total, error) => total + error * error, 0) / errors.length);
     const maxError = Math.max(...errors.map(Math.abs));
     const intervalMetrics = zteIntervalMetrics(
@@ -3568,15 +3698,20 @@ async function designZteComposite() {
   document.querySelector("#zte-design-button").disabled = true;
   document.querySelector("#zte-result").textContent = "正在读取两条真实 QHA 曲线并优化配比…";
   try {
+    const temperatureMin = Number(document.querySelector("#zte-t-min").value);
+    const temperatureMax = Number(document.querySelector("#zte-t-max").value);
+    const targetPoints = targetCurvePoints("zte");
+    validateTargetCurveCoverage(targetPoints, temperatureMin, temperatureMax);
     const result = await api("/api/composites/curve-design", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         pte_material_key: pteKey,
         nte_material_key: nteKey,
-        temperature_min_k: Number(document.querySelector("#zte-t-min").value),
-        temperature_max_k: Number(document.querySelector("#zte-t-max").value),
+        temperature_min_k: temperatureMin,
+        temperature_max_k: temperatureMax,
         target_alpha_ppm_per_k: Number(document.querySelector("#zte-target").value),
+        target_curve_points: targetPoints,
         model: document.querySelector("#zte-model").value,
         matrix_phase: document.querySelector("#zte-matrix-phase").value,
         temperature_step_k: Number(document.querySelector("#zte-step").value),
@@ -3655,6 +3790,22 @@ async function initialize() {
     loadCompositeMaterials("nte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#zte-manual-tab").addEventListener("click", () => setZteMode("manual"));
   document.querySelector("#zte-screen-tab").addEventListener("click", () => setZteMode("screen"));
+  document.querySelector("#zte-target-mode").addEventListener("change", () => updateTargetCurveMode("zte"));
+  document.querySelector("#zte-screen-target-mode").addEventListener("change", () =>
+    updateTargetCurveMode("zte-screen"));
+  document.querySelector("#zte-target-example").addEventListener("click", () => targetCurveExample("zte"));
+  document.querySelector("#zte-screen-target-example").addEventListener("click", () =>
+    targetCurveExample("zte-screen"));
+  document.querySelector("#zte-target-file").addEventListener("change", event =>
+    importTargetCurveFile("zte", event.target.files?.[0]).catch(error => {
+      document.querySelector("#zte-result").textContent = error.message;
+    }));
+  document.querySelector("#zte-screen-target-file").addEventListener("change", event =>
+    importTargetCurveFile("zte-screen", event.target.files?.[0]).catch(error => {
+      document.querySelector("#zte-screen-summary").textContent = error.message;
+    }));
+  updateTargetCurveMode("zte");
+  updateTargetCurveMode("zte-screen");
   document.querySelector("#zte-design-button").addEventListener("click", designZteComposite);
   const updateZteMatrixControl = () => {
     document.querySelector("#zte-matrix-control").hidden =

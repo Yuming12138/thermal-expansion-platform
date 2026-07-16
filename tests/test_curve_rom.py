@@ -5,6 +5,7 @@ from te_platform.composites.curve_rom import (
     optimize_curve_kerner,
     optimize_curve_rom,
     optimize_curve_turner,
+    resolve_target_alpha_curve,
 )
 
 
@@ -88,6 +89,29 @@ class CurveROMTests(unittest.TestCase):
             matrix_phase="nte",
         )
         self.assertEqual(mixed, (5.0, 10.0))
+
+    def test_optimizes_against_arbitrary_target_curve(self) -> None:
+        result = optimize_curve_rom(
+            [10, 20],
+            [-10, 0],
+            temperatures_k=[300, 500],
+            target_alpha_curve=[5, 15],
+        )
+        self.assertAlmostEqual(result.nte_volume_fraction, 0.25)
+        self.assertAlmostEqual(result.rms_error_ppm_per_k, 0.0)
+        self.assertEqual(result.target_alpha_curve_ppm_per_k, (5.0, 15.0))
+
+    def test_interpolates_piecewise_target_curve_and_requires_coverage(self) -> None:
+        values = resolve_target_alpha_curve(
+            [300, 350, 500],
+            target_curve_points=[(300, 5), (400, 10), (500, 15)],
+        )
+        self.assertEqual(values, (5.0, 7.5, 15.0))
+        with self.assertRaisesRegex(ValueError, "cover"):
+            resolve_target_alpha_curve(
+                [300, 500],
+                target_curve_points=[(350, 5), (500, 15)],
+            )
 
 
 if __name__ == "__main__":

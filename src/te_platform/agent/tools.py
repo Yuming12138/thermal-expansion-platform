@@ -236,7 +236,7 @@ def default_registry(
             ),
             description=(
                 "使用数据库中的真实PTE/NTE热膨胀曲线，在指定温区比较线性ROM、Turner与Kerner模型，"
-                "优化固定体积分数并返回质量分数、误差和ZTE温区覆盖率。"
+                "针对恒定目标或任意分段alpha(T)目标曲线优化固定体积分数，并返回质量分数、误差和覆盖率。"
             ),
             parameters={
                 "type": "object",
@@ -246,6 +246,21 @@ def default_registry(
                     "temperature_min_k": {"type": "number", "minimum": 0, "default": 300},
                     "temperature_max_k": {"type": "number", "minimum": 1, "default": 800},
                     "target_alpha_ppm_per_k": {"type": "number", "default": 0},
+                    "target_curve_points": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "temperature_k": {"type": "number", "minimum": 0},
+                                "alpha_ppm_per_k": {"type": "number"},
+                            },
+                            "required": ["temperature_k", "alpha_ppm_per_k"],
+                            "additionalProperties": False,
+                        },
+                        "default": [],
+                        "description": "可选分段线性目标曲线；非空时覆盖固定target_alpha。",
+                    },
                     "model": {
                         "type": "string",
                         "enum": ["linear_rom", "turner", "kerner"],
@@ -283,7 +298,7 @@ def default_registry(
                 **kwargs,
             ),
             description=(
-                "严格遍历目录库中所有满足温区与筛选条件的PTE/NTE组合，按ZTE覆盖率、"
+                "严格遍历目录库中所有满足温区与筛选条件的PTE/NTE组合，按目标曲线覆盖率、"
                 "最长连续温区和误差排名。用于回答全库最佳组合、候选推荐和配比约束问题；"
                 "不要用有限材料搜索结果代替此工具。"
             ),
@@ -299,6 +314,21 @@ def default_registry(
                         "default": 10,
                     },
                     "target_alpha_ppm_per_k": {"type": "number", "default": 0},
+                    "target_curve_points": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "temperature_k": {"type": "number", "minimum": 0},
+                                "alpha_ppm_per_k": {"type": "number"},
+                            },
+                            "required": ["temperature_k", "alpha_ppm_per_k"],
+                            "additionalProperties": False,
+                        },
+                        "default": [],
+                        "description": "可选分段线性目标曲线；用于任意热膨胀曲线反向设计。",
+                    },
                     "zte_tolerance_ppm_per_k": {
                         "type": "number",
                         "exclusiveMinimum": 0,

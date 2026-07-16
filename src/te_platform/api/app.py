@@ -123,10 +123,16 @@ class ROMRequest(BaseModel):
     target_alpha: float = 0.0
 
 
+class TargetCurvePoint(BaseModel):
+    temperature_k: float = Field(ge=0)
+    alpha_ppm_per_k: float
+
+
 class CurveROMRequest(BaseModel):
     pte_alpha: list[float] = Field(min_length=2)
     nte_alpha: list[float] = Field(min_length=2)
     target_alpha: float = 0.0
+    target_alpha_curve: list[float] | None = Field(default=None, min_length=2)
     model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     temperatures_k: list[float] | None = None
     pte_density: float | None = Field(default=None, gt=0)
@@ -145,6 +151,7 @@ class MaterialPairCurveRequest(BaseModel):
     temperature_min_k: float = Field(default=300.0, ge=0)
     temperature_max_k: float = Field(default=800.0, gt=0)
     target_alpha_ppm_per_k: float = 0.0
+    target_curve_points: list[TargetCurvePoint] = Field(default_factory=list, max_length=50)
     model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     matrix_phase: Literal["pte", "nte"] = "pte"
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
@@ -156,6 +163,7 @@ class MaterialPairScreeningRequest(BaseModel):
     temperature_max_k: float = Field(default=800.0, gt=0)
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
     target_alpha_ppm_per_k: float = 0.0
+    target_curve_points: list[TargetCurvePoint] = Field(default_factory=list, max_length=50)
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
     model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     matrix_phase: Literal["pte", "nte"] = "pte"
@@ -186,6 +194,7 @@ class ZteCandidateComparisonRequest(BaseModel):
     temperature_max_k: float = Field(default=800.0, gt=0)
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
     target_alpha_ppm_per_k: float = 0.0
+    target_curve_points: list[TargetCurvePoint] = Field(default_factory=list, max_length=50)
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
     model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     matrix_phase: Literal["pte", "nte"] = "pte"
@@ -674,6 +683,7 @@ def create_app(
                 nte_shear_modulus_gpa=request.nte_shear_modulus_gpa,
                 matrix_phase=request.matrix_phase,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+                target_alpha_curve=request.target_alpha_curve,
             ).to_dict()
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -808,6 +818,10 @@ def create_app(
                 temperature_min_k=request.temperature_min_k,
                 temperature_max_k=request.temperature_max_k,
                 target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                target_curve_points=[
+                    (point.temperature_k, point.alpha_ppm_per_k)
+                    for point in request.target_curve_points
+                ],
                 model=request.model,
                 matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
@@ -827,6 +841,10 @@ def create_app(
                 temperature_max_k=request.temperature_max_k,
                 temperature_step_k=request.temperature_step_k,
                 target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                target_curve_points=[
+                    (point.temperature_k, point.alpha_ppm_per_k)
+                    for point in request.target_curve_points
+                ],
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
                 model=request.model,
                 matrix_phase=request.matrix_phase,
@@ -861,6 +879,10 @@ def create_app(
                 temperature_min_k=request.temperature_min_k,
                 temperature_max_k=request.temperature_max_k,
                 target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                target_curve_points=[
+                    (point.temperature_k, point.alpha_ppm_per_k)
+                    for point in request.target_curve_points
+                ],
                 model=request.model,
                 matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
@@ -874,6 +896,7 @@ def create_app(
                 "temperature_max_k": request.temperature_max_k,
                 "temperature_step_k": request.temperature_step_k,
                 "target_alpha_ppm_per_k": request.target_alpha_ppm_per_k,
+                "target_curve_points": [point.model_dump() for point in request.target_curve_points],
                 "zte_tolerance_ppm_per_k": request.zte_tolerance_ppm_per_k,
                 "model": request.model,
                 "matrix_phase": request.matrix_phase,
