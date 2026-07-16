@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-11", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-14", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -354,6 +354,71 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(screening_mock.call_args.kwargs["model"], "kerner")
         self.assertEqual(screening_mock.call_args.kwargs["matrix_phase"], "nte")
         self.assertEqual(screening_mock.call_args.kwargs["nte_volume_fraction_min"], 0.5)
+
+    @patch("te_platform.api.app.optimize_material_pair")
+    def test_zte_candidate_comparison_endpoint(self, optimize_mock) -> None:
+        optimize_mock.return_value = {
+            "pte_material": {"formula": "CaO"},
+            "nte_material": {"material_key": "NTE-1"},
+            "nte_volume_fraction": 0.4,
+            "temperatures_k": [300, 600],
+            "mixed_alpha_ppm_per_k": [0, 0],
+        }
+        response = self.client.post(
+            "/api/composites/screen/compare",
+            json={
+                "pairs": [
+                    {"pte_material_key": "1.CaO", "nte_material_key": "NTE-1", "rank": 1}
+                ],
+                "model": "turner",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["designs"][0]["rank"], 1)
+        self.assertEqual(optimize_mock.call_args.kwargs["model"], "turner")
+
+    @patch("te_platform.api.app.build_zte_screening_report_pdf", return_value=b"%PDF-test")
+    @patch("te_platform.api.app.optimize_material_pair")
+    def test_zte_screening_pdf_endpoint(self, optimize_mock, report_mock) -> None:
+        optimize_mock.return_value = {
+            "pte_material": {"formula": "CaO"},
+            "nte_material": {"material_key": "NTE-1"},
+            "nte_volume_fraction": 0.4,
+            "temperatures_k": [300, 600],
+            "mixed_alpha_ppm_per_k": [0, 0],
+        }
+        response = self.client.post(
+            "/api/composites/screen/report.pdf",
+            json={
+                "project_name": "ZTE report",
+                "pairs": [{"pte_material_key": "1.CaO", "nte_material_key": "NTE-1"}],
+                "ranked_results": [],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        report_mock.assert_called_once()
+
+    def test_zte_screening_project_endpoints(self) -> None:
+        saved = self.client.post(
+            "/api/composites/screen/projects",
+            json={
+                "project_name": "Saved screening",
+                "screening_parameters": {"model": "linear_rom", "limit": 10},
+                "screening_result": {"results": [{"rank": 1}]},
+                "selected_pairs": [
+                    {"pte_material_key": "1.CaO", "nte_material_key": "NTE-1", "rank": 1}
+                ],
+            },
+        )
+        self.assertEqual(saved.status_code, 200)
+        project_id = saved.json()["id"]
+        projects = self.client.get("/api/composites/screen/projects")
+        loaded = self.client.get(f"/api/composites/screen/projects/{project_id}")
+        deleted = self.client.delete(f"/api/composites/screen/projects/{project_id}")
+        self.assertTrue(any(item["id"] == project_id for item in projects.json()))
+        self.assertEqual(loaded.json()["project_name"], "Saved screening")
+        self.assertTrue(deleted.json()["deleted"])
 
     def test_agent_tools_are_allowlisted(self) -> None:
         tools = self.client.get("/api/agent/tools")

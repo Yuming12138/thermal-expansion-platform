@@ -31,6 +31,12 @@ from te_platform.catalog.queries import (
 from te_platform.composites.rom import optimize_zte_fraction
 from te_platform.composites.curve_rom import optimize_curve_model
 from te_platform.composites.material_pair import curve_materials, optimize_material_pair
+from te_platform.composites.projects import (
+    delete_screening_project,
+    get_screening_project,
+    list_screening_projects,
+    save_screening_project,
+)
 from te_platform.composites.screening import screen_material_pairs
 from te_platform.config import (
     DEFAULT_PTE_RELEASE_SLUG,
@@ -41,6 +47,7 @@ from te_platform.config import (
 )
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
+from te_platform.reports.zte_report import build_zte_screening_report_pdf
 from te_platform.structures import build_structure_view
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
@@ -158,6 +165,35 @@ class MaterialPairScreeningRequest(BaseModel):
     nte_volume_fraction_max: float = Field(default=1.0, ge=0, le=1)
     require_matrix_majority: bool = False
     limit: int = Field(default=30, ge=1, le=100)
+
+
+class ZtePairSelection(BaseModel):
+    pte_material_key: str = Field(min_length=1)
+    nte_material_key: str = Field(min_length=1)
+    rank: int | None = Field(default=None, ge=1)
+
+
+class ZteCandidateComparisonRequest(BaseModel):
+    pairs: list[ZtePairSelection] = Field(min_length=1, max_length=6)
+    temperature_min_k: float = Field(default=300.0, ge=0)
+    temperature_max_k: float = Field(default=800.0, gt=0)
+    temperature_step_k: float = Field(default=10.0, gt=0, le=100)
+    target_alpha_ppm_per_k: float = 0.0
+    zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
+    model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
+    matrix_phase: Literal["pte", "nte"] = "pte"
+
+
+class ZteScreeningReportRequest(ZteCandidateComparisonRequest):
+    project_name: str = Field(default="ZTE screening report", min_length=1, max_length=120)
+    ranked_results: list[dict[str, object]] = Field(default_factory=list, max_length=100)
+
+
+class ZteScreeningProjectRequest(BaseModel):
+    project_name: str = Field(min_length=1, max_length=120)
+    screening_parameters: MaterialPairScreeningRequest
+    screening_result: dict[str, object]
+    selected_pairs: list[ZtePairSelection] = Field(default_factory=list, max_length=6)
 
 
 class AgentToolRequest(BaseModel):
@@ -700,6 +736,102 @@ def create_app(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+
+    def zte_candidate_comparison(
+        request: ZteCandidateComparisonRequest,
+    ) -> dict[str, object]:
+        designs = []
+        for pair in request.pairs:
+            design = optimize_material_pair(
+                catalog_db,
+                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
+                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_material_key=pair.pte_material_key,
+                nte_material_key=pair.nte_material_key,
+                temperature_min_k=request.temperature_min_k,
+                temperature_max_k=request.temperature_max_k,
+                target_alpha_ppm_per_k=request.target_alpha_ppm_per_k,
+                model=request.model,
+                matrix_phase=request.matrix_phase,
+                temperature_step_k=request.temperature_step_k,
+                zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+            )
+            design["rank"] = pair.rank
+            designs.append(design)
+        return {
+            "screening_parameters": {
+                "temperature_min_k": request.temperature_min_k,
+                "temperature_max_k": request.temperature_max_k,
+                "temperature_step_k": request.temperature_step_k,
+                "target_alpha_ppm_per_k": request.target_alpha_ppm_per_k,
+                "zte_tolerance_ppm_per_k": request.zte_tolerance_ppm_per_k,
+                "model": request.model,
+                "matrix_phase": request.matrix_phase,
+            },
+            "designs": designs,
+        }
+
+    @app.post("/api/composites/screen/compare")
+    def composite_screening_comparison(
+        request: ZteCandidateComparisonRequest,
+    ) -> dict[str, object]:
+        try:
+            return zte_candidate_comparison(request)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/composites/screen/report.pdf")
+    def composite_screening_report(request: ZteScreeningReportRequest) -> Response:
+        try:
+            comparison = zte_candidate_comparison(request)
+            content = build_zte_screening_report_pdf(
+                {
+                    **comparison,
+                    "project_name": request.project_name.strip(),
+                    "ranked_results": request.ranked_results,
+                }
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        filename = _download_filename(request.project_name, "zte_screening_report.pdf")
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers=_attachment_headers(filename),
+        )
+
+    @app.get("/api/composites/screen/projects")
+    def composite_screening_projects() -> list[dict[str, object]]:
+        ensure_workspace_database(workspace_db)
+        return list_screening_projects(workspace_db)
+
+    @app.post("/api/composites/screen/projects")
+    def composite_screening_project_save(
+        request: ZteScreeningProjectRequest,
+    ) -> dict[str, object]:
+        ensure_workspace_database(workspace_db)
+        return save_screening_project(
+            workspace_db,
+            project_name=request.project_name,
+            screening_parameters=request.screening_parameters.model_dump(),
+            screening_result=request.screening_result,
+            selected_pairs=[pair.model_dump() for pair in request.selected_pairs],
+        )
+
+    @app.get("/api/composites/screen/projects/{project_id}")
+    def composite_screening_project(project_id: str) -> dict[str, object]:
+        ensure_workspace_database(workspace_db)
+        try:
+            return get_screening_project(workspace_db, project_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.delete("/api/composites/screen/projects/{project_id}")
+    def composite_screening_project_delete(project_id: str) -> dict[str, object]:
+        ensure_workspace_database(workspace_db)
+        if not delete_screening_project(workspace_db, project_id):
+            raise HTTPException(status_code=404, detail="ZTE screening project not found")
+        return {"deleted": True, "id": project_id}
 
     @app.post("/api/structures/inspect")
     async def structure_inspect(file: UploadFile = File(...)) -> dict[str, object]:

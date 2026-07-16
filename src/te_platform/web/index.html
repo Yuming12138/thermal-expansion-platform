@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-9">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-10">
   </head>
   <body>
     <header>
@@ -217,9 +217,38 @@
             <button id="zte-screen-button" type="button">筛选全库最佳组合</button>
           </div>
           <div id="zte-screen-summary" class="prediction-result muted">设置目标温区和模型后开始全库筛选。</div>
+          <div class="zte-project-toolbar">
+            <input id="zte-project-name" value="ZTE筛选项目" maxlength="120" aria-label="筛选项目名称">
+            <button id="zte-save-project" type="button" disabled>保存当前项目</button>
+            <select id="zte-project-select" aria-label="已保存的ZTE筛选项目"><option value="">选择已保存项目</option></select>
+            <button id="zte-load-project" type="button" disabled>加载</button>
+            <button id="zte-delete-project" class="secondary-button" type="button" disabled>删除</button>
+          </div>
+          <div id="zte-screen-workspace" class="zte-screen-workspace" hidden>
+            <div class="zte-screen-toolbar">
+              <strong id="zte-selected-count">已选择 0/6 组</strong>
+              <button id="zte-compare-selected" type="button" disabled>对比所选曲线</button>
+              <button id="zte-export-csv" type="button">导出 CSV</button>
+              <button id="zte-export-json" type="button">导出 JSON</button>
+              <button id="zte-export-pdf" type="button" disabled>导出 PDF 报告</button>
+            </div>
+            <div class="zte-analysis-grid">
+              <article class="zte-analysis-card">
+                <h3>Pareto 多目标景观</h3>
+                <p class="curve-note">横轴为NTE体积分数，纵轴为RMS，颜色表示ZTE覆盖率；勾选组合会高亮。</p>
+                <canvas id="zte-pareto" width="900" height="430"></canvas>
+              </article>
+              <article class="zte-analysis-card">
+                <h3>所选混合曲线</h3>
+                <p id="zte-compare-note" class="curve-note">请从排名中勾选1–6组候选并运行对比。</p>
+                <canvas id="zte-comparison-curve" width="900" height="430"></canvas>
+              </article>
+            </div>
+            <div id="zte-selected-comparison" class="zte-selected-comparison" hidden></div>
+          </div>
           <div id="zte-screen-results" class="zte-screen-results" hidden>
             <table>
-              <thead><tr><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
+              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
               <tbody id="zte-screen-body"></tbody>
             </table>
           </div>
@@ -299,6 +328,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-11"></script>
+    <script src="/static/app.js?v=0.10.0-14"></script>
   </body>
 </html>
