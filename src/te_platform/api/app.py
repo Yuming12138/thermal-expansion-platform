@@ -693,6 +693,101 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+    def composite_material_detail(role: str, material_key: str) -> dict[str, object]:
+        release_slug = {
+            "pte": DEFAULT_PTE_RELEASE_SLUG,
+            "nte": DEFAULT_RELEASE_SLUG,
+        }.get(role.lower())
+        if release_slug is None:
+            raise HTTPException(status_code=422, detail="role must be 'pte' or 'nte'")
+        try:
+            detail = material_detail(catalog_db, release_slug, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        structure = next(
+            (item for item in detail["structures"] if item.get("content")),
+            None,
+        )
+        if structure:
+            try:
+                detail["structure_view"] = build_structure_view(
+                    structure["content"], structure["format"]
+                )
+            except Exception:
+                detail["structure_view"] = None
+        else:
+            detail["structure_view"] = None
+        detail["composite_role"] = role.lower()
+        return detail
+
+    @app.get("/api/composites/materials/{role}/{material_key}")
+    def composite_material(role: str, material_key: str) -> dict[str, object]:
+        ensure_catalog_database(catalog_db)
+        return composite_material_detail(role, material_key)
+
+    @app.get("/api/composites/materials/{role}/{material_key}/download/POSCAR")
+    def composite_material_poscar_download(role: str, material_key: str) -> Response:
+        detail = composite_material_detail(role, material_key)
+        structure = next(
+            (
+                item
+                for item in detail["structures"]
+                if str(item.get("format", "")).upper() == "POSCAR" and item.get("content")
+            ),
+            None,
+        )
+        if structure is None:
+            raise HTTPException(status_code=404, detail="Material has no stored POSCAR")
+        content = str(structure["content"])
+        if not content.endswith("\n"):
+            content += "\n"
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(_download_filename(material_key, "POSCAR")),
+        )
+
+    @app.get("/api/composites/materials/{role}/{material_key}/download/thermal_expansion.dat")
+    def composite_material_curve_download(role: str, material_key: str) -> Response:
+        detail = composite_material_detail(role, material_key)
+        curve = detail.get("precision_thermal_expansion")
+        if not curve:
+            raise HTTPException(status_code=404, detail="Material has no stored thermal-expansion curve")
+        release = detail.get("dataset_release") or {}
+        lines = [
+            f"# material_key: {material_key}",
+            f"# composite_role: {role.lower()}",
+            f"# dataset_release: {release.get('slug', '')} version={release.get('version', '')}",
+            f"# qha_job_id: {curve.get('job_id', '')}",
+            "# columns: temperature_K volumetric_thermal_expansion_coefficient_1_per_K",
+        ]
+        lines.extend(
+            f"{float(point['temperature_k']):.8f} {float(point['alpha_ppm_per_k']) / 1_000_000:.12e}"
+            for point in curve["points"]
+        )
+        return Response(
+            content="\n".join(lines) + "\n",
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(
+                _download_filename(material_key, "thermal_expansion.dat")
+            ),
+        )
+
+    @app.get("/api/composites/materials/{role}/{material_key}/download/thermal_expansion.pdf")
+    def composite_material_curve_pdf(role: str, material_key: str) -> Response:
+        detail = composite_material_detail(role, material_key)
+        try:
+            content = build_material_curve_pdf(detail)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers=_attachment_headers(
+                _download_filename(material_key, "thermal_expansion.pdf")
+            ),
+        )
+
     @app.post("/api/composites/curve-design")
     def composite_curve_design(request: MaterialPairCurveRequest) -> dict[str, object]:
         try:

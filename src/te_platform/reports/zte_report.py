@@ -55,23 +55,42 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
         pareto_axis = figure.add_subplot(grid[1, 1])
         table_axis.axis("off")
         rows = []
-        for index, design in enumerate(designs):
-            mass_fraction = design.get("nte_mass_fraction")
-            rows.append(
-                [
-                    str(design.get("rank") or index + 1),
-                    str((design.get("pte_material") or {}).get("formula") or "-"),
-                    str((design.get("nte_material") or {}).get("material_key") or "-"),
-                    _number(float(design["nte_volume_fraction"]) * 100),
-                    (_number(float(mass_fraction) * 100) if mass_fraction is not None else "-"),
-                    _number(float(design["zte_temperature_coverage_fraction"]) * 100, 1),
-                    _number(design.get("rms_error_ppm_per_k")),
-                    _number(_longest_span(design)),
-                ]
-            )
+        single_model_results = designs[0].get("model_results") if len(designs) == 1 else None
+        if single_model_results:
+            for model_name, model_result in single_model_results.items():
+                mass_fraction = model_result.get("nte_mass_fraction")
+                rows.append(
+                    [
+                        str(model_result.get("model_label") or model_name),
+                        str((designs[0].get("pte_material") or {}).get("formula") or "-"),
+                        str((designs[0].get("nte_material") or {}).get("formula") or "-"),
+                        _number(float(model_result["nte_volume_fraction"]) * 100),
+                        (_number(float(mass_fraction) * 100) if mass_fraction is not None else "-"),
+                        _number(float(model_result["zte_temperature_coverage_fraction"]) * 100, 1),
+                        _number(model_result.get("rms_error_ppm_per_k")),
+                        _number(_longest_span(model_result)),
+                    ]
+                )
+            table_labels = ["Model", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Coverage %", "RMS", "Longest K"]
+        else:
+            for index, design in enumerate(designs):
+                mass_fraction = design.get("nte_mass_fraction")
+                rows.append(
+                    [
+                        str(design.get("rank") or index + 1),
+                        str((design.get("pte_material") or {}).get("formula") or "-"),
+                        str((design.get("nte_material") or {}).get("material_key") or "-"),
+                        _number(float(design["nte_volume_fraction"]) * 100),
+                        (_number(float(mass_fraction) * 100) if mass_fraction is not None else "-"),
+                        _number(float(design["zte_temperature_coverage_fraction"]) * 100, 1),
+                        _number(design.get("rms_error_ppm_per_k")),
+                        _number(_longest_span(design)),
+                    ]
+                )
+            table_labels = ["Rank", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Coverage %", "RMS", "Longest K"]
         table = table_axis.table(
             cellText=rows,
-            colLabels=["Rank", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Coverage %", "RMS", "Longest K"],
+            colLabels=table_labels,
             cellLoc="center",
             colLoc="center",
             loc="center",
@@ -94,17 +113,45 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
 
         target = float(parameters.get("target_alpha_ppm_per_k", 0.0))
         tolerance = float(parameters.get("zte_tolerance_ppm_per_k", 5.0))
-        for index, design in enumerate(designs):
+        if single_model_results:
+            design = designs[0]
+            temperatures = [float(value) for value in design["temperatures_k"]]
             curve_axis.plot(
-                [float(value) for value in design["temperatures_k"]],
-                [float(value) for value in design["mixed_alpha_ppm_per_k"]],
-                color=REPORT_COLORS[index % len(REPORT_COLORS)],
-                linewidth=1.8,
-                label=(
-                    f"{(design.get('pte_material') or {}).get('formula', '-')} + "
-                    f"{(design.get('nte_material') or {}).get('material_key', '-')}"
-                ),
+                temperatures,
+                [float(value) for value in design["pte_alpha_ppm_per_k"]],
+                color="#d84a3a",
+                linewidth=1.1,
+                linestyle="--",
+                label="PTE source curve",
             )
+            curve_axis.plot(
+                temperatures,
+                [float(value) for value in design["nte_alpha_ppm_per_k"]],
+                color="#2864c7",
+                linewidth=1.1,
+                linestyle="--",
+                label="NTE source curve",
+            )
+            for index, (model_name, model_result) in enumerate(single_model_results.items()):
+                curve_axis.plot(
+                    temperatures,
+                    [float(value) for value in model_result["mixed_alpha_ppm_per_k"]],
+                    color=REPORT_COLORS[index % len(REPORT_COLORS)],
+                    linewidth=1.8,
+                    label=str(model_result.get("model_label") or model_name),
+                )
+        else:
+            for index, design in enumerate(designs):
+                curve_axis.plot(
+                    [float(value) for value in design["temperatures_k"]],
+                    [float(value) for value in design["mixed_alpha_ppm_per_k"]],
+                    color=REPORT_COLORS[index % len(REPORT_COLORS)],
+                    linewidth=1.8,
+                    label=(
+                        f"{(design.get('pte_material') or {}).get('formula', '-')} + "
+                        f"{(design.get('nte_material') or {}).get('material_key', '-')}"
+                    ),
+                )
         curve_axis.axhspan(target - tolerance, target + tolerance, color="#16836a", alpha=0.12)
         curve_axis.axhline(target, color="#16836a", linewidth=1, linestyle="--")
         curve_axis.set_xlabel("Temperature T (K)")

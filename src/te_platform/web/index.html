@@ -166,6 +166,7 @@
       <section class="panel workspace-page" data-page="zte" hidden>
         <h2>ZTE 复合材料曲线设计</h2>
         <p class="muted">既可以手动选择一组材料精细设计，也可以严格遍历内置目录库中的全部 PTE/NTE 组合并生成可解释排名。</p>
+        <div id="zte-design-workspace">
         <div class="zte-mode-tabs" role="tablist" aria-label="ZTE设计模式">
           <button id="zte-manual-tab" class="active" type="button" role="tab" aria-selected="true">手动配对设计</button>
           <button id="zte-screen-tab" type="button" role="tab" aria-selected="false">全库筛选推荐</button>
@@ -254,6 +255,25 @@
             </table>
           </div>
         </div>
+        </div>
+        <div id="zte-candidate-detail" class="zte-candidate-detail" hidden>
+          <div class="zte-candidate-header">
+            <button id="zte-candidate-back" class="secondary-button" type="button">← 返回筛选结果</button>
+            <div>
+              <p class="eyebrow">ZTE Candidate Workspace</p>
+              <h2 id="zte-candidate-title">候选组合详情</h2>
+              <p id="zte-candidate-subtitle" class="muted">正在读取目录库中的两相结构、曲线和模型结果…</p>
+            </div>
+            <div class="zte-candidate-actions">
+              <button id="zte-candidate-export-csv" type="button" disabled>下载曲线 CSV</button>
+              <button id="zte-candidate-export-json" type="button" disabled>下载结果 JSON</button>
+              <button id="zte-candidate-export-pdf" type="button" disabled>下载科研 PDF</button>
+            </div>
+          </div>
+          <div id="zte-candidate-content" class="zte-candidate-content prediction-result muted">
+            请从全库排名或 Pareto 图中打开一个候选组合。
+          </div>
+        </div>
       </section>
       <section class="workspace-page about-page" data-page="about" hidden>
         <article class="panel about-hero">
@@ -329,6 +349,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-16"></script>
+    <script src="/static/app.js?v=0.10.0-18"></script>
   </body>
 </html>

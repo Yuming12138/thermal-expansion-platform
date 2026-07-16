@@ -68,8 +68,9 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-16", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-18", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
+        self.assertIn("zte-candidate-detail", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
             workspace_page = self.client.get(workspace_path)
             self.assertEqual(workspace_page.status_code, 200)
@@ -330,6 +331,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(materials_mock.call_args.kwargs, {"alpha_sign": 1})
         self.assertEqual(design.status_code, 200)
         self.assertAlmostEqual(design.json()["nte_volume_fraction"], 0.4)
+
+    def test_composite_material_detail_and_download_endpoints(self) -> None:
+        pte_choices = self.client.get(
+            "/api/composites/materials", params={"role": "pte", "limit": 1}
+        )
+        nte_choices = self.client.get(
+            "/api/composites/materials", params={"role": "nte", "limit": 1}
+        )
+        self.assertEqual(pte_choices.status_code, 200)
+        self.assertEqual(nte_choices.status_code, 200)
+        for role, choices in (("pte", pte_choices.json()), ("nte", nte_choices.json())):
+            material_key = choices[0]["material_key"]
+            encoded_key = material_key.replace("/", "%2F")
+            detail = self.client.get(f"/api/composites/materials/{role}/{encoded_key}")
+            poscar = self.client.get(
+                f"/api/composites/materials/{role}/{encoded_key}/download/POSCAR"
+            )
+            curve = self.client.get(
+                f"/api/composites/materials/{role}/{encoded_key}/download/thermal_expansion.dat"
+            )
+            curve_pdf = self.client.get(
+                f"/api/composites/materials/{role}/{encoded_key}/download/thermal_expansion.pdf"
+            )
+            self.assertEqual(detail.status_code, 200)
+            self.assertEqual(detail.json()["composite_role"], role)
+            self.assertTrue(detail.json()["structures"])
+            self.assertEqual(poscar.status_code, 200)
+            self.assertIn("direct", poscar.text.lower())
+            self.assertEqual(curve.status_code, 200)
+            self.assertIn("temperature_K", curve.text)
+            self.assertTrue(curve_pdf.content.startswith(b"%PDF"))
 
     @patch("te_platform.api.app.screen_material_pairs")
     def test_full_catalog_zte_screening_endpoint(self, screening_mock) -> None:

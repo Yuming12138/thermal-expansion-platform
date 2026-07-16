@@ -39,6 +39,11 @@ let lastZteScreeningPayload = null;
 let zteComparisonPayload = null;
 let zteScreeningProjects = [];
 let zteParetoHitPoints = [];
+let zteHoveredPairId = null;
+let zteFocusedPairId = null;
+let zteCandidateDetailPayload = null;
+let zteCandidateReturnUrl = "/zte";
+let zteCandidateStructureViewers = [];
 const zteSelectedPairIds = new Set();
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
@@ -368,11 +373,18 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     materialStructureViewer?.render?.();
     materialStructureAxisViewer?.resize?.();
     materialStructureAxisViewer?.render?.();
+    zteCandidateStructureViewers.forEach(viewer => {
+      viewer.resize?.();
+      viewer.render?.();
+    });
     if (selectedPage === "landscape") focusLandscapeContext();
   });
 }
 
 function navigateToWorkspace(pageName) {
+  if (pageName === "zte" && !document.querySelector("#zte-candidate-detail")?.hidden) {
+    closeZteCandidateDetail({updateHistory: false});
+  }
   showWorkspacePage(pageName, {updateHistory: true});
   const navigation = document.querySelector(".workspace-nav");
   window.scrollTo({top: navigation.offsetTop, behavior: "auto"});
@@ -424,6 +436,11 @@ function setupWorkspaceNavigation() {
       console.warn("无法恢复景观材料", error);
     }
     showWorkspacePage(workspacePageFromPath());
+    try {
+      await restoreZteCandidateFromLocation();
+    } catch (error) {
+      document.querySelector("#zte-candidate-content").textContent = error.message;
+    }
   });
   showWorkspacePage(workspacePageFromPath());
 }
@@ -2127,6 +2144,36 @@ function selectedZtePairs() {
   return zteScreeningResults.filter(item => zteSelectedPairIds.has(ztePairId(item)));
 }
 
+function updateZteRowHighlights() {
+  document.querySelectorAll("#zte-screen-body tr[data-pair-id]").forEach(row => {
+    row.classList.toggle("hovered-pair", row.dataset.pairId === zteHoveredPairId);
+    row.classList.toggle("focused-pair", row.dataset.pairId === zteFocusedPairId);
+  });
+}
+
+function focusZteCandidate(item, {scrollRow = false} = {}) {
+  zteFocusedPairId = item ? ztePairId(item) : null;
+  updateZteRowHighlights();
+  drawZtePareto();
+  if (scrollRow && zteFocusedPairId) {
+    const row = [...document.querySelectorAll("#zte-screen-body tr[data-pair-id]")]
+      .find(element => element.dataset.pairId === zteFocusedPairId);
+    row?.scrollIntoView({block: "nearest", behavior: "smooth"});
+  }
+}
+
+function toggleZteCandidateSelection(item) {
+  if (!item) return;
+  const pairId = ztePairId(item);
+  if (zteSelectedPairIds.has(pairId)) zteSelectedPairIds.delete(pairId);
+  else if (zteSelectedPairIds.size < 6) zteSelectedPairIds.add(pairId);
+  else {
+    document.querySelector("#zte-compare-note").textContent = "最多同时选择 6 组候选。";
+    return;
+  }
+  updateZteSelectionState();
+}
+
 function zteComparisonRequest() {
   const parameters = currentZteScreeningParameters();
   return {
@@ -2163,6 +2210,7 @@ function updateZteSelectionState({preserveComparison = false} = {}) {
     checkbox.checked = zteSelectedPairIds.has(checkbox.dataset.pairId);
     checkbox.closest("tr")?.classList.toggle("selected-pair", checkbox.checked);
   });
+  updateZteRowHighlights();
   const selectedCount = zteSelectedPairIds.size;
   document.querySelector("#zte-selected-count").textContent = "已选择 " + selectedCount + "/6 组";
   document.querySelector("#zte-compare-selected").disabled = selectedCount === 0;
@@ -2221,15 +2269,17 @@ function drawZtePareto() {
   }
   zteScreeningResults.forEach(item => {
     const selected = zteSelectedPairIds.has(ztePairId(item));
+    const hovered = zteHoveredPairId === ztePairId(item);
+    const focused = zteFocusedPairId === ztePairId(item);
     const px = x(Number(item.nte_volume_fraction) * 100);
     const py = y(Number(item.rms_error_ppm_per_k));
     zteParetoHitPoints.push({canvasX: px, canvasY: py, item});
     ctx.beginPath();
-    ctx.arc(px, py, selected ? 6.5 : 4.2, 0, Math.PI * 2);
+    ctx.arc(px, py, hovered || focused ? 7.5 : selected ? 6.5 : 4.2, 0, Math.PI * 2);
     ctx.fillStyle = coverageColor(item.zte_temperature_coverage_fraction);
     ctx.fill();
-    ctx.strokeStyle = selected ? "#162f42" : "rgba(255,255,255,.85)";
-    ctx.lineWidth = selected ? 2.3 : 1;
+    ctx.strokeStyle = hovered ? "#ef7d24" : focused ? "#7a4ab4" : selected ? "#162f42" : "rgba(255,255,255,.85)";
+    ctx.lineWidth = hovered || focused ? 2.8 : selected ? 2.3 : 1;
     ctx.stroke();
   });
   ctx.fillStyle = "#40586b";
@@ -2262,8 +2312,12 @@ function setupZteParetoInteraction() {
   const hideTooltip = () => {
     tooltip.hidden = true;
     canvas.style.cursor = "default";
+    if (zteHoveredPairId) {
+      zteHoveredPairId = null;
+      updateZteRowHighlights();
+    }
   };
-  canvas.addEventListener("mousemove", event => {
+  const nearestPoint = event => {
     const rect = canvas.getBoundingClientRect();
     const canvasX = event.clientX - rect.left - canvas.clientLeft;
     const canvasY = event.clientY - rect.top - canvas.clientTop;
@@ -2276,9 +2330,18 @@ function setupZteParetoInteraction() {
         nearestDistance = distance;
       }
     });
+    return nearest;
+  };
+  canvas.addEventListener("mousemove", event => {
+    const nearest = nearestPoint(event);
     if (!nearest) {
       hideTooltip();
       return;
+    }
+    const hoveredPairId = ztePairId(nearest);
+    if (zteHoveredPairId !== hoveredPairId) {
+      zteHoveredPairId = hoveredPairId;
+      updateZteRowHighlights();
     }
     const ranges = (nearest.zte_temperature_ranges_k || [])
       .map(range => numeric(range[0]) + "–" + numeric(range[1]) + " K").join("；") || "无";
@@ -2308,6 +2371,12 @@ function setupZteParetoInteraction() {
     }
     tooltip.style.left = Math.max(8, left) + "px";
     tooltip.style.top = Math.max(8, top) + "px";
+  });
+  canvas.addEventListener("click", event => {
+    const nearest = nearestPoint(event);
+    if (!nearest) return;
+    toggleZteCandidateSelection(nearest);
+    focusZteCandidate(nearest, {scrollRow: true});
   });
   canvas.addEventListener("mouseleave", hideTooltip);
 }
@@ -2610,7 +2679,7 @@ function renderZteScreening(result, restoredPairs = []) {
     const ranges = (item.zte_temperature_ranges_k || [])
       .map(range => numeric(range[0]) + "–" + numeric(range[1]) + " K").join("；") || "无";
     const pairId = ztePairId(item);
-    return "<tr><td><input class='zte-pair-checkbox' type='checkbox' aria-label='选择排名" +
+    return "<tr data-pair-id='" + escapeHtml(pairId) + "'><td><input class='zte-pair-checkbox' type='checkbox' aria-label='选择排名" +
       item.rank + "' data-pair-id='" + escapeHtml(pairId) + "'></td><td>" + item.rank +
       "</td><td><strong>" + escapeHtml(item.pte_formula || item.pte_material_key) +
       "</strong>" +
@@ -2621,8 +2690,9 @@ function renderZteScreening(result, restoredPairs = []) {
       "</td><td title='" + escapeHtml(ranges) + "'>" + numeric(item.longest_zte_temperature_span_k) + " K" +
       "</td><td>" + numeric(item.rms_error_ppm_per_k) +
       "</td><td><span class='" + applicabilityClass + "'>" + applicability + "</span>" +
-      "</td><td><button class='zte-open-candidate' type='button' data-index='" + index +
-      "'>查看并调整</button></td></tr>";
+      "</td><td><div class='zte-row-actions'><button class='zte-detail-candidate' type='button' data-index='" + index +
+      "'>候选详情</button><button class='zte-open-candidate secondary-button' type='button' data-index='" + index +
+      "'>回填设计</button></div></td></tr>";
   }).join("");
   document.querySelector("#zte-screen-results").hidden = !zteScreeningResults.length;
   document.querySelector("#zte-screen-workspace").hidden = !zteScreeningResults.length;
@@ -2684,6 +2754,392 @@ async function openZteScreeningCandidate(index) {
   document.querySelector("#zte-model").dispatchEvent(new Event("change"));
   setZteMode("manual");
   await designZteComposite();
+}
+
+function zteCandidateRequest(candidate) {
+  const parameters = currentZteScreeningParameters();
+  return {
+    pairs: [{
+      pte_material_key: candidate.pte_material_key,
+      nte_material_key: candidate.nte_material_key,
+      rank: candidate.rank || null,
+    }],
+    temperature_min_k: parameters.temperature_min_k,
+    temperature_max_k: parameters.temperature_max_k,
+    temperature_step_k: parameters.temperature_step_k,
+    target_alpha_ppm_per_k: parameters.target_alpha_ppm_per_k,
+    zte_tolerance_ppm_per_k: parameters.zte_tolerance_ppm_per_k,
+    model: parameters.model,
+    matrix_phase: parameters.matrix_phase,
+  };
+}
+
+function zteCandidateUrl(candidate, request) {
+  const params = new URLSearchParams({
+    pte: candidate.pte_material_key,
+    nte: candidate.nte_material_key,
+    rank: String(candidate.rank || ""),
+    tmin: String(request.temperature_min_k),
+    tmax: String(request.temperature_max_k),
+    step: String(request.temperature_step_k),
+    target: String(request.target_alpha_ppm_per_k),
+    tolerance: String(request.zte_tolerance_ppm_per_k),
+    model: request.model,
+    matrix: request.matrix_phase,
+  });
+  return "/zte?" + params.toString();
+}
+
+function applyZteCandidateLocationParameters(params) {
+  const values = {
+    "#zte-screen-t-min": params.get("tmin"),
+    "#zte-screen-t-max": params.get("tmax"),
+    "#zte-screen-step": params.get("step"),
+    "#zte-screen-target": params.get("target"),
+    "#zte-screen-tolerance": params.get("tolerance"),
+    "#zte-screen-model": params.get("model"),
+    "#zte-screen-matrix-phase": params.get("matrix"),
+  };
+  Object.entries(values).forEach(([selector, value]) => {
+    if (value !== null && value !== "") document.querySelector(selector).value = value;
+  });
+  updateZteScreenMatrixControls();
+}
+
+function zteModelLabel(modelName, result) {
+  return result?.model_label || {
+    linear_rom: "线性 ROM",
+    turner: "Turner",
+    kerner: "Kerner",
+  }[modelName] || modelName;
+}
+
+function zteModelLongestSpan(result) {
+  return Math.max(...(result?.zte_temperature_ranges_k || [])
+    .map(range => Number(range[1]) - Number(range[0])), 0);
+}
+
+function renderZteCandidatePhase(role, detail, designMaterial) {
+  const material = detail.material || {};
+  const key = material.material_key || designMaterial.material_key;
+  const formula = material.formula || designMaterial.formula || key;
+  const structure = (detail.structures || []).find(item => item.content) || null;
+  const scene = detail.structure_view || {};
+  const encodedRole = encodeURIComponent(role);
+  const encodedKey = encodeURIComponent(key);
+  return "<article class='zte-phase-card'><div class='zte-phase-heading'><div><span>" +
+    role.toUpperCase() + " 相</span><h3>" + escapeHtml(formula) + "</h3>" +
+    (role === "nte" ? "<small>" + escapeHtml(key) + "</small>" : "") +
+    "</div><div class='zte-phase-downloads'>" +
+    "<a href='/api/composites/materials/" + encodedRole + "/" + encodedKey +
+    "/download/POSCAR' download>POSCAR</a>" +
+    "<a href='/api/composites/materials/" + encodedRole + "/" + encodedKey +
+    "/download/thermal_expansion.dat' download>α(T) DAT</a>" +
+    "<a href='/api/composites/materials/" + encodedRole + "/" + encodedKey +
+    "/download/thermal_expansion.pdf' download>曲线 PDF</a></div></div>" +
+    "<div id='zte-" + role + "-structure-viewer' class='zte-phase-structure'></div>" +
+    metricCards([
+      ["原胞原子", scene.central_count || "—"],
+      ["周期键", scene.bond_count || "—"],
+      ["K", numeric(designMaterial.bulk_modulus_gpa) + " GPa"],
+      ["G", numeric(designMaterial.shear_modulus_gpa) + " GPa"],
+      ["密度", numeric(designMaterial.density_g_cm3) + " g/cm³"],
+      ["结构格式", structure?.format || "—"],
+    ]) + "</article>";
+}
+
+function drawZteCandidateStructure(role, detail) {
+  const container = document.querySelector("#zte-" + role + "-structure-viewer");
+  const structure = (detail.structures || []).find(item => item.content);
+  if (!container || !structure) return;
+  if (!window.$3Dmol) {
+    container.innerHTML = "<p class='structure-error'>三维渲染组件未加载。</p>";
+    return;
+  }
+  try {
+    const viewer = window.$3Dmol.createViewer(container, {backgroundColor: "#ffffff", antialias: true});
+    const scene = detail.structure_view;
+    let atoms;
+    if (scene?.atoms?.length) {
+      const model = viewer.addModel();
+      atoms = structureViewModelAtoms(scene);
+      model.addAtoms(atoms);
+      if (scene.lattice) addStructureUnitCell(viewer, scene.lattice);
+    } else {
+      const model = viewer.addModel(structure.content, "vasp");
+      atoms = viewer.selectedAtoms({});
+      viewer.addUnitCell(model, {box: {color: "#7d8ba2", linewidth: 1}});
+    }
+    [...new Set(atoms.map(atom => atom.elem).filter(Boolean))].forEach(element => {
+      const color = structureElementColors[element] || "#7f91ab";
+      viewer.setStyle({elem: element}, {
+        sphere: {radius: .36, color},
+        stick: {radius: .075, color},
+      });
+    });
+    viewer.zoomTo();
+    viewer.rotate(90, "z");
+    viewer.rotate(9, "x");
+    viewer.zoom(1.05);
+    viewer.render();
+    zteCandidateStructureViewers.push(viewer);
+  } catch (error) {
+    container.innerHTML = "<p class='structure-error'>结构渲染失败：" + escapeHtml(error.message) + "</p>";
+  }
+}
+
+function renderZteCandidateModelTable(design) {
+  const modelResults = design.model_results || {};
+  return "<div class='zte-candidate-model-table'><table><thead><tr><th>模型</th>" +
+    "<th>NTE体积分数</th><th>NTE质量分数</th><th>ZTE覆盖率</th><th>最长连续温区</th>" +
+    "<th>RMS</th><th>最大偏差</th><th>模型假设</th></tr></thead><tbody>" +
+    Object.entries(modelResults).map(([modelName, result]) => {
+      const massFraction = Number.isFinite(Number(result.nte_mass_fraction))
+        ? (Number(result.nte_mass_fraction) * 100).toFixed(2) + "%" : "—";
+      return "<tr class='" + (modelName === design.selected_model ? "selected-model" : "") + "'><td>" +
+        escapeHtml(zteModelLabel(modelName, result)) + "</td><td>" +
+        (Number(result.nte_volume_fraction) * 100).toFixed(2) + "%</td><td>" + massFraction +
+        "</td><td>" + (Number(result.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</td><td>" +
+        numeric(zteModelLongestSpan(result)) + " K</td><td>" + numeric(result.rms_error_ppm_per_k) +
+        "</td><td>" + numeric(result.max_absolute_error_ppm_per_k) + "</td><td>" +
+        escapeHtml(result.assumptions || "—") + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
+}
+
+function drawZteCandidateCurves(payload) {
+  const canvas = document.querySelector("#zte-candidate-curves");
+  if (!canvas || !payload?.design) return;
+  const design = payload.design;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => {
+    if (zteCandidateDetailPayload) drawZteCandidateCurves(zteCandidateDetailPayload);
+  };
+  const margin = {left: 66, right: 24, top: 28, bottom: 52};
+  const temperatures = design.temperatures_k.map(Number);
+  const models = Object.entries(design.model_results || {});
+  const target = Number(design.target_alpha_ppm_per_k || 0);
+  const tolerance = Number(payload.request.zte_tolerance_ppm_per_k || 5);
+  const curves = [design.pte_alpha_ppm_per_k, design.nte_alpha_ppm_per_k,
+    ...models.map(([, result]) => result.mixed_alpha_ppm_per_k)].map(values => values.map(Number));
+  const allY = curves.flat();
+  const xMin = Math.min(...temperatures);
+  const xMax = Math.max(...temperatures);
+  const rawYMin = Math.min(...allY, target - tolerance);
+  const rawYMax = Math.max(...allY, target + tolerance);
+  const yPad = Math.max((rawYMax - rawYMin) * .1, 1);
+  const yMin = rawYMin - yPad;
+  const yMax = rawYMax + yPad;
+  const x = value => margin.left + (value - xMin) / Math.max(xMax - xMin, 1) * (width - margin.left - margin.right);
+  const y = value => margin.top + (yMax - value) / Math.max(yMax - yMin, 1) * (height - margin.top - margin.bottom);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(22,131,106,.12)";
+  ctx.fillRect(margin.left, y(target + tolerance), width - margin.left - margin.right,
+    y(target - tolerance) - y(target + tolerance));
+  ctx.strokeStyle = "#dce5eb";
+  ctx.fillStyle = "#617587";
+  ctx.font = "11px Segoe UI, sans-serif";
+  for (let index = 0; index <= 5; index += 1) {
+    const temperature = xMin + (xMax - xMin) * index / 5;
+    const px = x(temperature);
+    ctx.beginPath(); ctx.moveTo(px, margin.top); ctx.lineTo(px, height - margin.bottom); ctx.stroke();
+    ctx.textAlign = "center"; ctx.fillText(temperature.toFixed(0), px, height - 27);
+    const alpha = yMin + (yMax - yMin) * index / 5;
+    const py = y(alpha);
+    ctx.beginPath(); ctx.moveTo(margin.left, py); ctx.lineTo(width - margin.right, py); ctx.stroke();
+    ctx.textAlign = "right"; ctx.fillText(alpha.toFixed(1), margin.left - 8, py + 4);
+  }
+  const drawLine = (values, color, lineWidth, dash = []) => {
+    ctx.beginPath();
+    values.forEach((value, index) => index
+      ? ctx.lineTo(x(temperatures[index]), y(value))
+      : ctx.moveTo(x(temperatures[index]), y(value)));
+    ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.setLineDash(dash); ctx.stroke(); ctx.setLineDash([]);
+  };
+  drawLine(curves[0], "#e64b35", 1.6, [5, 3]);
+  drawLine(curves[1], "#3569b8", 1.6, [5, 3]);
+  models.forEach(([, result], index) =>
+    drawLine(result.mixed_alpha_ppm_per_k.map(Number), COMPARISON_COLORS[index], 2.5));
+  ctx.fillStyle = "#40586b"; ctx.font = "12px Segoe UI, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("温度 (K)", margin.left + (width - margin.left - margin.right) / 2, height - 7);
+  ctx.save(); ctx.translate(15, margin.top + (height - margin.top - margin.bottom) / 2);
+  ctx.rotate(-Math.PI / 2); ctx.fillText("热膨胀系数 α (ppm/K)", 0, 0); ctx.restore();
+}
+
+function renderZteCandidateDetail(payload) {
+  const {design, candidate, pteDetail, nteDetail} = payload;
+  const pteName = design.pte_material.formula || design.pte_material.material_key;
+  const nteName = design.nte_material.formula || design.nte_material.material_key;
+  document.querySelector("#zte-candidate-title").textContent = pteName + " + " + nteName;
+  document.querySelector("#zte-candidate-subtitle").textContent =
+    "排名 #" + (candidate.rank || "—") + " · " + numeric(design.temperature_min_k) + "–" +
+    numeric(design.temperature_max_k) + " K · 三种理想两相模型对照";
+  const warnings = (design.quality_warnings || []).length
+    ? "<div class='zte-candidate-warning'><strong>模型提示</strong><p>" +
+      escapeHtml(design.quality_warnings.join("；")) + "</p></div>" : "";
+  document.querySelector("#zte-candidate-content").className = "zte-candidate-content";
+  document.querySelector("#zte-candidate-content").innerHTML =
+    metricCards([
+      ["当前排名模型", zteModelLabel(design.selected_model, design)],
+      ["NTE体积分数", (Number(design.nte_volume_fraction) * 100).toFixed(2) + "%"],
+      ["NTE质量分数", Number.isFinite(Number(design.nte_mass_fraction)) ?
+        (Number(design.nte_mass_fraction) * 100).toFixed(2) + "%" : "—"],
+      ["ZTE覆盖率", (Number(design.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%"],
+      ["RMS", numeric(design.rms_error_ppm_per_k) + " ppm/K"],
+      ["最长连续温区", numeric(zteModelLongestSpan(design)) + " K"],
+    ]) + "<section class='zte-phase-grid'>" +
+    renderZteCandidatePhase("pte", pteDetail, design.pte_material) +
+    renderZteCandidatePhase("nte", nteDetail, design.nte_material) + "</section>" +
+    "<section class='zte-candidate-curve-card'><div><h3>两相原始曲线与三模型混合曲线</h3>" +
+    "<p class='curve-note'>虚线为PTE/NTE原始MatterSim-QHA曲线，实线为各模型最佳固定配比；绿色区域为目标α容差带。</p></div>" +
+    "<canvas id='zte-candidate-curves' width='1200' height='520'></canvas>" +
+    "<div class='zte-candidate-legend'><span class='pte'>PTE原始曲线</span><span class='nte'>NTE原始曲线</span>" +
+    Object.entries(design.model_results || {}).map(([name, result], index) =>
+      "<span style='--legend-color:" + COMPARISON_COLORS[index] + "'>" +
+      escapeHtml(zteModelLabel(name, result)) + "</span>").join("") + "</div></section>" +
+    "<section class='zte-candidate-model-card'><h3>三种模型定量对照</h3>" +
+    renderZteCandidateModelTable(design) +
+    "<div class='zte-model-basis-grid'>" + Object.entries(design.model_results || {}).map(([name, result]) =>
+      "<article><strong>" + escapeHtml(zteModelLabel(name, result)) + "</strong>" +
+      "<p>满足区间：" + escapeHtml(zteRangeText(result.zte_temperature_ranges_k)) + "</p>" +
+      "<code>" + escapeHtml(result.formula || "—") + "</code></article>").join("") +
+    "</div></section>" + warnings;
+  zteCandidateStructureViewers = [];
+  drawZteCandidateStructure("pte", pteDetail);
+  drawZteCandidateStructure("nte", nteDetail);
+  drawZteCandidateCurves(payload);
+  ["#zte-candidate-export-csv", "#zte-candidate-export-json", "#zte-candidate-export-pdf"]
+    .forEach(selector => { document.querySelector(selector).disabled = false; });
+}
+
+async function openZteCandidateDetail(candidate, {updateHistory = true} = {}) {
+  if (!candidate?.pte_material_key || !candidate?.nte_material_key) return;
+  const request = zteCandidateRequest(candidate);
+  if (updateHistory) {
+    zteCandidateReturnUrl = window.location.pathname + window.location.search;
+    window.history.pushState({page: "zte", candidate: true}, "", zteCandidateUrl(candidate, request));
+  }
+  document.querySelector("#zte-design-workspace").hidden = true;
+  document.querySelector("#zte-candidate-detail").hidden = false;
+  document.querySelector("#zte-candidate-title").textContent = "正在加载候选组合…";
+  document.querySelector("#zte-candidate-subtitle").textContent =
+    candidate.pte_material_key + " + " + candidate.nte_material_key;
+  document.querySelector("#zte-candidate-content").className = "zte-candidate-content prediction-result muted";
+  document.querySelector("#zte-candidate-content").textContent =
+    "正在从目录库读取两相结构和完整QHA曲线，并重新计算三种模型…";
+  ["#zte-candidate-export-csv", "#zte-candidate-export-json", "#zte-candidate-export-pdf"]
+    .forEach(selector => { document.querySelector(selector).disabled = true; });
+  const [comparison, pteDetail, nteDetail] = await Promise.all([
+    api("/api/composites/screen/compare", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(request),
+    }),
+    api("/api/composites/materials/pte/" + encodeURIComponent(candidate.pte_material_key)),
+    api("/api/composites/materials/nte/" + encodeURIComponent(candidate.nte_material_key)),
+  ]);
+  zteCandidateDetailPayload = {
+    candidate,
+    request,
+    comparison,
+    design: comparison.designs[0],
+    pteDetail,
+    nteDetail,
+  };
+  renderZteCandidateDetail(zteCandidateDetailPayload);
+  window.scrollTo({top: document.querySelector("#zte-candidate-detail").offsetTop - 12, behavior: "smooth"});
+}
+
+function closeZteCandidateDetail({updateHistory = true} = {}) {
+  document.querySelector("#zte-candidate-detail").hidden = true;
+  document.querySelector("#zte-design-workspace").hidden = false;
+  zteCandidateStructureViewers.forEach(viewer => viewer.clear?.());
+  zteCandidateStructureViewers = [];
+  zteCandidateDetailPayload = null;
+  if (updateHistory) window.history.pushState({page: "zte"}, "", zteCandidateReturnUrl || "/zte");
+}
+
+async function restoreZteCandidateFromLocation() {
+  if (window.location.pathname !== "/zte") return;
+  const params = new URLSearchParams(window.location.search);
+  const pte = params.get("pte");
+  const nte = params.get("nte");
+  if (!pte || !nte) {
+    if (!document.querySelector("#zte-candidate-detail").hidden) closeZteCandidateDetail({updateHistory: false});
+    return;
+  }
+  applyZteCandidateLocationParameters(params);
+  setZteMode("screen");
+  await openZteCandidateDetail({
+    pte_material_key: pte,
+    nte_material_key: nte,
+    rank: Number(params.get("rank")) || null,
+  }, {updateHistory: false});
+}
+
+function zteCandidateExportStem() {
+  const payload = zteCandidateDetailPayload;
+  if (!payload) return "zte-candidate";
+  return safeExportStem(
+    (payload.design.pte_material.formula || payload.design.pte_material.material_key) + "_" +
+    (payload.design.nte_material.formula || payload.design.nte_material.material_key)
+  );
+}
+
+function exportZteCandidateCsv() {
+  const payload = zteCandidateDetailPayload;
+  if (!payload) return;
+  const {design} = payload;
+  const models = Object.entries(design.model_results || {});
+  const columns = ["temperature_K", "pte_alpha_ppm_per_K", "nte_alpha_ppm_per_K",
+    ...models.map(([name]) => name + "_mixed_alpha_ppm_per_K")];
+  const lines = [columns.join(",")];
+  design.temperatures_k.forEach((temperature, index) => {
+    lines.push([
+      temperature,
+      design.pte_alpha_ppm_per_k[index],
+      design.nte_alpha_ppm_per_k[index],
+      ...models.map(([, result]) => result.mixed_alpha_ppm_per_k[index]),
+    ].map(zteCsvCell).join(","));
+  });
+  downloadBlob("\ufeff" + lines.join("\r\n"), "text/csv;charset=utf-8", zteCandidateExportStem() + "_curves.csv");
+}
+
+function exportZteCandidateJson() {
+  if (!zteCandidateDetailPayload) return;
+  downloadBlob(JSON.stringify({
+    generated_at: new Date().toISOString(),
+    candidate: zteCandidateDetailPayload.candidate,
+    screening_parameters: zteCandidateDetailPayload.request,
+    design: zteCandidateDetailPayload.design,
+  }, null, 2), "application/json;charset=utf-8", zteCandidateExportStem() + "_result.json");
+}
+
+async function exportZteCandidatePdf() {
+  const payload = zteCandidateDetailPayload;
+  if (!payload) return;
+  const button = document.querySelector("#zte-candidate-export-pdf");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/composites/screen/report.pdf", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        ...payload.request,
+        project_name: zteCandidateExportStem(),
+        ranked_results: [{
+          ...payload.candidate,
+          nte_volume_fraction: payload.design.nte_volume_fraction,
+          rms_error_ppm_per_k: payload.design.rms_error_ppm_per_k,
+          zte_temperature_coverage_fraction: payload.design.zte_temperature_coverage_fraction,
+        }],
+      }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "候选科研PDF生成失败");
+    }
+    downloadBlob(await response.blob(), "application/pdf", zteCandidateExportStem() + "_report.pdf");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function drawZteCurves(result) {
@@ -3130,6 +3586,13 @@ async function initialize() {
     document.querySelector("#zte-delete-project").disabled = !selected;
   });
   document.querySelector("#zte-screen-body").addEventListener("click", event => {
+    const detailButton = event.target.closest(".zte-detail-candidate");
+    if (detailButton) {
+      openZteCandidateDetail(zteScreeningResults[Number(detailButton.dataset.index)]).catch(error => {
+        document.querySelector("#zte-screen-summary").textContent = error.message;
+      });
+      return;
+    }
     const button = event.target.closest(".zte-open-candidate");
     if (!button) return;
     openZteScreeningCandidate(Number(button.dataset.index)).catch(error => {
@@ -3148,12 +3611,36 @@ async function initialize() {
     else zteSelectedPairIds.delete(checkbox.dataset.pairId);
     updateZteSelectionState();
   });
+  document.querySelector("#zte-screen-body").addEventListener("mouseover", event => {
+    const row = event.target.closest("tr[data-pair-id]");
+    if (!row || row.contains(event.relatedTarget)) return;
+    zteHoveredPairId = row.dataset.pairId;
+    updateZteRowHighlights();
+    drawZtePareto();
+  });
+  document.querySelector("#zte-screen-body").addEventListener("mouseout", event => {
+    const row = event.target.closest("tr[data-pair-id]");
+    if (!row || row.contains(event.relatedTarget)) return;
+    zteHoveredPairId = null;
+    updateZteRowHighlights();
+    drawZtePareto();
+  });
+  document.querySelector("#zte-candidate-back").addEventListener("click", () => closeZteCandidateDetail());
+  document.querySelector("#zte-candidate-export-csv").addEventListener("click", exportZteCandidateCsv);
+  document.querySelector("#zte-candidate-export-json").addEventListener("click", exportZteCandidateJson);
+  document.querySelector("#zte-candidate-export-pdf").addEventListener("click", () =>
+    exportZteCandidatePdf().catch(error => {
+      document.querySelector("#zte-candidate-subtitle").textContent = error.message;
+    }));
   updateZteScreenMatrixControls();
   drawZtePareto();
   setupZteParetoInteraction();
   drawZteComparisonCurves(null);
   loadZteScreeningProjects().catch(error => {
     console.warn("无法读取ZTE筛选项目", error);
+  });
+  restoreZteCandidateFromLocation().catch(error => {
+    document.querySelector("#zte-candidate-content").textContent = error.message;
   });
   Promise.all([loadCompositeMaterials("pte"), loadCompositeMaterials("nte")])
     .then(() => { document.querySelector("#zte-result").textContent = "请选择材料和目标温区，然后优化配比。"; })
