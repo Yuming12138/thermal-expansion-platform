@@ -17,6 +17,7 @@ const escapeHtml = value => String(value ?? "")
   .replaceAll("'", "&#39;");
 
 const numeric = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "—";
+const optionalNumeric = value => value === null || value === undefined || value === "" ? "—" : numeric(value);
 
 let fig1dReference = null;
 let selectedLandscapePoint = null;
@@ -36,6 +37,7 @@ let activeAnalysisProjectId = null;
 let lastComparisonPayload = null;
 let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
+let lastZteScreeningParameters = null;
 let zteComparisonPayload = null;
 let zteScreeningProjects = [];
 let zteParetoHitPoints = [];
@@ -2122,6 +2124,17 @@ function ztePairId(item) {
   return JSON.stringify([item.pte_material_key, item.nte_material_key]);
 }
 
+function parseElementInput(value) {
+  return [...new Set(String(value || "").split(/[\s,;，；]+/)
+    .map(item => item.trim()).filter(Boolean).map(item =>
+      item.slice(0, 1).toUpperCase() + item.slice(1).toLowerCase()))];
+}
+
+function nullableRatioInput(selector) {
+  const value = document.querySelector(selector).value.trim();
+  return value === "" ? null : Number(value);
+}
+
 function currentZteScreeningParameters() {
   return {
     temperature_min_k: Number(document.querySelector("#zte-screen-t-min").value),
@@ -2136,8 +2149,37 @@ function currentZteScreeningParameters() {
     nte_volume_fraction_min: Number(document.querySelector("#zte-screen-f-min").value) / 100,
     nte_volume_fraction_max: Number(document.querySelector("#zte-screen-f-max").value) / 100,
     require_matrix_majority: document.querySelector("#zte-screen-majority").checked,
+    required_elements: parseElementInput(document.querySelector("#zte-screen-required-elements").value),
+    excluded_elements: parseElementInput(document.querySelector("#zte-screen-excluded-elements").value),
+    require_mass_fraction: document.querySelector("#zte-screen-require-density").checked,
+    require_complete_mechanics: document.querySelector("#zte-screen-require-mechanics").checked,
+    max_density_ratio: nullableRatioInput("#zte-screen-density-ratio"),
+    max_bulk_modulus_ratio: nullableRatioInput("#zte-screen-bulk-ratio"),
+    max_shear_modulus_ratio: nullableRatioInput("#zte-screen-shear-ratio"),
     limit: Number(document.querySelector("#zte-screen-limit").value),
   };
+}
+
+function resultZteScreeningParameters() {
+  return lastZteScreeningParameters || currentZteScreeningParameters();
+}
+
+function zteEngineeringConstraintText(parameters) {
+  const parts = [];
+  if (parameters.required_elements?.length) parts.push("必须包含 " + parameters.required_elements.join("/"));
+  if (parameters.excluded_elements?.length) parts.push("排除 " + parameters.excluded_elements.join("/"));
+  if (parameters.require_mass_fraction) parts.push("密度完整");
+  if (parameters.require_complete_mechanics) parts.push("K/G完整");
+  if (parameters.max_density_ratio !== null && parameters.max_density_ratio !== undefined) {
+    parts.push("密度比≤" + parameters.max_density_ratio);
+  }
+  if (parameters.max_bulk_modulus_ratio !== null && parameters.max_bulk_modulus_ratio !== undefined) {
+    parts.push("K比≤" + parameters.max_bulk_modulus_ratio);
+  }
+  if (parameters.max_shear_modulus_ratio !== null && parameters.max_shear_modulus_ratio !== undefined) {
+    parts.push("G比≤" + parameters.max_shear_modulus_ratio);
+  }
+  return parts.join("；") || "未启用额外工程约束";
 }
 
 function selectedZtePairs() {
@@ -2175,7 +2217,7 @@ function toggleZteCandidateSelection(item) {
 }
 
 function zteComparisonRequest() {
-  const parameters = currentZteScreeningParameters();
+  const parameters = resultZteScreeningParameters();
   return {
     pairs: selectedZtePairs().map(item => ({
       pte_material_key: item.pte_material_key,
@@ -2356,7 +2398,10 @@ function setupZteParetoInteraction() {
       (Number(nearest.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</dd></div>" +
       "<div><dt>RMS</dt><dd>" + numeric(nearest.rms_error_ppm_per_k) + " ppm/K</dd></div>" +
       "<div><dt>最长连续温区</dt><dd>" + numeric(nearest.longest_zte_temperature_span_k) +
-      " K</dd></div></dl>" +
+      " K</dd></div><div><dt>密度 / K / G 比</dt><dd>" +
+      [nearest.density_ratio, nearest.bulk_modulus_ratio, nearest.shear_modulus_ratio]
+        .map(optionalNumeric).join(" / ") +
+      "</dd></div></dl>" +
       "<p>满足区间：" + escapeHtml(ranges) + "</p>";
     tooltip.hidden = false;
     canvas.style.cursor = "help";
@@ -2535,7 +2580,7 @@ function exportZteScreeningJson() {
   downloadBlob(JSON.stringify({
     project_name: zteProjectName(),
     generated_at: new Date().toISOString(),
-    screening_parameters: currentZteScreeningParameters(),
+    screening_parameters: resultZteScreeningParameters(),
     screening_result: lastZteScreeningPayload,
     selected_pairs: zteComparisonRequest().pairs,
     comparison: zteComparisonPayload,
@@ -2551,7 +2596,12 @@ async function exportZteScreeningPdf() {
     const response = await fetch("/api/composites/screen/report.pdf", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({...request, project_name: zteProjectName(), ranked_results: zteScreeningResults}),
+      body: JSON.stringify({
+        ...request,
+        project_name: zteProjectName(),
+        ranked_results: zteScreeningResults,
+        screening_context: resultZteScreeningParameters(),
+      }),
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
@@ -2592,7 +2642,7 @@ async function saveZteScreeningProject() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         project_name: zteProjectName(),
-        screening_parameters: currentZteScreeningParameters(),
+        screening_parameters: resultZteScreeningParameters(),
         screening_result: lastZteScreeningPayload,
         selected_pairs: zteComparisonRequest().pairs,
       }),
@@ -2622,12 +2672,19 @@ function applyZteScreeningParameters(parameters) {
     "#zte-screen-nte-query": parameters.nte_query,
     "#zte-screen-f-min": Number(parameters.nte_volume_fraction_min ?? 0) * 100,
     "#zte-screen-f-max": Number(parameters.nte_volume_fraction_max ?? 1) * 100,
+    "#zte-screen-required-elements": (parameters.required_elements || []).join(","),
+    "#zte-screen-excluded-elements": (parameters.excluded_elements || []).join(","),
+    "#zte-screen-density-ratio": parameters.max_density_ratio ?? "",
+    "#zte-screen-bulk-ratio": parameters.max_bulk_modulus_ratio ?? "",
+    "#zte-screen-shear-ratio": parameters.max_shear_modulus_ratio ?? "",
     "#zte-screen-limit": parameters.limit,
   };
   Object.entries(values).forEach(([selector, value]) => {
     if (value !== undefined && value !== null) document.querySelector(selector).value = value;
   });
   document.querySelector("#zte-screen-majority").checked = Boolean(parameters.require_matrix_majority);
+  document.querySelector("#zte-screen-require-density").checked = Boolean(parameters.require_mass_fraction);
+  document.querySelector("#zte-screen-require-mechanics").checked = Boolean(parameters.require_complete_mechanics);
   updateZteScreenMatrixControls();
 }
 
@@ -2652,24 +2709,30 @@ async function deleteZteScreeningProject() {
 
 function renderZteScreening(result, restoredPairs = []) {
   lastZteScreeningPayload = result;
+  lastZteScreeningParameters = currentZteScreeningParameters();
   zteScreeningResults = result.results || [];
   document.querySelector("#zte-save-project").disabled = !zteScreeningResults.length;
   zteSelectedPairIds.clear();
   restoredPairs.slice(0, 6).forEach(pair => zteSelectedPairIds.add(ztePairId(pair)));
   zteComparisonPayload = null;
   const evaluated = Number(result.evaluated_pair_count || 0).toLocaleString("zh-CN");
+  const engineeringEligible = Number(result.engineering_eligible_pair_count ?? result.evaluated_pair_count ?? 0)
+    .toLocaleString("zh-CN");
   const matched = Number(result.matched_pair_count || 0).toLocaleString("zh-CN");
   document.querySelector("#zte-screen-summary").innerHTML =
     "<h3>全库筛选完成</h3>" + metricCards([
       ["可用 PTE", Number(result.eligible_pte_count || 0).toLocaleString("zh-CN")],
       ["可用 NTE", Number(result.eligible_nte_count || 0).toLocaleString("zh-CN")],
       ["严格评估组合", evaluated],
+      ["工程约束后", engineeringEligible],
       ["满足配比约束", matched],
       ["计算耗时", numeric(result.elapsed_seconds) + " s"],
       ["排名范围", result.ranking_is_complete ? "完整全库" : "候选范围"],
     ]) +
     "<p class='curve-note'>排名顺序：ZTE温区覆盖率 → 最长连续满足温区 → RMS → 最大偏差。" +
-    "所有组合使用同一温度网格和固定配比进行比较。</p>";
+    "所有组合使用同一温度网格和固定配比进行比较。</p>" +
+    "<p class='zte-engineering-summary'><strong>工程约束：</strong>" +
+    escapeHtml(zteEngineeringConstraintText(result)) + "</p>";
   const body = document.querySelector("#zte-screen-body");
   body.innerHTML = zteScreeningResults.map((item, index) => {
     const applicability = item.model === "kerner"
@@ -2686,6 +2749,9 @@ function renderZteScreening(result, restoredPairs = []) {
       "</td><td><strong>" + escapeHtml(item.nte_formula || item.nte_material_key) +
       "</strong><small>" + escapeHtml(item.nte_material_key) + "</small>" +
       "</td><td>" + (Number(item.nte_volume_fraction) * 100).toFixed(2) + "%" +
+      "</td><td>" + optionalNumeric(item.density_ratio) +
+      "</td><td>" + optionalNumeric(item.bulk_modulus_ratio) +
+      "</td><td>" + optionalNumeric(item.shear_modulus_ratio) +
       "</td><td>" + (Number(item.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%" +
       "</td><td title='" + escapeHtml(ranges) + "'>" + numeric(item.longest_zte_temperature_span_k) + " K" +
       "</td><td>" + numeric(item.rms_error_ppm_per_k) +
@@ -2710,12 +2776,27 @@ async function runZteScreening() {
     document.querySelector("#zte-screen-summary").textContent = "最高 NTE 体积分数不能低于最低值。";
     return;
   }
+  const parameters = currentZteScreeningParameters();
+  const invalidRatio = [parameters.max_density_ratio, parameters.max_bulk_modulus_ratio,
+    parameters.max_shear_modulus_ratio].some(value => value !== null && value < 1);
+  if (invalidRatio) {
+    document.querySelector("#zte-screen-summary").textContent = "工程比值约束不能低于 1。";
+    return;
+  }
+  const elementOverlap = parameters.required_elements.filter(element =>
+    parameters.excluded_elements.includes(element));
+  if (elementOverlap.length) {
+    document.querySelector("#zte-screen-summary").textContent =
+      "必须元素与排除元素不能重复：" + elementOverlap.join("、");
+    return;
+  }
   const button = document.querySelector("#zte-screen-button");
   button.disabled = true;
   document.querySelector("#zte-screen-results").hidden = true;
   document.querySelector("#zte-screen-workspace").hidden = true;
   document.querySelector("#zte-save-project").disabled = true;
   lastZteScreeningPayload = null;
+  lastZteScreeningParameters = null;
   zteScreeningResults = [];
   zteSelectedPairIds.clear();
   clearZteComparison();
@@ -2725,7 +2806,7 @@ async function runZteScreening() {
     const result = await api("/api/composites/screen", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(currentZteScreeningParameters()),
+      body: JSON.stringify(parameters),
     });
     renderZteScreening(result);
   } catch (error) {
@@ -2757,7 +2838,7 @@ async function openZteScreeningCandidate(index) {
 }
 
 function zteCandidateRequest(candidate) {
-  const parameters = currentZteScreeningParameters();
+  const parameters = resultZteScreeningParameters();
   return {
     pairs: [{
       pte_material_key: candidate.pte_material_key,
@@ -2775,6 +2856,7 @@ function zteCandidateRequest(candidate) {
 }
 
 function zteCandidateUrl(candidate, request) {
+  const constraints = resultZteScreeningParameters();
   const params = new URLSearchParams({
     pte: candidate.pte_material_key,
     nte: candidate.nte_material_key,
@@ -2786,6 +2868,13 @@ function zteCandidateUrl(candidate, request) {
     tolerance: String(request.zte_tolerance_ppm_per_k),
     model: request.model,
     matrix: request.matrix_phase,
+    required: constraints.required_elements.join(","),
+    excluded: constraints.excluded_elements.join(","),
+    densityratio: String(constraints.max_density_ratio ?? ""),
+    krat: String(constraints.max_bulk_modulus_ratio ?? ""),
+    grat: String(constraints.max_shear_modulus_ratio ?? ""),
+    reqdensity: constraints.require_mass_fraction ? "1" : "0",
+    reqmech: constraints.require_complete_mechanics ? "1" : "0",
   });
   return "/zte?" + params.toString();
 }
@@ -2799,10 +2888,17 @@ function applyZteCandidateLocationParameters(params) {
     "#zte-screen-tolerance": params.get("tolerance"),
     "#zte-screen-model": params.get("model"),
     "#zte-screen-matrix-phase": params.get("matrix"),
+    "#zte-screen-required-elements": params.get("required"),
+    "#zte-screen-excluded-elements": params.get("excluded"),
+    "#zte-screen-density-ratio": params.get("densityratio"),
+    "#zte-screen-bulk-ratio": params.get("krat"),
+    "#zte-screen-shear-ratio": params.get("grat"),
   };
   Object.entries(values).forEach(([selector, value]) => {
     if (value !== null && value !== "") document.querySelector(selector).value = value;
   });
+  document.querySelector("#zte-screen-require-density").checked = params.get("reqdensity") === "1";
+  document.querySelector("#zte-screen-require-mechanics").checked = params.get("reqmech") === "1";
   updateZteScreenMatrixControls();
 }
 
@@ -3124,6 +3220,7 @@ async function exportZteCandidatePdf() {
       body: JSON.stringify({
         ...payload.request,
         project_name: zteCandidateExportStem(),
+        screening_context: resultZteScreeningParameters(),
         ranked_results: [{
           ...payload.candidate,
           nte_volume_fraction: payload.design.nte_volume_fraction,

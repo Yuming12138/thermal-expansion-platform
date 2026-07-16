@@ -217,6 +217,19 @@
             <label id="zte-screen-majority-control" class="zte-checkbox-control" hidden><input id="zte-screen-majority" type="checkbox" checked>仅保留连续基体不少于 50 vol%</label>
             <button id="zte-screen-button" type="button">筛选全库最佳组合</button>
           </div>
+          <details class="zte-engineering-constraints">
+            <summary>工程约束（可选）</summary>
+            <p class="curve-note">这些条件直接进入全库组合引擎。比值均定义为两相较大值/较小值，1表示完全一致。</p>
+            <div class="zte-engineering-grid">
+              <label>组合必须包含元素<input id="zte-screen-required-elements" placeholder="逗号分隔，例如 W,O"></label>
+              <label>排除元素<input id="zte-screen-excluded-elements" placeholder="例如 Pb,U,Cd"></label>
+              <label>最大密度比<input id="zte-screen-density-ratio" type="number" min="1" step="0.1" placeholder="不限制"></label>
+              <label>最大体积模量 K 比<input id="zte-screen-bulk-ratio" type="number" min="1" step="0.1" placeholder="不限制"></label>
+              <label>最大剪切模量 G 比<input id="zte-screen-shear-ratio" type="number" min="1" step="0.1" placeholder="不限制"></label>
+              <label class="zte-checkbox-control"><input id="zte-screen-require-density" type="checkbox">仅保留可计算质量分数的组合</label>
+              <label class="zte-checkbox-control"><input id="zte-screen-require-mechanics" type="checkbox">要求两相 K、G 均完整</label>
+            </div>
+          </details>
           <div id="zte-screen-summary" class="prediction-result muted">设置目标温区和模型后开始全库筛选。</div>
           <div class="zte-project-toolbar">
             <input id="zte-project-name" value="ZTE筛选项目" maxlength="120" aria-label="筛选项目名称">
@@ -250,7 +263,7 @@
           </div>
           <div id="zte-screen-results" class="zte-screen-results" hidden>
             <table>
-              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
+              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>密度比</th><th>K比</th><th>G比</th><th>ZTE覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
               <tbody id="zte-screen-body"></tbody>
             </table>
           </div>
@@ -349,6 +362,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-18"></script>
+    <script src="/static/app.js?v=0.10.0-19"></script>
   </body>
 </html>

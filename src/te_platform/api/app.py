@@ -164,6 +164,13 @@ class MaterialPairScreeningRequest(BaseModel):
     nte_volume_fraction_min: float = Field(default=0.0, ge=0, le=1)
     nte_volume_fraction_max: float = Field(default=1.0, ge=0, le=1)
     require_matrix_majority: bool = False
+    required_elements: list[str] = Field(default_factory=list, max_length=20)
+    excluded_elements: list[str] = Field(default_factory=list, max_length=20)
+    require_mass_fraction: bool = False
+    require_complete_mechanics: bool = False
+    max_density_ratio: float | None = Field(default=None, ge=1, le=100)
+    max_bulk_modulus_ratio: float | None = Field(default=None, ge=1, le=100)
+    max_shear_modulus_ratio: float | None = Field(default=None, ge=1, le=100)
     limit: int = Field(default=30, ge=1, le=100)
 
 
@@ -187,6 +194,7 @@ class ZteCandidateComparisonRequest(BaseModel):
 class ZteScreeningReportRequest(ZteCandidateComparisonRequest):
     project_name: str = Field(default="ZTE screening report", min_length=1, max_length=120)
     ranked_results: list[dict[str, object]] = Field(default_factory=list, max_length=100)
+    screening_context: dict[str, object] = Field(default_factory=dict)
 
 
 class ZteScreeningProjectRequest(BaseModel):
@@ -827,6 +835,13 @@ def create_app(
                 nte_volume_fraction_min=request.nte_volume_fraction_min,
                 nte_volume_fraction_max=request.nte_volume_fraction_max,
                 require_matrix_majority=request.require_matrix_majority,
+                required_elements=request.required_elements,
+                excluded_elements=request.excluded_elements,
+                require_mass_fraction=request.require_mass_fraction,
+                require_complete_mechanics=request.require_complete_mechanics,
+                max_density_ratio=request.max_density_ratio,
+                max_bulk_modulus_ratio=request.max_bulk_modulus_ratio,
+                max_shear_modulus_ratio=request.max_shear_modulus_ratio,
                 limit=request.limit,
             )
         except ValueError as error:
@@ -882,6 +897,10 @@ def create_app(
             content = build_zte_screening_report_pdf(
                 {
                     **comparison,
+                    "screening_parameters": {
+                        **comparison["screening_parameters"],
+                        **request.screening_context,
+                    },
                     "project_name": request.project_name.strip(),
                     "ranked_results": request.ranked_results,
                 }

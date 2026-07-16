@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import heapq
 import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -9,6 +10,7 @@ from time import perf_counter
 from typing import Any
 
 import numpy as np
+from pymatgen.core import Element
 
 from te_platform.composites.curve_rom import optimize_curve_model
 from te_platform.db.schema import connect_readonly_database
@@ -20,6 +22,8 @@ class CurveRecord:
     formula: str | None
     bulk_modulus_gpa: float | None
     shear_modulus_gpa: float | None
+    density_g_cm3: float | None
+    elements: frozenset[str]
     temperatures_k: tuple[float, ...]
     alpha_ppm_per_k: tuple[float, ...]
 
@@ -42,7 +46,11 @@ def _release_records(
         rows = connection.execute(
             """SELECT m.material_key, m.formula, j.updated_at, c.points_json,
                 MAX(CASE WHEN mp.name = 'K_GPa' THEN mp.numeric_value END) AS K_GPa,
-                MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa
+                MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
+                (SELECT s.content FROM structures s
+                 WHERE s.dataset_release_id = dr.id AND s.material_id = m.id
+                 ORDER BY CASE WHEN UPPER(s.format) = 'POSCAR' THEN 0 ELSE 1 END, s.id
+                 LIMIT 1) AS structure_content
             FROM dataset_releases dr
             JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
             JOIN materials m ON m.id = dm.material_id
@@ -68,6 +76,7 @@ def _release_records(
         alpha = tuple(float(point[1]) * 1_000_000.0 for point in points)
         if any(right <= left for left, right in zip(temperatures, temperatures[1:])):
             continue
+        density_g_cm3, structure_elements = _poscar_metadata(row["structure_content"])
         records.append(
             CurveRecord(
                 material_key=material_key,
@@ -78,12 +87,69 @@ def _release_records(
                 shear_modulus_gpa=(
                     float(row["G_GPa"]) if row["G_GPa"] is not None else None
                 ),
+                density_g_cm3=density_g_cm3,
+                elements=structure_elements or frozenset(
+                    re.findall(r"[A-Z][a-z]?", str(row["formula"] or ""))
+                ),
                 temperatures_k=temperatures,
                 alpha_ppm_per_k=alpha,
             )
         )
         seen.add(material_key)
     return tuple(records)
+
+
+def _poscar_metadata(content: str | None) -> tuple[float | None, frozenset[str]]:
+    if not content:
+        return None, frozenset()
+    try:
+        lines = [line.strip() for line in str(content).splitlines() if line.strip()]
+        if len(lines) < 7:
+            return None
+        scale = float(lines[1].split()[0])
+        lattice = np.asarray(
+            [[float(value) for value in lines[index].split()[:3]] for index in range(2, 5)],
+            dtype=float,
+        )
+        raw_volume = abs(float(np.linalg.det(lattice)))
+        if raw_volume <= 0:
+            return None, frozenset()
+        volume_a3 = -scale if scale < 0 else raw_volume * scale**3
+        species = lines[5].split()
+        counts = [int(value) for value in lines[6].split()]
+        if len(species) != len(counts) or not all(Element.is_valid_symbol(symbol) for symbol in species):
+            return None, frozenset()
+        mass_amu = sum(float(Element(symbol).atomic_mass) * count for symbol, count in zip(species, counts))
+        return mass_amu * 1.66053906660 / volume_a3, frozenset(species)
+    except (IndexError, TypeError, ValueError):
+        return None, frozenset()
+
+
+def _normalize_elements(values: tuple[str, ...] | list[str] | None, field_name: str) -> frozenset[str]:
+    normalized = frozenset(str(value).strip().capitalize() for value in (values or ()) if str(value).strip())
+    invalid = sorted(symbol for symbol in normalized if not Element.is_valid_symbol(symbol))
+    if invalid:
+        raise ValueError(f"{field_name} contains invalid element symbols: {', '.join(invalid)}")
+    return normalized
+
+
+def _ratio_mask(reference: float | None, values: np.ndarray, maximum_ratio: float | None) -> np.ndarray:
+    if maximum_ratio is None:
+        return np.ones(values.shape, dtype=bool)
+    if reference is None or not np.isfinite(reference) or reference <= 0:
+        return np.zeros(values.shape, dtype=bool)
+    valid = np.isfinite(values) & (values > 0)
+    ratios = np.full(values.shape, np.inf, dtype=float)
+    ratios[valid] = np.maximum(reference / values[valid], values[valid] / reference)
+    return ratios <= maximum_ratio + 1e-12
+
+
+def _symmetric_ratio(first: float | None, second: float | None) -> float | None:
+    if first is None or second is None:
+        return None
+    if not np.isfinite(first) or not np.isfinite(second) or first <= 0 or second <= 0:
+        return None
+    return max(first / second, second / first)
 
 
 def _matches_query(record: CurveRecord, query: str) -> bool:
@@ -250,6 +316,13 @@ def screen_material_pairs(
     nte_volume_fraction_min: float = 0.0,
     nte_volume_fraction_max: float = 1.0,
     require_matrix_majority: bool = False,
+    required_elements: tuple[str, ...] | list[str] | None = None,
+    excluded_elements: tuple[str, ...] | list[str] | None = None,
+    require_mass_fraction: bool = False,
+    require_complete_mechanics: bool = False,
+    max_density_ratio: float | None = None,
+    max_bulk_modulus_ratio: float | None = None,
+    max_shear_modulus_ratio: float | None = None,
     limit: int = 30,
 ) -> dict[str, Any]:
     started = perf_counter()
@@ -267,6 +340,18 @@ def screen_material_pairs(
         raise ValueError("NTE volume-fraction limits must satisfy 0 <= min <= max <= 1")
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
+    for value, name in (
+        (max_density_ratio, "max_density_ratio"),
+        (max_bulk_modulus_ratio, "max_bulk_modulus_ratio"),
+        (max_shear_modulus_ratio, "max_shear_modulus_ratio"),
+    ):
+        if value is not None and value < 1:
+            raise ValueError(f"{name} must be at least 1")
+    required_element_set = _normalize_elements(required_elements, "required_elements")
+    excluded_element_set = _normalize_elements(excluded_elements, "excluded_elements")
+    if required_element_set & excluded_element_set:
+        overlap = ", ".join(sorted(required_element_set & excluded_element_set))
+        raise ValueError(f"required_elements and excluded_elements overlap: {overlap}")
     estimated_grid_points = int(
         np.ceil((temperature_max_k - temperature_min_k) / temperature_step_k)
     ) + 1
@@ -312,9 +397,17 @@ def screen_material_pairs(
             "temperature_step_k": temperature_step_k,
             "target_alpha_ppm_per_k": target_alpha_ppm_per_k,
             "zte_tolerance_ppm_per_k": zte_tolerance_ppm_per_k,
+            "required_elements": sorted(required_element_set),
+            "excluded_elements": sorted(excluded_element_set),
+            "require_mass_fraction": require_mass_fraction,
+            "require_complete_mechanics": require_complete_mechanics,
+            "max_density_ratio": max_density_ratio,
+            "max_bulk_modulus_ratio": max_bulk_modulus_ratio,
+            "max_shear_modulus_ratio": max_shear_modulus_ratio,
             "eligible_pte_count": len(pte_records),
             "eligible_nte_count": len(nte_records),
             "evaluated_pair_count": 0,
+            "engineering_eligible_pair_count": 0,
             "matched_pair_count": 0,
             "ranking_is_complete": True,
             "elapsed_seconds": perf_counter() - started,
@@ -323,6 +416,7 @@ def screen_material_pairs(
 
     nte_bulk = np.asarray([record.bulk_modulus_gpa or np.nan for record in nte_records])
     nte_shear = np.asarray([record.shear_modulus_gpa or np.nan for record in nte_records])
+    nte_density = np.asarray([record.density_g_cm3 or np.nan for record in nte_records])
     # A global top-N pair must also be within the top N of its own PTE block.
     # Keeping more than N locally and globally preserves the requested complete ranking
     # without materializing metrics for all 1.2 million pairs at once.
@@ -333,6 +427,14 @@ def screen_material_pairs(
     ] = []
     serial = 0
     matched_pair_count = 0
+    engineering_eligible_pair_count = 0
+    engineering_rejection_counts = {
+        "elements": 0,
+        "density": 0,
+        "bulk_modulus": 0,
+        "shear_modulus": 0,
+        "mechanics_completeness": 0,
+    }
     target = float(target_alpha_ppm_per_k)
     for pte_index, (pte_record, pte_curve) in enumerate(zip(pte_records, pte_curves)):
         delta = nte_curves - pte_curve
@@ -355,7 +457,49 @@ def screen_material_pairs(
             nte_bulk_moduli_gpa=nte_bulk,
             nte_shear_moduli_gpa=nte_shear,
         )
-        valid = (
+        engineering_valid = np.ones(len(nte_records), dtype=bool)
+        if excluded_element_set:
+            element_mask = np.asarray(
+                [not bool(excluded_element_set & (pte_record.elements | record.elements)) for record in nte_records],
+                dtype=bool,
+            )
+            engineering_rejection_counts["elements"] += int(np.count_nonzero(engineering_valid & ~element_mask))
+            engineering_valid &= element_mask
+        if required_element_set:
+            element_mask = np.asarray(
+                [required_element_set.issubset(pte_record.elements | record.elements) for record in nte_records],
+                dtype=bool,
+            )
+            engineering_rejection_counts["elements"] += int(np.count_nonzero(engineering_valid & ~element_mask))
+            engineering_valid &= element_mask
+        density_mask = _ratio_mask(pte_record.density_g_cm3, nte_density, max_density_ratio)
+        if require_mass_fraction:
+            density_mask &= np.isfinite(nte_density) & (nte_density > 0)
+            if not pte_record.density_g_cm3 or pte_record.density_g_cm3 <= 0:
+                density_mask[:] = False
+        engineering_rejection_counts["density"] += int(np.count_nonzero(engineering_valid & ~density_mask))
+        engineering_valid &= density_mask
+        bulk_mask = _ratio_mask(pte_record.bulk_modulus_gpa, nte_bulk, max_bulk_modulus_ratio)
+        engineering_rejection_counts["bulk_modulus"] += int(np.count_nonzero(engineering_valid & ~bulk_mask))
+        engineering_valid &= bulk_mask
+        shear_mask = _ratio_mask(pte_record.shear_modulus_gpa, nte_shear, max_shear_modulus_ratio)
+        engineering_rejection_counts["shear_modulus"] += int(np.count_nonzero(engineering_valid & ~shear_mask))
+        engineering_valid &= shear_mask
+        if require_complete_mechanics:
+            mechanics_mask = (
+                np.isfinite(nte_bulk) & (nte_bulk > 0) & np.isfinite(nte_shear) & (nte_shear > 0)
+            )
+            if not (
+                pte_record.bulk_modulus_gpa and pte_record.bulk_modulus_gpa > 0
+                and pte_record.shear_modulus_gpa and pte_record.shear_modulus_gpa > 0
+            ):
+                mechanics_mask[:] = False
+            engineering_rejection_counts["mechanics_completeness"] += int(
+                np.count_nonzero(engineering_valid & ~mechanics_mask)
+            )
+            engineering_valid &= mechanics_mask
+        engineering_eligible_pair_count += int(np.count_nonzero(engineering_valid))
+        valid = engineering_valid & (
             (fractions >= nte_volume_fraction_min - 1e-12)
             & (fractions <= nte_volume_fraction_max + 1e-12)
         )
@@ -427,6 +571,8 @@ def screen_material_pairs(
             nte_bulk_modulus_gpa=nte_record.bulk_modulus_gpa,
             pte_shear_modulus_gpa=pte_record.shear_modulus_gpa,
             nte_shear_modulus_gpa=nte_record.shear_modulus_gpa,
+            pte_density=pte_record.density_g_cm3,
+            nte_density=nte_record.density_g_cm3,
             matrix_phase=matrix_phase,
             zte_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
         )
@@ -455,6 +601,7 @@ def screen_material_pairs(
                 "matrix_volume_fraction": matrix_fraction,
                 "model_applicable": model_applicable,
                 "nte_volume_fraction": result.nte_volume_fraction,
+                "nte_mass_fraction": result.nte_mass_fraction,
                 "effective_nte_thermal_weight": result.effective_nte_thermal_weight,
                 "rms_error_ppm_per_k": result.rms_error_ppm_per_k,
                 "max_absolute_error_ppm_per_k": result.max_absolute_error_ppm_per_k,
@@ -465,6 +612,17 @@ def screen_material_pairs(
                 "pte_shear_modulus_gpa": pte_record.shear_modulus_gpa,
                 "nte_bulk_modulus_gpa": nte_record.bulk_modulus_gpa,
                 "nte_shear_modulus_gpa": nte_record.shear_modulus_gpa,
+                "pte_density_g_cm3": pte_record.density_g_cm3,
+                "nte_density_g_cm3": nte_record.density_g_cm3,
+                "density_ratio": _symmetric_ratio(
+                    pte_record.density_g_cm3, nte_record.density_g_cm3
+                ),
+                "bulk_modulus_ratio": _symmetric_ratio(
+                    pte_record.bulk_modulus_gpa, nte_record.bulk_modulus_gpa
+                ),
+                "shear_modulus_ratio": _symmetric_ratio(
+                    pte_record.shear_modulus_gpa, nte_record.shear_modulus_gpa
+                ),
             }
         )
     refined.sort(
@@ -492,9 +650,18 @@ def screen_material_pairs(
         "nte_volume_fraction_min": nte_volume_fraction_min,
         "nte_volume_fraction_max": nte_volume_fraction_max,
         "require_matrix_majority": require_matrix_majority,
+        "required_elements": sorted(required_element_set),
+        "excluded_elements": sorted(excluded_element_set),
+        "require_mass_fraction": require_mass_fraction,
+        "require_complete_mechanics": require_complete_mechanics,
+        "max_density_ratio": max_density_ratio,
+        "max_bulk_modulus_ratio": max_bulk_modulus_ratio,
+        "max_shear_modulus_ratio": max_shear_modulus_ratio,
         "eligible_pte_count": len(pte_records),
         "eligible_nte_count": len(nte_records),
         "evaluated_pair_count": len(pte_records) * len(nte_records),
+        "engineering_eligible_pair_count": engineering_eligible_pair_count,
+        "engineering_rejection_counts": engineering_rejection_counts,
         "matched_pair_count": matched_pair_count,
         "candidate_pool_size": len(candidates),
         "ranking_is_complete": True,

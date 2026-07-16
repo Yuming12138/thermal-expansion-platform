@@ -68,7 +68,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-18", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-19", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
         self.assertIn("zte-candidate-detail", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
@@ -379,6 +379,13 @@ class ApiTests(unittest.TestCase):
                 "matrix_phase": "nte",
                 "nte_volume_fraction_min": 0.5,
                 "require_matrix_majority": True,
+                "required_elements": ["O"],
+                "excluded_elements": ["Pb"],
+                "require_mass_fraction": True,
+                "require_complete_mechanics": True,
+                "max_density_ratio": 2.0,
+                "max_bulk_modulus_ratio": 4.0,
+                "max_shear_modulus_ratio": 5.0,
                 "limit": 10,
             },
         )
@@ -387,6 +394,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(screening_mock.call_args.kwargs["model"], "kerner")
         self.assertEqual(screening_mock.call_args.kwargs["matrix_phase"], "nte")
         self.assertEqual(screening_mock.call_args.kwargs["nte_volume_fraction_min"], 0.5)
+        self.assertEqual(screening_mock.call_args.kwargs["required_elements"], ["O"])
+        self.assertEqual(screening_mock.call_args.kwargs["excluded_elements"], ["Pb"])
+        self.assertTrue(screening_mock.call_args.kwargs["require_mass_fraction"])
+        self.assertEqual(screening_mock.call_args.kwargs["max_density_ratio"], 2.0)
 
     @patch("te_platform.api.app.optimize_material_pair")
     def test_zte_candidate_comparison_endpoint(self, optimize_mock) -> None:
@@ -426,11 +437,15 @@ class ApiTests(unittest.TestCase):
                 "project_name": "ZTE report",
                 "pairs": [{"pte_material_key": "1.CaO", "nte_material_key": "NTE-1"}],
                 "ranked_results": [],
+                "screening_context": {"excluded_elements": ["Pb"], "max_density_ratio": 2},
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF"))
         report_mock.assert_called_once()
+        report_payload = report_mock.call_args.args[0]
+        self.assertEqual(report_payload["screening_parameters"]["excluded_elements"], ["Pb"])
+        self.assertEqual(report_payload["screening_parameters"]["max_density_ratio"], 2)
 
     def test_zte_screening_project_endpoints(self) -> None:
         saved = self.client.post(

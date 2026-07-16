@@ -32,6 +32,26 @@ def _longest_span(design: dict[str, Any]) -> float:
     )
 
 
+def _constraint_summary(parameters: dict[str, Any]) -> str:
+    parts = []
+    if parameters.get("required_elements"):
+        parts.append("required elements=" + ",".join(parameters["required_elements"]))
+    if parameters.get("excluded_elements"):
+        parts.append("excluded elements=" + ",".join(parameters["excluded_elements"]))
+    if parameters.get("require_mass_fraction"):
+        parts.append("density required")
+    if parameters.get("require_complete_mechanics"):
+        parts.append("complete K/G required")
+    for key, label in (
+        ("max_density_ratio", "density ratio"),
+        ("max_bulk_modulus_ratio", "K ratio"),
+        ("max_shear_modulus_ratio", "G ratio"),
+    ):
+        if parameters.get(key) is not None:
+            parts.append(f"{label}<={parameters[key]}")
+    return " | ".join(parts) or "No additional engineering constraints"
+
+
 def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
     designs = payload.get("designs") or []
     ranked_results = payload.get("ranked_results") or []
@@ -191,7 +211,14 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
         pareto_axis.grid(True, color="#e2e8ee", linewidth=0.7)
         figure.text(
             0.01,
+            0.025,
+            _constraint_summary(parameters),
+            fontsize=6.8,
+            color="#647586",
+        )
+        figure.text(
             0.01,
+            0.008,
             (
                 f"Generated {_generated_at()} | target={target:g} ppm/K | tolerance=±{tolerance:g} ppm/K | "
                 "Ranking: coverage, longest continuous span, RMS, maximum error."
