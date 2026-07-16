@@ -79,6 +79,8 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
         if single_model_results:
             for model_name, model_result in single_model_results.items():
                 mass_fraction = model_result.get("nte_mass_fraction")
+                robustness = model_result.get("robustness_analysis") or {}
+                formulation = robustness.get("optimal_formulation") or {}
                 rows.append(
                     [
                         str(model_result.get("model_label") or model_name),
@@ -86,15 +88,23 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
                         str((designs[0].get("nte_material") or {}).get("formula") or "-"),
                         _number(float(model_result["nte_volume_fraction"]) * 100),
                         (_number(float(mass_fraction) * 100) if mass_fraction is not None else "-"),
+                        _number(float(robustness.get("robust_fraction_span") or 0) * 100),
+                        (
+                            f"{_number(formulation.get('rounded_pte_mass_g'))}/"
+                            f"{_number(formulation.get('rounded_nte_mass_g'))}"
+                            if formulation.get("available") else "-"
+                        ),
                         _number(float(model_result["zte_temperature_coverage_fraction"]) * 100, 1),
                         _number(model_result.get("rms_error_ppm_per_k")),
                         _number(_longest_span(model_result)),
                     ]
                 )
-            table_labels = ["Model", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Coverage %", "RMS", "Longest K"]
+            table_labels = ["Model", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Robust vol.%", "PTE/NTE g", "Coverage %", "RMS", "Longest K"]
         else:
             for index, design in enumerate(designs):
                 mass_fraction = design.get("nte_mass_fraction")
+                robustness = design.get("robustness_analysis") or {}
+                formulation = robustness.get("optimal_formulation") or {}
                 rows.append(
                     [
                         str(design.get("rank") or index + 1),
@@ -102,12 +112,18 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
                         str((design.get("nte_material") or {}).get("material_key") or "-"),
                         _number(float(design["nte_volume_fraction"]) * 100),
                         (_number(float(mass_fraction) * 100) if mass_fraction is not None else "-"),
+                        _number(float(robustness.get("robust_fraction_span") or 0) * 100),
+                        (
+                            f"{_number(formulation.get('rounded_pte_mass_g'))}/"
+                            f"{_number(formulation.get('rounded_nte_mass_g'))}"
+                            if formulation.get("available") else "-"
+                        ),
                         _number(float(design["zte_temperature_coverage_fraction"]) * 100, 1),
                         _number(design.get("rms_error_ppm_per_k")),
                         _number(_longest_span(design)),
                     ]
                 )
-            table_labels = ["Rank", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Coverage %", "RMS", "Longest K"]
+            table_labels = ["Rank", "PTE", "NTE", "NTE vol.%", "NTE mass.%", "Robust vol.%", "PTE/NTE g", "Coverage %", "RMS", "Longest K"]
         table = table_axis.table(
             cellText=rows,
             colLabels=table_labels,
@@ -252,6 +268,7 @@ def build_zte_screening_report_pdf(payload: dict[str, Any]) -> bytes:
                 f"Generated {_generated_at()} | target="
                 f"{'piecewise alpha(T), ' + str(len(target_points)) + ' points' if target_points else f'{target:g} ppm/K'}"
                 f" | tolerance=±{tolerance:g} ppm/K | "
+                f"robust coverage>={float(parameters.get('minimum_target_coverage_fraction', 0.9)) * 100:g}% | "
                 "Ranking: coverage, longest continuous span, RMS, maximum error."
             ),
             fontsize=7.2,

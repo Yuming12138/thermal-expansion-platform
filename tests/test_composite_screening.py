@@ -228,6 +228,8 @@ Direct
             )
             self.assertAlmostEqual(result["results"][0]["nte_volume_fraction"], 0.25)
             self.assertAlmostEqual(result["results"][0]["rms_error_ppm_per_k"], 0.0)
+            self.assertGreater(result["results"][0]["robust_fraction_span"], 0)
+            self.assertIn("optimal_formulation", result["results"][0])
             for actual, expected in zip(
                 result["target_alpha_curve_ppm_per_k"],
                 [5.0, 8.333333333333332, 11.666666666666666, 15.0],

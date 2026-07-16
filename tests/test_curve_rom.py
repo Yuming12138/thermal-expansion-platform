@@ -1,6 +1,7 @@
 import unittest
 
 from te_platform.composites.curve_rom import (
+    analyze_fraction_robustness,
     mix_curve,
     optimize_curve_kerner,
     optimize_curve_rom,
@@ -112,6 +113,30 @@ class CurveROMTests(unittest.TestCase):
                 [300, 500],
                 target_curve_points=[(350, 5), (500, 15)],
             )
+
+    def test_analyzes_robust_fraction_window_and_rounded_formulation(self) -> None:
+        analysis = analyze_fraction_robustness(
+            [10, 10, 10],
+            [-10, -10, -10],
+            optimal_nte_volume_fraction=0.5,
+            target_alpha_curve=[0, 0, 0],
+            temperatures_k=[300, 400, 500],
+            pte_density=2,
+            nte_density=4,
+            target_tolerance_ppm_per_k=2,
+            minimum_target_coverage_fraction=1,
+            fraction_step=0.05,
+            formulation_total_mass_g=10,
+            balance_resolution_g=0.1,
+        )
+        self.assertAlmostEqual(analysis["robust_fraction_min"], 0.4)
+        self.assertAlmostEqual(analysis["robust_fraction_max"], 0.6)
+        self.assertAlmostEqual(analysis["robust_fraction_span"], 0.2)
+        formulation = analysis["optimal_formulation"]
+        self.assertTrue(formulation["available"])
+        self.assertAlmostEqual(formulation["rounded_pte_mass_g"], 3.3)
+        self.assertAlmostEqual(formulation["rounded_nte_mass_g"], 6.7)
+        self.assertAlmostEqual(formulation["actual_nte_volume_fraction"], 0.5037593985)
 
 
 if __name__ == "__main__":

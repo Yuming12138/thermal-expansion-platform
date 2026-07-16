@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from te_platform.composites.curve_rom import (
+    analyze_fraction_robustness,
     mix_curve,
     normalize_target_curve_points,
     optimize_curve_model,
@@ -312,6 +313,10 @@ def optimize_material_pair(
     matrix_phase: str = "pte",
     temperature_step_k: float = 10.0,
     zte_tolerance_ppm_per_k: float = 5.0,
+    minimum_target_coverage_fraction: float = 0.9,
+    robustness_fraction_step: float = 0.005,
+    formulation_total_mass_g: float = 10.0,
+    balance_resolution_g: float = 0.001,
 ) -> dict[str, Any]:
     if temperature_max_k <= temperature_min_k:
         raise ValueError("temperature_max_k must be greater than temperature_min_k")
@@ -405,6 +410,26 @@ def optimize_material_pair(
                 matrix_phase=matrix_phase,
             )
         )
+        result_data["robustness_analysis"] = analyze_fraction_robustness(
+            optimization_pte_alpha,
+            optimization_nte_alpha,
+            optimal_nte_volume_fraction=result.nte_volume_fraction,
+            target_alpha_curve=optimization_target_alpha,
+            temperatures_k=optimization_temperatures,
+            model=model_name,
+            pte_density=pte.get("density_g_cm3"),
+            nte_density=nte.get("density_g_cm3"),
+            pte_bulk_modulus_gpa=pte.get("bulk_modulus_gpa"),
+            nte_bulk_modulus_gpa=nte.get("bulk_modulus_gpa"),
+            pte_shear_modulus_gpa=pte.get("shear_modulus_gpa"),
+            nte_shear_modulus_gpa=nte.get("shear_modulus_gpa"),
+            matrix_phase=matrix_phase,
+            target_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+            minimum_target_coverage_fraction=minimum_target_coverage_fraction,
+            fraction_step=robustness_fraction_step,
+            formulation_total_mass_g=formulation_total_mass_g,
+            balance_resolution_g=balance_resolution_g,
+        )
         model_results[model_name] = result_data
     if model not in model_results:
         raise ValueError(f"Requested model is unavailable: {model}")
@@ -464,5 +489,9 @@ def optimize_material_pair(
         ],
         "target_temperatures_k": optimization_temperatures,
         "target_alpha_curve_ppm_per_k": list(optimization_target_alpha),
+        "minimum_target_coverage_fraction": minimum_target_coverage_fraction,
+        "robustness_fraction_step": robustness_fraction_step,
+        "formulation_total_mass_g": formulation_total_mass_g,
+        "balance_resolution_g": balance_resolution_g,
         **selected_result,
     }

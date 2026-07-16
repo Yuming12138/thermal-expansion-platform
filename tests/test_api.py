@@ -68,9 +68,10 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-20", home.text)
-        self.assertIn("/static/styles.css?v=0.10.0-11", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-22", home.text)
+        self.assertIn("/static/styles.css?v=0.10.0-12", home.text)
         self.assertIn("分段目标曲线", home.text)
+        self.assertIn("鲁棒性与实验配方参数", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
         self.assertIn("zte-candidate-detail", home.text)
         for workspace_path in ["/database", "/predict", "/landscape", "/zte", "/about"]:
@@ -392,6 +393,10 @@ class ApiTests(unittest.TestCase):
                 "max_density_ratio": 2.0,
                 "max_bulk_modulus_ratio": 4.0,
                 "max_shear_modulus_ratio": 5.0,
+                "minimum_target_coverage_fraction": 0.85,
+                "robustness_fraction_step": 0.01,
+                "formulation_total_mass_g": 25,
+                "balance_resolution_g": 0.01,
                 "limit": 10,
             },
         )
@@ -408,6 +413,8 @@ class ApiTests(unittest.TestCase):
             screening_mock.call_args.kwargs["target_curve_points"],
             [(300.0, 2.0), (800.0, -1.0)],
         )
+        self.assertEqual(screening_mock.call_args.kwargs["minimum_target_coverage_fraction"], 0.85)
+        self.assertEqual(screening_mock.call_args.kwargs["formulation_total_mass_g"], 25)
 
     @patch("te_platform.api.app.optimize_material_pair")
     def test_zte_candidate_comparison_endpoint(self, optimize_mock) -> None:
@@ -429,6 +436,8 @@ class ApiTests(unittest.TestCase):
                     {"temperature_k": 300, "alpha_ppm_per_k": 1},
                     {"temperature_k": 800, "alpha_ppm_per_k": 3},
                 ],
+                "minimum_target_coverage_fraction": 0.8,
+                "formulation_total_mass_g": 20,
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -438,6 +447,8 @@ class ApiTests(unittest.TestCase):
             optimize_mock.call_args.kwargs["target_curve_points"],
             [(300.0, 1.0), (800.0, 3.0)],
         )
+        self.assertEqual(optimize_mock.call_args.kwargs["minimum_target_coverage_fraction"], 0.8)
+        self.assertEqual(optimize_mock.call_args.kwargs["formulation_total_mass_g"], 20)
 
     @patch("te_platform.api.app.build_zte_screening_report_pdf", return_value=b"%PDF-test")
     @patch("te_platform.api.app.optimize_material_pair")

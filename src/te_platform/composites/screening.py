@@ -13,6 +13,7 @@ import numpy as np
 from pymatgen.core import Element
 
 from te_platform.composites.curve_rom import (
+    analyze_fraction_robustness,
     normalize_target_curve_points,
     optimize_curve_model,
     resolve_target_alpha_curve,
@@ -328,6 +329,10 @@ def screen_material_pairs(
     max_density_ratio: float | None = None,
     max_bulk_modulus_ratio: float | None = None,
     max_shear_modulus_ratio: float | None = None,
+    minimum_target_coverage_fraction: float = 0.9,
+    robustness_fraction_step: float = 0.005,
+    formulation_total_mass_g: float = 10.0,
+    balance_resolution_g: float = 0.001,
     limit: int = 30,
 ) -> dict[str, Any]:
     started = perf_counter()
@@ -345,6 +350,12 @@ def screen_material_pairs(
         raise ValueError("NTE volume-fraction limits must satisfy 0 <= min <= max <= 1")
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
+    if not 0 <= minimum_target_coverage_fraction <= 1:
+        raise ValueError("minimum_target_coverage_fraction must be between 0 and 1")
+    if not 0 < robustness_fraction_step <= 0.05:
+        raise ValueError("robustness_fraction_step must be greater than 0 and no more than 0.05")
+    if formulation_total_mass_g <= 0 or balance_resolution_g <= 0:
+        raise ValueError("Formulation mass and balance resolution must be positive")
     for value, name in (
         (max_density_ratio, "max_density_ratio"),
         (max_bulk_modulus_ratio, "max_bulk_modulus_ratio"),
@@ -424,6 +435,10 @@ def screen_material_pairs(
             "max_density_ratio": max_density_ratio,
             "max_bulk_modulus_ratio": max_bulk_modulus_ratio,
             "max_shear_modulus_ratio": max_shear_modulus_ratio,
+            "minimum_target_coverage_fraction": minimum_target_coverage_fraction,
+            "robustness_fraction_step": robustness_fraction_step,
+            "formulation_total_mass_g": formulation_total_mass_g,
+            "balance_resolution_g": balance_resolution_g,
             "eligible_pte_count": len(pte_records),
             "eligible_nte_count": len(nte_records),
             "evaluated_pair_count": 0,
@@ -612,6 +627,8 @@ def screen_material_pairs(
             model_applicable = matrix_fraction >= 0.5
         refined.append(
             {
+                "_pte_index": pte_index,
+                "_nte_index": nte_index,
                 "pte_material_key": pte_record.material_key,
                 "pte_formula": pte_record.formula,
                 "nte_material_key": nte_record.material_key,
@@ -659,6 +676,36 @@ def screen_material_pairs(
     )
     results = refined[:limit]
     for rank, item in enumerate(results, start=1):
+        pte_index = int(item.pop("_pte_index"))
+        nte_index = int(item.pop("_nte_index"))
+        robustness = analyze_fraction_robustness(
+            pte_curves[pte_index].tolist(),
+            nte_curves[nte_index].tolist(),
+            optimal_nte_volume_fraction=float(item["nte_volume_fraction"]),
+            target_alpha_curve=target.tolist(),
+            temperatures_k=temperatures.tolist(),
+            model=model,
+            pte_density=pte_records[pte_index].density_g_cm3,
+            nte_density=nte_records[nte_index].density_g_cm3,
+            pte_bulk_modulus_gpa=pte_records[pte_index].bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_records[nte_index].bulk_modulus_gpa,
+            pte_shear_modulus_gpa=pte_records[pte_index].shear_modulus_gpa,
+            nte_shear_modulus_gpa=nte_records[nte_index].shear_modulus_gpa,
+            matrix_phase=matrix_phase,
+            target_tolerance_ppm_per_k=zte_tolerance_ppm_per_k,
+            minimum_target_coverage_fraction=minimum_target_coverage_fraction,
+            fraction_step=robustness_fraction_step,
+            formulation_total_mass_g=formulation_total_mass_g,
+            balance_resolution_g=balance_resolution_g,
+            include_samples=False,
+        )
+        item["robust_fraction_min"] = robustness["robust_fraction_min"]
+        item["robust_fraction_max"] = robustness["robust_fraction_max"]
+        item["robust_fraction_span"] = robustness["robust_fraction_span"]
+        item["recommended_robust_nte_volume_fraction"] = robustness[
+            "recommended_robust_nte_volume_fraction"
+        ]
+        item["optimal_formulation"] = robustness["optimal_formulation"]
         item["rank"] = rank
     return {
         "model": model,
@@ -684,6 +731,10 @@ def screen_material_pairs(
         "max_density_ratio": max_density_ratio,
         "max_bulk_modulus_ratio": max_bulk_modulus_ratio,
         "max_shear_modulus_ratio": max_shear_modulus_ratio,
+        "minimum_target_coverage_fraction": minimum_target_coverage_fraction,
+        "robustness_fraction_step": robustness_fraction_step,
+        "formulation_total_mass_g": formulation_total_mass_g,
+        "balance_resolution_g": balance_resolution_g,
         "eligible_pte_count": len(pte_records),
         "eligible_nte_count": len(nte_records),
         "evaluated_pair_count": len(pte_records) * len(nte_records),

@@ -156,6 +156,10 @@ class MaterialPairCurveRequest(BaseModel):
     matrix_phase: Literal["pte", "nte"] = "pte"
     temperature_step_k: float = Field(default=10.0, gt=0, le=100)
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
+    minimum_target_coverage_fraction: float = Field(default=0.9, ge=0, le=1)
+    robustness_fraction_step: float = Field(default=0.005, gt=0, le=0.05)
+    formulation_total_mass_g: float = Field(default=10.0, gt=0, le=100000)
+    balance_resolution_g: float = Field(default=0.001, gt=0, le=10)
 
 
 class MaterialPairScreeningRequest(BaseModel):
@@ -179,6 +183,10 @@ class MaterialPairScreeningRequest(BaseModel):
     max_density_ratio: float | None = Field(default=None, ge=1, le=100)
     max_bulk_modulus_ratio: float | None = Field(default=None, ge=1, le=100)
     max_shear_modulus_ratio: float | None = Field(default=None, ge=1, le=100)
+    minimum_target_coverage_fraction: float = Field(default=0.9, ge=0, le=1)
+    robustness_fraction_step: float = Field(default=0.005, gt=0, le=0.05)
+    formulation_total_mass_g: float = Field(default=10.0, gt=0, le=100000)
+    balance_resolution_g: float = Field(default=0.001, gt=0, le=10)
     limit: int = Field(default=30, ge=1, le=100)
 
 
@@ -198,6 +206,10 @@ class ZteCandidateComparisonRequest(BaseModel):
     zte_tolerance_ppm_per_k: float = Field(default=5.0, gt=0, le=100)
     model: Literal["linear_rom", "turner", "kerner"] = "linear_rom"
     matrix_phase: Literal["pte", "nte"] = "pte"
+    minimum_target_coverage_fraction: float = Field(default=0.9, ge=0, le=1)
+    robustness_fraction_step: float = Field(default=0.005, gt=0, le=0.05)
+    formulation_total_mass_g: float = Field(default=10.0, gt=0, le=100000)
+    balance_resolution_g: float = Field(default=0.001, gt=0, le=10)
 
 
 class ZteScreeningReportRequest(ZteCandidateComparisonRequest):
@@ -826,6 +838,10 @@ def create_app(
                 matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+                minimum_target_coverage_fraction=request.minimum_target_coverage_fraction,
+                robustness_fraction_step=request.robustness_fraction_step,
+                formulation_total_mass_g=request.formulation_total_mass_g,
+                balance_resolution_g=request.balance_resolution_g,
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -860,6 +876,10 @@ def create_app(
                 max_density_ratio=request.max_density_ratio,
                 max_bulk_modulus_ratio=request.max_bulk_modulus_ratio,
                 max_shear_modulus_ratio=request.max_shear_modulus_ratio,
+                minimum_target_coverage_fraction=request.minimum_target_coverage_fraction,
+                robustness_fraction_step=request.robustness_fraction_step,
+                formulation_total_mass_g=request.formulation_total_mass_g,
+                balance_resolution_g=request.balance_resolution_g,
                 limit=request.limit,
             )
         except ValueError as error:
@@ -887,6 +907,10 @@ def create_app(
                 matrix_phase=request.matrix_phase,
                 temperature_step_k=request.temperature_step_k,
                 zte_tolerance_ppm_per_k=request.zte_tolerance_ppm_per_k,
+                minimum_target_coverage_fraction=request.minimum_target_coverage_fraction,
+                robustness_fraction_step=request.robustness_fraction_step,
+                formulation_total_mass_g=request.formulation_total_mass_g,
+                balance_resolution_g=request.balance_resolution_g,
             )
             design["rank"] = pair.rank
             designs.append(design)
@@ -900,6 +924,10 @@ def create_app(
                 "zte_tolerance_ppm_per_k": request.zte_tolerance_ppm_per_k,
                 "model": request.model,
                 "matrix_phase": request.matrix_phase,
+                "minimum_target_coverage_fraction": request.minimum_target_coverage_fraction,
+                "robustness_fraction_step": request.robustness_fraction_step,
+                "formulation_total_mass_g": request.formulation_total_mass_g,
+                "balance_resolution_g": request.balance_resolution_g,
             },
             "designs": designs,
         }

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-11">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-12">
   </head>
   <body>
     <header>
@@ -200,6 +200,15 @@
             <textarea id="zte-target-points" rows="4" placeholder="300, 0&#10;500, 2&#10;800, -1" aria-label="手动设计目标曲线控制点"></textarea>
             <div class="zte-target-actions"><button id="zte-target-example" type="button">生成温区示例</button><label class="file-button">导入 CSV/TXT<input id="zte-target-file" type="file" accept=".csv,.txt,text/csv,text/plain"></label></div>
           </div>
+          <details class="zte-robustness-controls">
+            <summary>鲁棒性与实验配方参数</summary>
+            <div class="zte-engineering-grid">
+              <label>最低目标覆盖率 (%)<input id="zte-robust-coverage" type="number" value="90" min="0" max="100" step="1"></label>
+              <label>浓度扫描步长 (%)<input id="zte-robust-step" type="number" value="0.5" min="0.1" max="5" step="0.1"></label>
+              <label>实验总质量 (g)<input id="zte-formulation-mass" type="number" value="10" min="0.001" step="1"></label>
+              <label>天平分度值 (g)<input id="zte-balance-resolution" type="number" value="0.001" min="0.000001" step="0.001"></label>
+            </div>
+          </details>
           <div id="zte-result" class="prediction-result muted">正在加载可用材料曲线…</div>
         </div>
         <div id="zte-screen-panel" class="zte-mode-panel" hidden>
@@ -229,6 +238,15 @@
             <textarea id="zte-screen-target-points" rows="4" placeholder="300, 0&#10;500, 2&#10;800, -1" aria-label="全库筛选目标曲线控制点"></textarea>
             <div class="zte-target-actions"><button id="zte-screen-target-example" type="button">生成温区示例</button><label class="file-button">导入 CSV/TXT<input id="zte-screen-target-file" type="file" accept=".csv,.txt,text/csv,text/plain"></label></div>
           </div>
+          <details class="zte-robustness-controls">
+            <summary>鲁棒性与实验配方参数</summary>
+            <div class="zte-engineering-grid">
+              <label>最低目标覆盖率 (%)<input id="zte-screen-robust-coverage" type="number" value="90" min="0" max="100" step="1"></label>
+              <label>浓度扫描步长 (%)<input id="zte-screen-robust-step" type="number" value="0.5" min="0.1" max="5" step="0.1"></label>
+              <label>实验总质量 (g)<input id="zte-screen-formulation-mass" type="number" value="10" min="0.001" step="1"></label>
+              <label>天平分度值 (g)<input id="zte-screen-balance-resolution" type="number" value="0.001" min="0.000001" step="0.001"></label>
+            </div>
+          </details>
           <details class="zte-engineering-constraints">
             <summary>工程约束（可选）</summary>
             <p class="curve-note">这些条件直接进入全库组合引擎。比值均定义为两相较大值/较小值，1表示完全一致。</p>
@@ -275,7 +293,7 @@
           </div>
           <div id="zte-screen-results" class="zte-screen-results" hidden>
             <table>
-              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>密度比</th><th>K比</th><th>G比</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
+              <thead><tr><th>选择</th><th>排名</th><th>PTE</th><th>NTE</th><th>NTE体积分数</th><th>稳健窗口</th><th>密度比</th><th>K比</th><th>G比</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>模型判断</th><th></th></tr></thead>
               <tbody id="zte-screen-body"></tbody>
             </table>
           </div>
@@ -374,6 +392,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-20"></script>
+    <script src="/static/app.js?v=0.10.0-22"></script>
   </body>
 </html>

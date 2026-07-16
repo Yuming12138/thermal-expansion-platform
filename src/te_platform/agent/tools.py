@@ -284,6 +284,18 @@ def default_registry(
                         "maximum": 100,
                         "default": 5,
                     },
+                    "minimum_target_coverage_fraction": {
+                        "type": "number", "minimum": 0, "maximum": 1, "default": 0.9,
+                    },
+                    "robustness_fraction_step": {
+                        "type": "number", "exclusiveMinimum": 0, "maximum": 0.05, "default": 0.005,
+                    },
+                    "formulation_total_mass_g": {
+                        "type": "number", "exclusiveMinimum": 0, "default": 10,
+                    },
+                    "balance_resolution_g": {
+                        "type": "number", "exclusiveMinimum": 0, "default": 0.001,
+                    },
                 },
                 "required": ["pte_material_key", "nte_material_key"],
                 "additionalProperties": False,
@@ -379,6 +391,18 @@ def default_registry(
                     "max_density_ratio": {"type": ["number", "null"], "minimum": 1},
                     "max_bulk_modulus_ratio": {"type": ["number", "null"], "minimum": 1},
                     "max_shear_modulus_ratio": {"type": ["number", "null"], "minimum": 1},
+                    "minimum_target_coverage_fraction": {
+                        "type": "number", "minimum": 0, "maximum": 1, "default": 0.9,
+                    },
+                    "robustness_fraction_step": {
+                        "type": "number", "exclusiveMinimum": 0, "maximum": 0.05, "default": 0.005,
+                    },
+                    "formulation_total_mass_g": {
+                        "type": "number", "exclusiveMinimum": 0, "default": 10,
+                    },
+                    "balance_resolution_g": {
+                        "type": "number", "exclusiveMinimum": 0, "default": 0.001,
+                    },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
                 },
                 "additionalProperties": False,

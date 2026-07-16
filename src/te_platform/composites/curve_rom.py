@@ -416,6 +416,199 @@ def optimize_curve_model(
     )
 
 
+def analyze_fraction_robustness(
+    pte_alpha: list[float],
+    nte_alpha: list[float],
+    *,
+    optimal_nte_volume_fraction: float,
+    target_alpha_curve: list[float] | tuple[float, ...],
+    temperatures_k: list[float],
+    model: str = "linear_rom",
+    pte_density: float | None = None,
+    nte_density: float | None = None,
+    pte_bulk_modulus_gpa: float | None = None,
+    nte_bulk_modulus_gpa: float | None = None,
+    pte_shear_modulus_gpa: float | None = None,
+    nte_shear_modulus_gpa: float | None = None,
+    matrix_phase: str = "pte",
+    target_tolerance_ppm_per_k: float = 5.0,
+    minimum_target_coverage_fraction: float = 0.9,
+    fraction_step: float = 0.005,
+    formulation_total_mass_g: float = 10.0,
+    balance_resolution_g: float = 0.001,
+    include_samples: bool = True,
+) -> dict[str, Any]:
+    _validate_curves(pte_alpha, nte_alpha)
+    targets = [float(value) for value in target_alpha_curve]
+    if len(targets) != len(pte_alpha) or len(temperatures_k) != len(pte_alpha):
+        raise ValueError("Target curve, temperatures, and phase curves must have the same length")
+    if not 0 <= minimum_target_coverage_fraction <= 1:
+        raise ValueError("minimum_target_coverage_fraction must be between 0 and 1")
+    if not 0 < fraction_step <= 0.05:
+        raise ValueError("fraction_step must be greater than 0 and no more than 0.05")
+    if formulation_total_mass_g <= 0 or balance_resolution_g <= 0:
+        raise ValueError("Formulation mass and balance resolution must be positive")
+
+    step_count = max(20, int(round(1.0 / fraction_step)))
+    fractions = [index / step_count for index in range(step_count + 1)]
+    samples: list[dict[str, Any]] = []
+    for fraction in fractions:
+        mixed = mix_curve(
+            pte_alpha,
+            nte_alpha,
+            fraction,
+            model=model,
+            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+            matrix_phase=matrix_phase,
+        )
+        errors = [value - target for value, target in zip(mixed, targets)]
+        coverage, _covered_span, ranges = _zte_intervals(
+            temperatures_k,
+            errors,
+            target_tolerance_ppm_per_k,
+        )
+        longest_span = max((end - start for start, end in ranges), default=0.0)
+        samples.append(
+            {
+                "nte_volume_fraction": fraction,
+                "rms_error_ppm_per_k": sqrt(
+                    sum(error * error for error in errors) / len(errors)
+                ),
+                "max_absolute_error_ppm_per_k": max(abs(error) for error in errors),
+                "target_coverage_fraction": coverage,
+                "longest_target_temperature_span_k": longest_span,
+                "acceptable": coverage + 1e-12 >= minimum_target_coverage_fraction,
+            }
+        )
+
+    acceptable_ranges: list[tuple[float, float]] = []
+    range_start: float | None = None
+    for index, sample in enumerate(samples):
+        if sample["acceptable"] and range_start is None:
+            range_start = float(sample["nte_volume_fraction"])
+        if range_start is not None and (
+            not sample["acceptable"] or index == len(samples) - 1
+        ):
+            end_index = index if sample["acceptable"] else index - 1
+            acceptable_ranges.append(
+                (range_start, float(samples[end_index]["nte_volume_fraction"]))
+            )
+            range_start = None
+
+    optimal_fraction = min(1.0, max(0.0, float(optimal_nte_volume_fraction)))
+    acceptable_samples = [sample for sample in samples if sample["acceptable"]]
+    recommended = min(
+        acceptable_samples,
+        key=lambda sample: (
+            sample["rms_error_ppm_per_k"],
+            abs(sample["nte_volume_fraction"] - optimal_fraction),
+        ),
+        default=None,
+    )
+    selected_fraction = (
+        float(recommended["nte_volume_fraction"])
+        if recommended is not None
+        else optimal_fraction
+    )
+    selected_range = next(
+        (
+            interval
+            for interval in acceptable_ranges
+            if interval[0] - 1e-12 <= selected_fraction <= interval[1] + 1e-12
+        ),
+        None,
+    )
+
+    def formulation(fraction: float) -> dict[str, Any]:
+        if not pte_density or not nte_density or pte_density <= 0 or nte_density <= 0:
+            return {
+                "available": False,
+                "reason": "Both positive phase densities are required for a mass formulation",
+            }
+        mass_fraction = _mass_fraction(fraction, pte_density, nte_density)
+        assert mass_fraction is not None
+        ideal_nte_mass = formulation_total_mass_g * mass_fraction
+        ideal_pte_mass = formulation_total_mass_g - ideal_nte_mass
+        rounded_nte_mass = round(ideal_nte_mass / balance_resolution_g) * balance_resolution_g
+        rounded_pte_mass = round(ideal_pte_mass / balance_resolution_g) * balance_resolution_g
+        actual_total_mass = rounded_nte_mass + rounded_pte_mass
+        if actual_total_mass <= 0:
+            actual_fraction = fraction
+        else:
+            nte_volume = rounded_nte_mass / nte_density
+            pte_volume = rounded_pte_mass / pte_density
+            actual_fraction = nte_volume / (nte_volume + pte_volume)
+        actual_mixed = mix_curve(
+            pte_alpha,
+            nte_alpha,
+            actual_fraction,
+            model=model,
+            pte_bulk_modulus_gpa=pte_bulk_modulus_gpa,
+            nte_bulk_modulus_gpa=nte_bulk_modulus_gpa,
+            pte_shear_modulus_gpa=pte_shear_modulus_gpa,
+            nte_shear_modulus_gpa=nte_shear_modulus_gpa,
+            matrix_phase=matrix_phase,
+        )
+        actual_errors = [value - target for value, target in zip(actual_mixed, targets)]
+        actual_coverage, _span, actual_ranges = _zte_intervals(
+            temperatures_k,
+            actual_errors,
+            target_tolerance_ppm_per_k,
+        )
+        return {
+            "available": True,
+            "requested_nte_volume_fraction": fraction,
+            "ideal_nte_mass_fraction": mass_fraction,
+            "ideal_pte_mass_g": ideal_pte_mass,
+            "ideal_nte_mass_g": ideal_nte_mass,
+            "rounded_pte_mass_g": rounded_pte_mass,
+            "rounded_nte_mass_g": rounded_nte_mass,
+            "rounded_total_mass_g": actual_total_mass,
+            "actual_nte_volume_fraction": actual_fraction,
+            "volume_fraction_error": actual_fraction - fraction,
+            "rounded_rms_error_ppm_per_k": sqrt(
+                sum(error * error for error in actual_errors) / len(actual_errors)
+            ),
+            "rounded_max_absolute_error_ppm_per_k": max(
+                abs(error) for error in actual_errors
+            ),
+            "rounded_target_coverage_fraction": actual_coverage,
+            "rounded_target_temperature_ranges_k": actual_ranges,
+        }
+
+    return {
+        "minimum_target_coverage_fraction": minimum_target_coverage_fraction,
+        "fraction_step": 1.0 / step_count,
+        "optimal_nte_volume_fraction": optimal_fraction,
+        "recommended_robust_nte_volume_fraction": (
+            float(recommended["nte_volume_fraction"]) if recommended is not None else None
+        ),
+        "acceptable_fraction_ranges": acceptable_ranges,
+        "robust_fraction_min": selected_range[0] if selected_range else None,
+        "robust_fraction_max": selected_range[1] if selected_range else None,
+        "robust_fraction_span": (
+            selected_range[1] - selected_range[0] if selected_range else 0.0
+        ),
+        "lower_fraction_margin": (
+            max(0.0, optimal_fraction - selected_range[0]) if selected_range else 0.0
+        ),
+        "upper_fraction_margin": (
+            max(0.0, selected_range[1] - optimal_fraction) if selected_range else 0.0
+        ),
+        "formulation_total_mass_g": formulation_total_mass_g,
+        "balance_resolution_g": balance_resolution_g,
+        "optimal_formulation": formulation(optimal_fraction),
+        "recommended_formulation": (
+            formulation(float(recommended["nte_volume_fraction"]))
+            if recommended is not None else None
+        ),
+        "samples": samples if include_samples else [],
+    }
+
+
 def optimize_curve_rom(
     pte_alpha: list[float],
     nte_alpha: list[float],

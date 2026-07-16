@@ -2169,6 +2169,18 @@ function validateTargetCurveCoverage(points, minimumTemperature, maximumTemperat
   }
 }
 
+function validateRobustnessParameters(parameters) {
+  if (parameters.minimum_target_coverage_fraction < 0 || parameters.minimum_target_coverage_fraction > 1) {
+    throw new Error("最低目标覆盖率必须在 0–100% 之间。");
+  }
+  if (!(parameters.robustness_fraction_step > 0 && parameters.robustness_fraction_step <= 0.05)) {
+    throw new Error("浓度扫描步长必须大于 0 且不超过 5%。");
+  }
+  if (!(parameters.formulation_total_mass_g > 0) || !(parameters.balance_resolution_g > 0)) {
+    throw new Error("实验总质量和天平分度值必须为正数。");
+  }
+}
+
 function formatTargetCurvePoints(points) {
   return (points || []).map(point =>
     String(Number(point.temperature_k)) + ", " + String(Number(point.alpha_ppm_per_k))).join("\n");
@@ -2218,6 +2230,10 @@ function currentZteScreeningParameters() {
     max_density_ratio: nullableRatioInput("#zte-screen-density-ratio"),
     max_bulk_modulus_ratio: nullableRatioInput("#zte-screen-bulk-ratio"),
     max_shear_modulus_ratio: nullableRatioInput("#zte-screen-shear-ratio"),
+    minimum_target_coverage_fraction: Number(document.querySelector("#zte-screen-robust-coverage").value) / 100,
+    robustness_fraction_step: Number(document.querySelector("#zte-screen-robust-step").value) / 100,
+    formulation_total_mass_g: Number(document.querySelector("#zte-screen-formulation-mass").value),
+    balance_resolution_g: Number(document.querySelector("#zte-screen-balance-resolution").value),
     limit: Number(document.querySelector("#zte-screen-limit").value),
   };
   validateTargetCurveCoverage(
@@ -2225,6 +2241,7 @@ function currentZteScreeningParameters() {
     parameters.temperature_min_k,
     parameters.temperature_max_k,
   );
+  validateRobustnessParameters(parameters);
   return parameters;
 }
 
@@ -2307,6 +2324,10 @@ function zteComparisonRequest() {
     zte_tolerance_ppm_per_k: parameters.zte_tolerance_ppm_per_k,
     model: parameters.model,
     matrix_phase: parameters.matrix_phase,
+    minimum_target_coverage_fraction: parameters.minimum_target_coverage_fraction,
+    robustness_fraction_step: parameters.robustness_fraction_step,
+    formulation_total_mass_g: parameters.formulation_total_mass_g,
+    balance_resolution_g: parameters.balance_resolution_g,
   };
 }
 
@@ -2477,6 +2498,8 @@ function setupZteParetoInteraction() {
       " K</dd></div><div><dt>密度 / K / G 比</dt><dd>" +
       [nearest.density_ratio, nearest.bulk_modulus_ratio, nearest.shear_modulus_ratio]
         .map(optionalNumeric).join(" / ") +
+      "</dd></div><div><dt>稳健配比窗口</dt><dd>" +
+      (Number(nearest.robust_fraction_span || 0) * 100).toFixed(2) + " vol%" +
       "</dd></div></dl>" +
       "<p>满足区间：" + escapeHtml(ranges) + "</p>";
     tooltip.hidden = false;
@@ -2637,7 +2660,7 @@ function renderZteComparison(payload) {
   const comparison = document.querySelector("#zte-selected-comparison");
   comparison.hidden = false;
   comparison.innerHTML = "<h3>候选对比指标</h3><div class='zte-comparison-table'><table><thead><tr>" +
-    "<th>候选</th><th>NTE体积分数</th><th>NTE质量分数</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>最大偏差</th>" +
+    "<th>候选</th><th>NTE体积分数</th><th>NTE质量分数</th><th>稳健窗口</th><th>目标覆盖率</th><th>最长连续温区</th><th>RMS</th><th>最大偏差</th>" +
     "</tr></thead><tbody>" + designs.map((design, index) => {
       const massFraction = Number.isFinite(Number(design.nte_mass_fraction))
         ? (Number(design.nte_mass_fraction) * 100).toFixed(2) + "%" : "—";
@@ -2647,6 +2670,7 @@ function renderZteComparison(payload) {
         COMPARISON_COLORS[index % COMPARISON_COLORS.length] + "'></span>" +
         escapeHtml(zteDesignLabel(design, index)) + "</td><td>" +
         (Number(design.nte_volume_fraction) * 100).toFixed(2) + "%</td><td>" + massFraction +
+        "</td><td>" + (Number(design.robustness_analysis?.robust_fraction_span || 0) * 100).toFixed(2) + " vol%" +
         "</td><td>" + (Number(design.zte_temperature_coverage_fraction) * 100).toFixed(1) +
         "%</td><td>" + numeric(longest) + " K</td><td>" + numeric(design.rms_error_ppm_per_k) +
         "</td><td>" + numeric(design.max_absolute_error_ppm_per_k) + "</td></tr>";
@@ -2682,7 +2706,8 @@ function zteCsvCell(value) {
 function exportZteScreeningCsv() {
   if (!lastZteScreeningPayload) return;
   const columns = ["rank", "pte_formula", "pte_material_key", "nte_formula", "nte_material_key", "model",
-    "nte_volume_fraction", "effective_nte_thermal_weight", "zte_temperature_coverage_fraction",
+    "nte_volume_fraction", "robust_fraction_min", "robust_fraction_max", "robust_fraction_span",
+    "recommended_robust_nte_volume_fraction", "effective_nte_thermal_weight", "zte_temperature_coverage_fraction",
     "longest_zte_temperature_span_k", "rms_error_ppm_per_k", "max_absolute_error_ppm_per_k",
     "zte_temperature_ranges_k", "selected"];
   const lines = [columns.join(",")];
@@ -2802,6 +2827,10 @@ function applyZteScreeningParameters(parameters) {
     "#zte-screen-density-ratio": parameters.max_density_ratio ?? "",
     "#zte-screen-bulk-ratio": parameters.max_bulk_modulus_ratio ?? "",
     "#zte-screen-shear-ratio": parameters.max_shear_modulus_ratio ?? "",
+    "#zte-screen-robust-coverage": Number(parameters.minimum_target_coverage_fraction ?? 0.9) * 100,
+    "#zte-screen-robust-step": Number(parameters.robustness_fraction_step ?? 0.005) * 100,
+    "#zte-screen-formulation-mass": parameters.formulation_total_mass_g ?? 10,
+    "#zte-screen-balance-resolution": parameters.balance_resolution_g ?? 0.001,
     "#zte-screen-limit": parameters.limit,
   };
   Object.entries(values).forEach(([selector, value]) => {
@@ -2859,6 +2888,9 @@ function renderZteScreening(result, restoredPairs = []) {
     "所有组合使用同一温度网格和固定配比进行比较。</p>" +
     "<p class='zte-engineering-summary'><strong>反向设计目标：</strong>" +
     escapeHtml(zteTargetDescription(result)) + "</p>" +
+    "<p class='zte-engineering-summary'><strong>鲁棒性判据：</strong>目标覆盖率 ≥ " +
+    (Number(result.minimum_target_coverage_fraction ?? .9) * 100).toFixed(1) + "%；浓度扫描步长 " +
+    (Number(result.robustness_fraction_step ?? .005) * 100).toFixed(2) + " vol%</p>" +
     "<p class='zte-engineering-summary'><strong>工程约束：</strong>" +
     escapeHtml(zteEngineeringConstraintText(result)) + "</p>";
   const body = document.querySelector("#zte-screen-body");
@@ -2877,6 +2909,7 @@ function renderZteScreening(result, restoredPairs = []) {
       "</td><td><strong>" + escapeHtml(item.nte_formula || item.nte_material_key) +
       "</strong><small>" + escapeHtml(item.nte_material_key) + "</small>" +
       "</td><td>" + (Number(item.nte_volume_fraction) * 100).toFixed(2) + "%" +
+      "</td><td>" + (Number(item.robust_fraction_span || 0) * 100).toFixed(2) + " vol%" +
       "</td><td>" + optionalNumeric(item.density_ratio) +
       "</td><td>" + optionalNumeric(item.bulk_modulus_ratio) +
       "</td><td>" + optionalNumeric(item.shear_modulus_ratio) +
@@ -2968,6 +3001,10 @@ async function openZteScreeningCandidate(index) {
   document.querySelector("#zte-target-points").value = document.querySelector("#zte-screen-target-points").value;
   document.querySelector("#zte-tolerance").value = document.querySelector("#zte-screen-tolerance").value;
   document.querySelector("#zte-step").value = document.querySelector("#zte-screen-step").value;
+  document.querySelector("#zte-robust-coverage").value = document.querySelector("#zte-screen-robust-coverage").value;
+  document.querySelector("#zte-robust-step").value = document.querySelector("#zte-screen-robust-step").value;
+  document.querySelector("#zte-formulation-mass").value = document.querySelector("#zte-screen-formulation-mass").value;
+  document.querySelector("#zte-balance-resolution").value = document.querySelector("#zte-screen-balance-resolution").value;
   document.querySelector("#zte-model").dispatchEvent(new Event("change"));
   updateTargetCurveMode("zte");
   setZteMode("manual");
@@ -2990,6 +3027,10 @@ function zteCandidateRequest(candidate) {
     zte_tolerance_ppm_per_k: parameters.zte_tolerance_ppm_per_k,
     model: parameters.model,
     matrix_phase: parameters.matrix_phase,
+    minimum_target_coverage_fraction: parameters.minimum_target_coverage_fraction,
+    robustness_fraction_step: parameters.robustness_fraction_step,
+    formulation_total_mass_g: parameters.formulation_total_mass_g,
+    balance_resolution_g: parameters.balance_resolution_g,
   };
 }
 
@@ -3014,6 +3055,10 @@ function zteCandidateUrl(candidate, request) {
     grat: String(constraints.max_shear_modulus_ratio ?? ""),
     reqdensity: constraints.require_mass_fraction ? "1" : "0",
     reqmech: constraints.require_complete_mechanics ? "1" : "0",
+    robustcoverage: String(constraints.minimum_target_coverage_fraction ?? 0.9),
+    robuststep: String(constraints.robustness_fraction_step ?? 0.005),
+    mass: String(constraints.formulation_total_mass_g ?? 10),
+    balance: String(constraints.balance_resolution_g ?? 0.001),
   });
   return "/zte?" + params.toString();
 }
@@ -3040,6 +3085,10 @@ function applyZteCandidateLocationParameters(params) {
     "#zte-screen-density-ratio": params.get("densityratio"),
     "#zte-screen-bulk-ratio": params.get("krat"),
     "#zte-screen-shear-ratio": params.get("grat"),
+    "#zte-screen-robust-coverage": String(Number(params.get("robustcoverage") ?? 0.9) * 100),
+    "#zte-screen-robust-step": String(Number(params.get("robuststep") ?? 0.005) * 100),
+    "#zte-screen-formulation-mass": params.get("mass") || "10",
+    "#zte-screen-balance-resolution": params.get("balance") || "0.001",
   };
   Object.entries(values).forEach(([selector, value]) => {
     if (value !== null && value !== "") document.querySelector(selector).value = value;
@@ -3135,7 +3184,7 @@ function drawZteCandidateStructure(role, detail) {
 function renderZteCandidateModelTable(design) {
   const modelResults = design.model_results || {};
   return "<div class='zte-candidate-model-table'><table><thead><tr><th>模型</th>" +
-    "<th>NTE体积分数</th><th>NTE质量分数</th><th>目标覆盖率</th><th>最长连续温区</th>" +
+    "<th>NTE体积分数</th><th>NTE质量分数</th><th>稳健窗口</th><th>目标覆盖率</th><th>最长连续温区</th>" +
     "<th>RMS</th><th>最大偏差</th><th>模型假设</th></tr></thead><tbody>" +
     Object.entries(modelResults).map(([modelName, result]) => {
       const massFraction = Number.isFinite(Number(result.nte_mass_fraction))
@@ -3143,6 +3192,7 @@ function renderZteCandidateModelTable(design) {
       return "<tr class='" + (modelName === design.selected_model ? "selected-model" : "") + "'><td>" +
         escapeHtml(zteModelLabel(modelName, result)) + "</td><td>" +
         (Number(result.nte_volume_fraction) * 100).toFixed(2) + "%</td><td>" + massFraction +
+        "</td><td>" + (Number(result.robustness_analysis?.robust_fraction_span || 0) * 100).toFixed(2) + " vol%" +
         "</td><td>" + (Number(result.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%</td><td>" +
         numeric(zteModelLongestSpan(result)) + " K</td><td>" + numeric(result.rms_error_ppm_per_k) +
         "</td><td>" + numeric(result.max_absolute_error_ppm_per_k) + "</td><td>" +
@@ -3226,6 +3276,7 @@ function renderZteCandidateDetail(payload) {
       ["NTE质量分数", Number.isFinite(Number(design.nte_mass_fraction)) ?
         (Number(design.nte_mass_fraction) * 100).toFixed(2) + "%" : "—"],
       ["目标覆盖率", (Number(design.zte_temperature_coverage_fraction) * 100).toFixed(1) + "%"],
+      ["稳健窗口宽度", (Number(design.robustness_analysis?.robust_fraction_span || 0) * 100).toFixed(2) + " vol%"],
       ["RMS", numeric(design.rms_error_ppm_per_k) + " ppm/K"],
       ["最长连续温区", numeric(zteModelLongestSpan(design)) + " K"],
     ]) + "<section class='zte-phase-grid'>" +
@@ -3238,6 +3289,7 @@ function renderZteCandidateDetail(payload) {
     Object.entries(design.model_results || {}).map(([name, result], index) =>
       "<span style='--legend-color:" + COMPARISON_COLORS[index] + "'>" +
       escapeHtml(zteModelLabel(name, result)) + "</span>").join("") + "</div></section>" +
+    zteRobustnessWorkspaceHtml(design, "zte-candidate") +
     "<section class='zte-candidate-model-card'><h3>三种模型定量对照</h3>" +
     renderZteCandidateModelTable(design) +
     "<div class='zte-model-basis-grid'>" + Object.entries(design.model_results || {}).map(([name, result]) =>
@@ -3249,6 +3301,7 @@ function renderZteCandidateDetail(payload) {
   drawZteCandidateStructure("pte", pteDetail);
   drawZteCandidateStructure("nte", nteDetail);
   drawZteCandidateCurves(payload);
+  drawZteRobustnessWorkspace(design, "zte-candidate");
   ["#zte-candidate-export-csv", "#zte-candidate-export-json", "#zte-candidate-export-pdf"]
     .forEach(selector => { document.querySelector(selector).disabled = false; });
 }
@@ -3535,6 +3588,20 @@ function zteMassFraction(result, fraction) {
     (fraction * nteDensity + (1 - fraction) * pteDensity);
 }
 
+function zteMassDecimalPlaces(resolution) {
+  const step = Math.abs(Number(resolution));
+  if (!(step > 0)) return 3;
+  for (let digits = 0; digits <= 6; digits += 1) {
+    const scaled = step * (10 ** digits);
+    if (Math.abs(scaled - Math.round(scaled)) < 1e-8) return digits;
+  }
+  return 6;
+}
+
+function zteMassText(value, resolution) {
+  return Number(value).toFixed(zteMassDecimalPlaces(resolution));
+}
+
 function zteModelComparison(result) {
   const rows = Object.values(result.model_results || {}).map(model => {
     const mass = Number.isFinite(Number(model.nte_mass_fraction))
@@ -3602,6 +3669,228 @@ function zteIntervalMetrics(temperatures, errors, tolerance) {
   return {coverage: coveredSpan / totalSpan, ranges};
 }
 
+function zteRobustRangeText(analysis) {
+  if (!Number.isFinite(Number(analysis?.robust_fraction_min)) ||
+      !Number.isFinite(Number(analysis?.robust_fraction_max))) return "未找到满足阈值的配比窗口";
+  return (Number(analysis.robust_fraction_min) * 100).toFixed(2) + "%–" +
+    (Number(analysis.robust_fraction_max) * 100).toFixed(2) + "% NTE";
+}
+
+function zteFormulationForFraction(result, fraction) {
+  const pteDensity = Number(result.pte_material?.density_g_cm3);
+  const nteDensity = Number(result.nte_material?.density_g_cm3);
+  if (!(pteDensity > 0) || !(nteDensity > 0)) return {available: false};
+  const totalMass = Number(result.formulation_total_mass_g || 10);
+  const resolution = Number(result.balance_resolution_g || .001);
+  const massFraction = zteMassFraction(result, fraction);
+  if (massFraction === null) return {available: false};
+  const idealNteMass = totalMass * massFraction;
+  const idealPteMass = totalMass - idealNteMass;
+  const roundedNteMass = Math.round(idealNteMass / resolution) * resolution;
+  const roundedPteMass = Math.round(idealPteMass / resolution) * resolution;
+  const nteVolume = roundedNteMass / nteDensity;
+  const pteVolume = roundedPteMass / pteDensity;
+  const actualFraction = nteVolume / Math.max(nteVolume + pteVolume, Number.EPSILON);
+  const optimizationTemperatures = (result.optimization_temperatures_k || []).map(Number);
+  const optimizationPte = (result.optimization_pte_alpha_ppm_per_k || []).map(Number);
+  const optimizationNte = (result.optimization_nte_alpha_ppm_per_k || []).map(Number);
+  const targets = (result.target_alpha_curve_ppm_per_k || []).map(Number);
+  let roundedRms = null;
+  let roundedMaxError = null;
+  let roundedCoverage = null;
+  if (optimizationTemperatures.length &&
+      optimizationPte.length === optimizationTemperatures.length &&
+      optimizationNte.length === optimizationTemperatures.length) {
+    const roundedMixed = zteMixedCurve(result, actualFraction, optimizationPte, optimizationNte);
+    const errors = roundedMixed.map((value, index) => value - (
+      Number.isFinite(targets[index]) ? targets[index] : Number(result.target_alpha_ppm_per_k || 0)
+    ));
+    roundedRms = Math.sqrt(errors.reduce((total, error) => total + error * error, 0) / errors.length);
+    roundedMaxError = Math.max(...errors.map(Math.abs));
+    roundedCoverage = zteIntervalMetrics(
+      optimizationTemperatures,
+      errors,
+      Number(result.zte_tolerance_ppm_per_k || 5),
+    ).coverage;
+  }
+  return {
+    available: true,
+    totalMass,
+    resolution,
+    massFraction,
+    idealPteMass,
+    idealNteMass,
+    roundedPteMass,
+    roundedNteMass,
+    actualFraction,
+    fractionError: actualFraction - fraction,
+    roundedRms,
+    roundedMaxError,
+    roundedCoverage,
+  };
+}
+
+function zteRobustnessWorkspaceHtml(result, prefix) {
+  const analysis = result.robustness_analysis || {};
+  const span = Number(analysis.robust_fraction_span || 0) * 100;
+  const threshold = Number(analysis.minimum_target_coverage_fraction ?? .9) * 100;
+  return "<section class='zte-robustness-workspace'>" + metricCards([
+    ["稳健配比窗口", zteRobustRangeText(analysis)],
+    ["稳健窗口宽度", span.toFixed(2) + " vol%"],
+    ["允许向低浓度偏差", (Number(analysis.lower_fraction_margin || 0) * 100).toFixed(2) + " vol%"],
+    ["允许向高浓度偏差", (Number(analysis.upper_fraction_margin || 0) * 100).toFixed(2) + " vol%"],
+    ["鲁棒判据", "目标覆盖率 ≥ " + threshold.toFixed(1) + "%"],
+  ]) + "<div class='zte-robustness-grid'>" +
+    "<article class='zte-robustness-card'><h4>配比鲁棒性曲线</h4>" +
+    "<p class='curve-note'>同时显示RMS与目标覆盖率，浅绿色区域为满足鲁棒判据的浓度范围。</p>" +
+    "<canvas id='" + prefix + "-robustness-chart' width='900' height='430'></canvas></article>" +
+    "<article class='zte-robustness-card'><h4>温度—浓度二维偏差地图</h4>" +
+    "<p class='curve-note'>绿色接近目标曲线，红色表示正偏差，蓝色表示负偏差。</p>" +
+    "<canvas id='" + prefix + "-heatmap' width='900' height='430'></canvas></article></div>" +
+    "<div id='" + prefix + "-formulation' class='zte-formulation-card'></div></section>";
+}
+
+function renderZteFormulation(result, fraction, prefix) {
+  const container = document.querySelector("#" + prefix + "-formulation");
+  if (!container) return;
+  const formulation = zteFormulationForFraction(result, fraction);
+  if (!formulation.available) {
+    container.innerHTML = "<h4>实验称量配方</h4><p>两相密度不完整，暂时无法从体积分数换算为称量质量。</p>";
+    return;
+  }
+  const roundedPerformance = formulation.roundedRms === null
+    ? "<tr><th>取整后性能</th><td>缺少优化温区曲线，暂无法复算</td></tr>"
+    : "<tr><th>取整后 RMS / 最大偏差</th><td>" + numeric(formulation.roundedRms) +
+      " / " + numeric(formulation.roundedMaxError) + " ppm/K</td></tr>" +
+      "<tr><th>取整后目标覆盖率</th><td>" +
+      (formulation.roundedCoverage * 100).toFixed(1) + "%</td></tr>";
+  container.innerHTML = "<h4>实验称量配方</h4><table class='zte-formulation-table'><tbody>" +
+    "<tr><th>目标总质量</th><td>" + zteMassText(formulation.totalMass, formulation.resolution) + " g</td></tr>" +
+    "<tr><th>理想PTE / NTE质量</th><td>" +
+    zteMassText(formulation.idealPteMass, formulation.resolution) + " g / " +
+    zteMassText(formulation.idealNteMass, formulation.resolution) + " g</td></tr>" +
+    "<tr><th>按天平分度取整</th><td>" +
+    zteMassText(formulation.roundedPteMass, formulation.resolution) + " g PTE + " +
+    zteMassText(formulation.roundedNteMass, formulation.resolution) + " g NTE</td></tr>" +
+    "<tr><th>取整后的NTE体积分数</th><td>" + (formulation.actualFraction * 100).toFixed(4) + "%</td></tr>" +
+    "<tr><th>体积分数取整误差</th><td>" + (formulation.fractionError * 100).toFixed(4) + " vol%</td></tr>" +
+    roundedPerformance +
+    "<tr><th>天平分度值</th><td>" + zteMassText(formulation.resolution, formulation.resolution) + " g</td></tr>" +
+    "</tbody></table><p class='curve-note'>配方仅为理想两相质量换算，不包含粘结剂、挥发损失和烧结收缩。</p>";
+}
+
+function drawZteRobustnessChart(result, prefix) {
+  const canvas = document.querySelector("#" + prefix + "-robustness-chart");
+  const samples = result.robustness_analysis?.samples || [];
+  if (!canvas || samples.length < 2) return;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => drawZteRobustnessChart(result, prefix);
+  const margin = {left: 58, right: 50, top: 24, bottom: 44};
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const maxRms = Math.max(...samples.map(sample => Number(sample.rms_error_ppm_per_k) || 0), 1);
+  const x = fraction => margin.left + fraction * plotWidth;
+  const yRms = value => margin.top + (1 - value / maxRms) * plotHeight;
+  const yCoverage = value => margin.top + (1 - value) * plotHeight;
+  ctx.clearRect(0, 0, width, height);
+  (result.robustness_analysis.acceptable_fraction_ranges || []).forEach(range => {
+    ctx.fillStyle = "rgba(22,131,106,.12)";
+    ctx.fillRect(x(Number(range[0])), margin.top, x(Number(range[1])) - x(Number(range[0])), plotHeight);
+  });
+  ctx.strokeStyle = "#dfe7eb"; ctx.lineWidth = 1;
+  for (let index = 0; index <= 5; index += 1) {
+    const px = margin.left + index / 5 * plotWidth;
+    const py = margin.top + index / 5 * plotHeight;
+    ctx.beginPath(); ctx.moveTo(px, margin.top); ctx.lineTo(px, margin.top + plotHeight); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(margin.left, py); ctx.lineTo(margin.left + plotWidth, py); ctx.stroke();
+  }
+  const drawSeries = (key, yFunction, color) => {
+    ctx.beginPath();
+    samples.forEach((sample, index) => index
+      ? ctx.lineTo(x(Number(sample.nte_volume_fraction)), yFunction(Number(sample[key])))
+      : ctx.moveTo(x(Number(sample.nte_volume_fraction)), yFunction(Number(sample[key]))));
+    ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.stroke();
+  };
+  drawSeries("rms_error_ppm_per_k", yRms, "#d45b42");
+  drawSeries("target_coverage_fraction", yCoverage, "#16836a");
+  const optimal = Number(result.nte_volume_fraction);
+  ctx.strokeStyle = "#263e50"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(x(optimal), margin.top); ctx.lineTo(x(optimal), margin.top + plotHeight); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#546979"; ctx.font = "11px Segoe UI"; ctx.textAlign = "center";
+  for (let index = 0; index <= 5; index += 1) ctx.fillText((index * 20) + "%", margin.left + index / 5 * plotWidth, height - 19);
+  ctx.textAlign = "right";
+  for (let index = 0; index <= 4; index += 1) {
+    const value = maxRms * (1 - index / 4);
+    ctx.fillText(value.toFixed(1), margin.left - 7, margin.top + index / 4 * plotHeight + 4);
+  }
+  ctx.textAlign = "left";
+  for (let index = 0; index <= 4; index += 1) ctx.fillText((100 - index * 25) + "%", width - margin.right + 7, margin.top + index / 4 * plotHeight + 4);
+  ctx.textAlign = "center"; ctx.fillText("NTE体积分数", margin.left + plotWidth / 2, height - 4);
+  ctx.fillStyle = "#d45b42"; ctx.fillText("RMS", margin.left + 25, 14);
+  ctx.fillStyle = "#16836a"; ctx.fillText("目标覆盖率", margin.left + 105, 14);
+}
+
+function drawZteConcentrationHeatmap(result, prefix) {
+  const canvas = document.querySelector("#" + prefix + "-heatmap");
+  if (!canvas) return;
+  const temperatures = (result.optimization_temperatures_k || []).map(Number);
+  const pte = (result.optimization_pte_alpha_ppm_per_k || []).map(Number);
+  const nte = (result.optimization_nte_alpha_ppm_per_k || []).map(Number);
+  const target = (result.target_alpha_curve_ppm_per_k || []).map(Number);
+  if (temperatures.length < 2 || pte.length !== temperatures.length || target.length !== temperatures.length) return;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => drawZteConcentrationHeatmap(result, prefix);
+  const margin = {left: 58, right: 24, top: 24, bottom: 44};
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const rowCount = 101;
+  const tolerance = Number(result.zte_tolerance_ppm_per_k || 5);
+  let maxAbs = tolerance * 3;
+  const errorRows = [];
+  for (let row = 0; row < rowCount; row += 1) {
+    const fraction = row / (rowCount - 1);
+    const mixed = zteMixedCurve(result, fraction, pte, nte);
+    const errors = mixed.map((value, index) => value - target[index]);
+    maxAbs = Math.max(maxAbs, ...errors.map(Math.abs));
+    errorRows.push(errors);
+  }
+  ctx.clearRect(0, 0, width, height);
+  const color = error => {
+    if (Math.abs(error) <= tolerance) {
+      const strength = .2 + .45 * (1 - Math.abs(error) / Math.max(tolerance, Number.EPSILON));
+      return "rgba(22,131,106," + strength.toFixed(3) + ")";
+    }
+    const strength = .18 + .72 * Math.min(1, (Math.abs(error) - tolerance) / Math.max(maxAbs - tolerance, 1));
+    return error > 0 ? "rgba(214,73,58," + strength.toFixed(3) + ")" : "rgba(48,104,184," + strength.toFixed(3) + ")";
+  };
+  const cellWidth = plotWidth / temperatures.length;
+  const cellHeight = plotHeight / rowCount;
+  errorRows.forEach((errors, row) => errors.forEach((error, column) => {
+    ctx.fillStyle = color(error);
+    ctx.fillRect(margin.left + column * cellWidth, margin.top + plotHeight - (row + 1) * cellHeight, cellWidth + .6, cellHeight + .6);
+  }));
+  const optimalY = margin.top + plotHeight * (1 - Number(result.nte_volume_fraction));
+  ctx.strokeStyle = "#172b38"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(margin.left, optimalY); ctx.lineTo(margin.left + plotWidth, optimalY); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = "#9fb2bd"; ctx.strokeRect(margin.left, margin.top, plotWidth, plotHeight);
+  ctx.fillStyle = "#536878"; ctx.font = "11px Segoe UI"; ctx.textAlign = "center";
+  for (let index = 0; index <= 5; index += 1) {
+    const temperature = temperatures[0] + (temperatures[temperatures.length - 1] - temperatures[0]) * index / 5;
+    ctx.fillText(temperature.toFixed(0), margin.left + index / 5 * plotWidth, height - 19);
+  }
+  ctx.textAlign = "right";
+  for (let index = 0; index <= 4; index += 1) ctx.fillText((100 - index * 25) + "%", margin.left - 7, margin.top + index / 4 * plotHeight + 4);
+  ctx.textAlign = "center"; ctx.fillText("温度 (K)", margin.left + plotWidth / 2, height - 4);
+  ctx.save(); ctx.translate(15, margin.top + plotHeight / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("NTE体积分数", 0, 0); ctx.restore();
+}
+
+function drawZteRobustnessWorkspace(result, prefix, fraction = Number(result.nte_volume_fraction)) {
+  drawZteRobustnessChart(result, prefix);
+  drawZteConcentrationHeatmap(result, prefix);
+  renderZteFormulation(result, fraction, prefix);
+}
+
 function renderZteDesign(result) {
   const ntePercent = Number(result.nte_volume_fraction) * 100;
   const ptePercent = 100 - ntePercent;
@@ -3645,7 +3934,8 @@ function renderZteDesign(result) {
     "%' title='当前模型最佳比例 " + ntePercent.toFixed(2) + "%'></span></div>" +
     "<div class='zte-slider-scale'><span>0% NTE</span><strong id='zte-current-fraction'>当前：" +
     ntePercent.toFixed(1) + "% NTE</strong><span>100% NTE</span></div></div>" +
-    "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>";
+    "<canvas id='zte-curve' class='zte-curve' width='1000' height='420'></canvas>" +
+    zteRobustnessWorkspaceHtml(result, "zte-manual");
   const slider = document.querySelector("#zte-fraction-slider");
   const applyFraction = fractionValue => {
     const fraction = Math.min(1, Math.max(0, Number(fractionValue)));
@@ -3679,6 +3969,7 @@ function renderZteDesign(result) {
     document.querySelector("#zte-current-fraction").textContent =
       "当前：" + (fraction * 100).toFixed(1) + "% NTE";
     drawZteCurves({...result, mixed_alpha_ppm_per_k: mixed, nte_volume_fraction: fraction});
+    renderZteFormulation(result, fraction, "zte-manual");
   };
   slider.addEventListener("input", () => applyFraction(Number(slider.value) / 100));
   document.querySelector("#zte-reset-fraction").addEventListener("click", () => {
@@ -3686,6 +3977,7 @@ function renderZteDesign(result) {
     applyFraction(Number(result.nte_volume_fraction));
   });
   drawZteCurves(result);
+  drawZteRobustnessWorkspace(result, "zte-manual");
 }
 
 async function designZteComposite() {
@@ -3702,6 +3994,13 @@ async function designZteComposite() {
     const temperatureMax = Number(document.querySelector("#zte-t-max").value);
     const targetPoints = targetCurvePoints("zte");
     validateTargetCurveCoverage(targetPoints, temperatureMin, temperatureMax);
+    const robustnessParameters = {
+      minimum_target_coverage_fraction: Number(document.querySelector("#zte-robust-coverage").value) / 100,
+      robustness_fraction_step: Number(document.querySelector("#zte-robust-step").value) / 100,
+      formulation_total_mass_g: Number(document.querySelector("#zte-formulation-mass").value),
+      balance_resolution_g: Number(document.querySelector("#zte-balance-resolution").value),
+    };
+    validateRobustnessParameters(robustnessParameters);
     const result = await api("/api/composites/curve-design", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -3716,6 +4015,7 @@ async function designZteComposite() {
         matrix_phase: document.querySelector("#zte-matrix-phase").value,
         temperature_step_k: Number(document.querySelector("#zte-step").value),
         zte_tolerance_ppm_per_k: Number(document.querySelector("#zte-tolerance").value),
+        ...robustnessParameters,
       }),
     });
     renderZteDesign(result);
