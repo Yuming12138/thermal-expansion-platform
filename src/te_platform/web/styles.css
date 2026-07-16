@@ -302,8 +302,9 @@ td button { padding: 4px 7px; font-size: .75rem; }
 .zte-phase-heading small { color: #788995; overflow-wrap: anywhere; }
 .zte-phase-downloads { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .zte-phase-downloads a { padding: 6px 8px; border: 1px solid #c9dce5; border-radius: 6px; color: #1c657a; background: #f4fafb; font-size: .68rem; text-decoration: none; }
-.zte-phase-structure { width: 100%; height: 330px; overflow: hidden; border: 1px solid #e1e7ec; border-radius: 8px; background: #fff; cursor: grab; }
+.zte-phase-structure { position: relative; width: 100%; height: 330px; overflow: hidden; border: 1px solid #e1e7ec; border-radius: 8px; background: #fff; cursor: grab; }
 .zte-phase-structure:active { cursor: grabbing; }
+.zte-phase-structure canvas { outline: none; }
 .zte-phase-card .prediction-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 11px; }
 .zte-candidate-curve-card h3, .zte-candidate-model-card h3 { margin: 0; color: #294b5f; }
 .zte-candidate-curve-card canvas { width: 100%; height: 480px; display: block; margin-top: 12px; border: 1px solid #e3eaf0; border-radius: 8px; background: #fcfdfe; }

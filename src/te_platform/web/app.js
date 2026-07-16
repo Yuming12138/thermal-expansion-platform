@@ -375,11 +375,15 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     materialStructureViewer?.render?.();
     materialStructureAxisViewer?.resize?.();
     materialStructureAxisViewer?.render?.();
-    zteCandidateStructureViewers.forEach(viewer => {
-      viewer.resize?.();
-      viewer.render?.();
-    });
+    resizeZteCandidateStructures();
     if (selectedPage === "landscape") focusLandscapeContext();
+  });
+}
+
+function resizeZteCandidateStructures() {
+  zteCandidateStructureViewers.forEach(viewer => {
+    viewer.resize?.();
+    viewer.render?.();
   });
 }
 
@@ -3300,6 +3304,7 @@ function renderZteCandidateDetail(payload) {
   zteCandidateStructureViewers = [];
   drawZteCandidateStructure("pte", pteDetail);
   drawZteCandidateStructure("nte", nteDetail);
+  window.requestAnimationFrame(resizeZteCandidateStructures);
   drawZteCandidateCurves(payload);
   drawZteRobustnessWorkspace(design, "zte-candidate");
   ["#zte-candidate-export-csv", "#zte-candidate-export-json", "#zte-candidate-export-pdf"]
@@ -4503,6 +4508,11 @@ window.addEventListener("resize", () => {
   window.clearTimeout(canvasResizeTimer);
   canvasResizeTimer = window.setTimeout(() => {
     document.querySelectorAll("canvas").forEach(canvas => canvas.teRedraw?.());
+    materialStructureViewer?.resize?.();
+    materialStructureViewer?.render?.();
+    materialStructureAxisViewer?.resize?.();
+    materialStructureAxisViewer?.render?.();
+    resizeZteCandidateStructures();
   }, 120);
 });
 
