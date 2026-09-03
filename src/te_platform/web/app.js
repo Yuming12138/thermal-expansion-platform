@@ -713,11 +713,18 @@ function renderMaterialProvenance(data) {
   const release = data.dataset_release || {};
   const notes = data.method_notes || {};
   const curve = data.precision_thermal_expansion;
+  const anisotropic = data.anisotropic_thermal_expansion || {};
   const checksum = release.source_sha256 ? String(release.source_sha256).slice(0, 16) + "…" : "未记录";
   const curveSource = curve
     ? escapeHtml(displaySourceName(curve.source_path)) + " · " +
       escapeHtml(curve.model_name || "模型未记录")
     : "暂无已关联的精确QHA曲线";
+  const anisotropicSource = Object.keys(anisotropic).length
+    ? Object.values(anisotropic)
+      .map(item => String(item.method || "tensor-aware"))
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join("；")
+    : "暂无各向异性曲线";
   return "<section class='provenance-card'><h3>数据来源与方法</h3><dl>" +
     "<dt>数据版本</dt><dd>" + escapeHtml(release.title || release.slug || "未记录") +
     " · v" + escapeHtml(release.version || "—") + "</dd>" +
@@ -726,7 +733,8 @@ function renderMaterialProvenance(data) {
     "<dt>剪切模量 G</dt><dd>" + escapeHtml(notes.G_GPa || "目录字段") + "</dd>" +
     "<dt>键合模量 Ẽ</dt><dd>" + escapeHtml(notes.E_tilde_GPa || "按论文定义计算") + "</dd>" +
     "<dt>目录 CTE</dt><dd>" + escapeHtml(notes.CTE_ppm || "目录筛选字段") + "</dd>" +
-    "<dt>QHA 曲线</dt><dd>" + curveSource + "</dd></dl></section>";
+    "<dt>legacy 体积曲线</dt><dd>" + curveSource + "</dd>" +
+    "<dt>各向异性曲线</dt><dd>" + escapeHtml(anisotropicSource) + "</dd></dl></section>";
 }
 
 function renderMaterialDownloads(data) {
@@ -734,11 +742,19 @@ function renderMaterialDownloads(data) {
   const hasPoscar = data.structures?.some(item =>
     String(item.format || "").toUpperCase() === "POSCAR" && item.content
   );
+  const hasElasticTensor = data.structures?.some(item =>
+    String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
+  );
   const hasCurve = Boolean(data.precision_thermal_expansion?.points?.length >= 2);
+  const anisotropic = data.anisotropic_thermal_expansion || {};
   const links = [];
   if (hasPoscar) {
     links.push("<a href='/api/materials/" + encodedKey +
       "/download/POSCAR' download>下载 POSCAR</a>");
+  }
+  if (hasElasticTensor) {
+    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
+      "/download/ELASTIC_TENSOR' download>下载完整弹性张量</a>");
   }
   if (hasCurve) {
     links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
@@ -746,6 +762,11 @@ function renderMaterialDownloads(data) {
     links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
       "/download/thermal_expansion.pdf' download>下载曲线 PDF</a>");
   }
+  ["cartesian", "directional"].forEach(kind => {
+    if (!anisotropic[kind]?.points?.length) return;
+    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
+      "/download/thermal_expansion_" + kind + ".dat' download>下载 " + kind + " 曲线</a>");
+  });
   return links.length
     ? "<div class='material-download-actions'>" + links.join("") + "</div>"
     : "";
@@ -773,7 +794,8 @@ async function loadDetail(key) {
     "<p class='muted'>结构：" + escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
     "</dl>" + renderMaterialProvenance(data) +
     "<div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
-    renderPrecisionThermalExpansion(data.precision_thermal_expansion) + "</div>" +
+    renderPrecisionThermalExpansion(data.precision_thermal_expansion) +
+    renderAnisotropicThermalExpansion(data.anisotropic_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
     escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
   const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
@@ -781,6 +803,7 @@ async function loadDetail(key) {
   updateComparisonButtons();
   drawMaterialStructure(data.material, data.structures?.[0], data.structure_view);
   drawPrecisionThermalExpansion(data.precision_thermal_expansion);
+  drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
   selectLandscapeMaterial(data);
 }
 
@@ -1636,7 +1659,7 @@ function selectLandscapeMaterial(data) {
 
 function renderPrecisionThermalExpansion(result) {
   if (!result || !result.points || result.points.length < 2) {
-    return "<section class='thermal-panel'><div class='thermal-heading'><h3>精确 QHA 热膨胀曲线</h3>" +
+    return "<section class='thermal-panel'><div class='thermal-heading'><h3>legacy 体积热膨胀曲线</h3>" +
       "<p class='curve-note'>温度 T 与体热膨胀系数 α(T)</p></div>" +
       "<div class='thermal-empty'><p class='muted'>暂无已关联的精确 QHA 热膨胀曲线。</p>" +
       "<span>可通过 QHA 计算生成 α(T) 数据后在此对照晶体结构。</span></div></section>";
@@ -1644,10 +1667,124 @@ function renderPrecisionThermalExpansion(result) {
   const warnings = Array.isArray(result.quality_warnings) && result.quality_warnings.length
     ? "质量提示：" + result.quality_warnings.join("；")
     : "该曲线来自已关联的精确 QHA 任务。";
-  return "<section class='thermal-panel'><div class='thermal-heading'><h3>精确 QHA 热膨胀曲线</h3>" +
-    "<p class='curve-note'>温度 T 与体热膨胀系数 α(T)</p></div>" +
+  const method = String(result.method || result.model_name || "QHA");
+  const title = method.toUpperCase().includes("AGV")
+    ? "legacy 体积热膨胀曲线（AGV2）"
+    : "legacy 体积热膨胀曲线（QHA）";
+  return "<section class='thermal-panel'><div class='thermal-heading'><h3>" + title + "</h3>" +
+    "<p class='curve-note'>温度 T 与体热膨胀系数 α<sub>V</sub>(T)</p></div>" +
     "<canvas id='thermal-curve' class='thermal-curve' width='720' height='440'></canvas>" +
     "<p class='curve-note'>任务 " + escapeHtml(result.job_id) + " · " + escapeHtml(warnings) + "</p></section>";
+}
+
+function renderAnisotropicThermalExpansion(curves) {
+  if (!curves || (!curves.cartesian && !curves.directional)) {
+    return "<section class='thermal-panel'><div class='thermal-heading'><h3>各向异性热膨胀曲线</h3>" +
+      "<p class='curve-note'>Cartesian 张量与晶轴 directional 表示</p></div>" +
+      "<div class='thermal-empty'><p class='muted'>暂无已关联的各向异性曲线。</p></div></section>";
+  }
+  const methods = [curves.cartesian, curves.directional]
+    .filter(Boolean)
+    .map(item => item.method || "AGV2")
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join("；");
+  return "<section class='thermal-panel anisotropic-thermal-panel'><div class='thermal-heading'><h3>" +
+    "各向异性热膨胀曲线</h3><p class='curve-note'>" + escapeHtml(methods) +
+    " · 分量单位 ppm/K · α<sub>V</sub> 为体积曲线</p></div>" +
+    "<canvas id='anisotropic-thermal-curve' class='thermal-curve' width='720' height='440'></canvas>" +
+    "<p class='curve-note'>Cartesian 显示 α<sub>xx</sub>、α<sub>yy</sub>、α<sub>zz</sub> 与 α<sub>V</sub>；" +
+    "directional 文件保留 α<sub>a</sub>、α<sub>b</sub>、α<sub>c</sub> 和 F<sub>ani</sub>。</p></section>";
+}
+
+function drawAnisotropicThermalExpansion(curves) {
+  if (!curves || (!curves.cartesian && !curves.directional)) return;
+  const canvas = document.querySelector("#anisotropic-thermal-curve");
+  if (!canvas) return;
+  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
+  canvas.teRedraw = () => drawAnisotropicThermalExpansion(curves);
+  const source = curves.cartesian || curves.directional;
+  const points = (source.points || [])
+    .filter(point => Number.isFinite(Number(point.T_K)))
+    .map(point => Object.fromEntries(Object.entries(point).map(([key, value]) => [key, Number(value)])))
+    .filter(point => Number.isFinite(point.T_K));
+  if (points.length < 2) return;
+  const candidateKeys = curves.cartesian
+    ? ["alpha_xx", "alpha_yy", "alpha_zz", "alpha_volume"]
+    : ["alpha_a", "alpha_b", "alpha_c", "alpha_volume"];
+  const series = candidateKeys
+    .filter(key => points.some(point => Number.isFinite(point[key])))
+    .map((key, index) => ({
+      key,
+      color: ["#1d6b83", "#c45b32", "#6e8f3f", "#8a5aa8"][index],
+    }));
+  const values = points.flatMap(point => series
+    .map(item => point[item.key])
+    .filter(value => Number.isFinite(value)));
+  if (!series.length || values.length < 2) return;
+  const margin = {left: 58, right: 22, top: 34, bottom: 46};
+  const xMin = Math.min(...points.map(point => point.T_K));
+  const xMax = Math.max(...points.map(point => point.T_K));
+  const yMin = Math.min(...values, 0);
+  const yMax = Math.max(...values, 0);
+  const xSpan = Math.max(1, xMax - xMin);
+  const ySpan = Math.max(1, yMax - yMin);
+  const x = value => margin.left + (value - xMin) / xSpan * (width - margin.left - margin.right);
+  const y = value => height - margin.bottom - (value - yMin) / ySpan * (height - margin.top - margin.bottom);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#b9c9d7";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, height - margin.bottom);
+  ctx.lineTo(width - margin.right, height - margin.bottom);
+  ctx.stroke();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#d8e1ea";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, y(0));
+  ctx.lineTo(width - margin.right, y(0));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  series.forEach(item => {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = item.key === "alpha_volume" ? 2.2 : 1.7;
+    ctx.beginPath();
+    let started = false;
+    points.forEach(point => {
+      if (!Number.isFinite(point[item.key])) return;
+      if (started) ctx.lineTo(x(point.T_K), y(point[item.key]));
+      else { ctx.moveTo(x(point.T_K), y(point[item.key])); started = true; }
+    });
+    ctx.stroke();
+  });
+  ctx.fillStyle = "#516476";
+  ctx.font = "12px Segoe UI";
+  ctx.textAlign = "center";
+  for (let index = 0; index <= 4; index++) {
+    const xValue = xMin + index / 4 * xSpan;
+    ctx.fillText(xValue.toFixed(0), x(xValue), height - 24);
+  }
+  ctx.textAlign = "right";
+  for (let index = 0; index <= 4; index++) {
+    const yValue = yMin + index / 4 * ySpan;
+    ctx.fillText(yValue.toFixed(1), margin.left - 8, y(yValue) + 4);
+  }
+  ctx.textAlign = "left";
+  let legendX = margin.left;
+  series.forEach(item => {
+    ctx.fillStyle = item.color;
+    ctx.fillRect(legendX, 16, 18, 3);
+    ctx.fillStyle = "#40586a";
+    ctx.fillText(item.key, legendX + 23, 20);
+    legendX += 92;
+  });
+  ctx.textAlign = "center";
+  ctx.fillText("T (K)", margin.left + (width - margin.left - margin.right) / 2, height - 7);
+  ctx.save();
+  ctx.translate(14, margin.top + (height - margin.top - margin.bottom) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("α (ppm/K)", 0, 0);
+  ctx.restore();
 }
 
 function drawPrecisionThermalExpansion(result, canvasSelector = "#thermal-curve") {

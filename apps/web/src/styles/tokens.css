@@ -1,0 +1,148 @@
+/*
+ * 设计 tokens · 三层契约（ui-craft tokens.md）
+ *
+ * 第 1 层 primitives：从旧版 src/te_platform/web/styles.css 逐值提炼，只增不改。
+ * 第 2 层 semantic：组件只允许消费这一层。
+ * 第 3 层 component：个别组件的派生变量。
+ *
+ * 约束来源：便携版必须离线可用 → 系统字体栈，不引入外部字体与 CDN。
+ * 若与旧版视觉有出入，以旧版为准并回改此文件，不要在组件里写裸值。
+ */
+
+:root {
+  /* ---------- 1. 原始值 ---------- */
+
+  /* 品牌色系：石油蓝绿（主 accent）+ 深海军蓝（页头）+ 青绿（ZTE 语义） */
+  --tp-navy-900: #102b46;
+  --tp-navy-800: #12324f;
+  --tp-navy-700: #1c536d;
+  --tp-teal-700: #155166;
+  --tp-teal-600: #1d6b83;
+  --tp-teal-500: #1d91a6;
+  --tp-teal-450: #16836a;
+  --tp-teal-100: #d8eef1;
+  --tp-teal-50: #edf6f8;
+
+  /* 中性色：冷蓝灰 */
+  --tp-ink-900: #152238;
+  --tp-ink-700: #29455a;
+  --tp-ink-600: #40586c;
+  --tp-ink-500: #52687a;
+  --tp-ink-400: #607789;
+  --tp-ink-300: #7e8c99;
+  --tp-ink-200: #9aa8b4;
+
+  --tp-surface-page: #f5f8fc;
+  --tp-surface-panel: #ffffff;
+  --tp-surface-inset: #f5f8fb;
+  --tp-surface-subtle: #f7fafc;
+
+  --tp-border-faint: #ebf0f5;
+  --tp-border-default: #dbe5ef;
+  --tp-border-strong: #bfd0df;
+
+  /* 语义色（NTE/PTE 判别是平台核心语义，成对保留） */
+  --tp-nte-fg: #255d96;
+  --tp-nte-bg: #dceafb;
+  --tp-pte-fg: #a43e35;
+  --tp-pte-bg: #fde3df;
+  --tp-danger-fg: #9a443c;
+  --tp-danger-bg: #f9ebe9;
+  --tp-warning-fg: #725129;
+  --tp-warning-bg: #fff8ed;
+  --tp-warning-accent: #d98b31;
+  --tp-success-fg: #14735b;
+  --tp-success-bg: #edf8f4;
+  --tp-focus-ring: #8a5ab7;
+  --tp-compare-accent: #d98624;
+
+  /* 曲线配色：PTE/NTE 两相与多曲线序列（沿用旧版 COMPARISON_COLORS） */
+  --tp-line-pte: #e64b35;
+  --tp-line-nte: #3569b8;
+
+  /* 字体 */
+  --tp-font-sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --tp-font-mono: Consolas, "SFMono-Regular", "JetBrains Mono", monospace;
+  --tp-font-formula: Cambria, "Times New Roman", serif;
+
+  /* ---------- 2. 语义层 ---------- */
+
+  --color-bg: var(--tp-surface-page);
+  --color-surface: var(--tp-surface-panel);
+  --color-surface-inset: var(--tp-surface-inset);
+  --color-surface-subtle: var(--tp-surface-subtle);
+
+  --color-ink: var(--tp-ink-900);
+  --color-ink-secondary: var(--tp-ink-500);
+  --color-ink-muted: var(--tp-ink-300);
+  --color-ink-inverted: #ffffff;
+
+  --color-border: var(--tp-border-default);
+  --color-border-strong: var(--tp-border-strong);
+  --color-border-faint: var(--tp-border-faint);
+
+  --color-accent: var(--tp-teal-600);
+  --color-accent-strong: var(--tp-teal-700);
+  --color-accent-vivid: var(--tp-teal-500);
+  --color-accent-soft: var(--tp-teal-50);
+  --color-accent-tint: var(--tp-teal-100);
+
+  --color-nte-fg: var(--tp-nte-fg);
+  --color-nte-bg: var(--tp-nte-bg);
+  --color-pte-fg: var(--tp-pte-fg);
+  --color-pte-bg: var(--tp-pte-bg);
+  --color-danger-fg: var(--tp-danger-fg);
+  --color-danger-bg: var(--tp-danger-bg);
+  --color-warning-fg: var(--tp-warning-fg);
+  --color-warning-bg: var(--tp-warning-bg);
+  --color-warning-accent: var(--tp-warning-accent);
+  --color-success-fg: var(--tp-success-fg);
+  --color-success-bg: var(--tp-success-bg);
+  --color-focus-ring: var(--tp-focus-ring);
+  --color-compare-accent: var(--tp-compare-accent);
+
+  /* 页头是品牌表达位：深海军 → 石油蓝绿渐变（继承旧版，非装饰性渐变） */
+  --color-header-from: var(--tp-navy-900);
+  --color-header-to: var(--tp-navy-700);
+
+  --font-body: var(--tp-font-sans);
+  --font-data: var(--tp-font-mono);
+  --font-formula: var(--tp-font-formula);
+
+  /* 间距：4px 基准 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* 圆角分层（刻意不统一：控件 7 / 小卡 9 / 面板 12 / 胶囊 999） */
+  --radius-control: 7px;
+  --radius-card: 9px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
+
+  /* 阴影：环境光 + 直射光双层 */
+  --shadow-panel: 0 1px 2px rgba(23, 49, 78, 0.05), 0 5px 16px rgba(23, 49, 78, 0.06);
+  --shadow-raised: 0 2px 4px rgba(23, 49, 78, 0.06), 0 9px 28px rgba(27, 55, 75, 0.14);
+  --shadow-header: 0 3px 12px rgba(23, 49, 78, 0.06);
+
+  --content-max: 1500px;
+
+  /* ---------- 3. 组件层 ---------- */
+
+  --nav-height: 46px;
+  --transition-quick: 130ms ease-out;
+  --transition-page: 180ms ease-out;
+}
+
+/* ---------- 降级与偏好 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-quick: 0ms;
+    --transition-page: 0ms;
+  }
+}

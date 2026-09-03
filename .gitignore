@@ -39,6 +39,11 @@ FORCE_CONSTANTS
 # Frontend build outputs
 apps/web/node_modules/
 apps/web/dist/
+src/te_platform/web/dist/
+*.tsbuildinfo
+
+# Local WorkBuddy assistant state (session memory, not part of the codebase)
+.workbuddy/
 
 # Generated cross-platform portable release archives
 portable-release/

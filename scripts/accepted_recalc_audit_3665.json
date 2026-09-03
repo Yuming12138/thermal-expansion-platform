@@ -1,0 +1,12 @@
+{
+  "mp-1040871": {
+    "status": "NTE_100K",
+    "path": "D:\\11.playground\\htcompute-platform\\campaigns\\priority_color_audit_recalc_20260827\\materials\\mp-1040871\\agv2_priority_20260827\\thermal_expansion_cartesian.dat",
+    "source": "priority_color_audit_recalc_20260827"
+  },
+  "mp-1524446": {
+    "status": "NTE_100K",
+    "path": "D:\\11.playground\\htcompute-platform\\campaigns\\priority_color_audit_recalc_20260827\\materials\\mp-1524446\\agv2_priority_20260827\\thermal_expansion_cartesian.dat",
+    "source": "priority_color_audit_recalc_20260827"
+  }
+}

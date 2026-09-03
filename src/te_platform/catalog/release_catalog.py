@@ -64,6 +64,7 @@ def _assert_no_absolute_paths(connection: sqlite3.Connection) -> None:
         ("calculation_jobs", "result_json"),
         ("calculation_jobs", "error_message"),
         ("precision_thermal_expansion_curves", "source_path"),
+        ("anisotropic_thermal_expansion_curves", "source_path"),
     ]
     for table, column in candidates:
         rows = connection.execute(f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL")

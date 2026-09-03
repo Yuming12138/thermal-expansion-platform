@@ -103,6 +103,34 @@ def _attachment_headers(filename: str) -> dict[str, str]:
     }
 
 
+def _anisotropic_curve_download_text(
+    material_key: str,
+    release: dict[str, object],
+    curve: dict[str, object],
+) -> str:
+    """Serialize one published tensor-aware curve without exposing local paths."""
+    columns = [str(item) for item in curve.get("columns", [])]
+    points = curve.get("points") or []
+    kind = str(curve.get("curve_kind", "curve"))
+    lines = [
+        f"# material_key: {material_key}",
+        f"# dataset_release: {release.get('slug', '')} version={release.get('version', '')}",
+        f"# curve_kind: {kind}",
+        f"# method: {curve.get('method', '')}",
+        "# units: " + " ".join(
+            f"{column}={curve.get('column_units', {}).get(column, curve.get('unit', ''))}"
+            for column in columns
+        ),
+        "# columns: " + " ".join(columns),
+    ]
+    for point in points:
+        try:
+            lines.append(" ".join(f"{float(point[column]):.10e}" for column in columns))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return "\n".join(lines) + "\n"
+
+
 class SBRRequest(BaseModel):
     shear_modulus_gpa: float = Field(ge=0)
     bonding_modulus_gpa: float = Field(gt=0)
@@ -587,6 +615,32 @@ def create_app(
             headers=_attachment_headers(filename),
         )
 
+    @app.get("/api/materials/{material_key}/download/ELASTIC_TENSOR")
+    def material_elastic_tensor_download(material_key: str) -> Response:
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        structure = next(
+            (
+                item
+                for item in detail["structures"]
+                if str(item.get("format", "")).upper() == "ELASTIC_TENSOR" and item.get("content")
+            ),
+            None,
+        )
+        if structure is None:
+            raise HTTPException(status_code=404, detail="Material has no stored ELASTIC_TENSOR")
+        content = str(structure["content"])
+        if not content.endswith("\n"):
+            content += "\n"
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(_download_filename(material_key, "ELASTIC_TENSOR")),
+        )
+
     @app.get("/api/materials/{material_key}/download/thermal_expansion.dat")
     def material_thermal_expansion_download(material_key: str) -> Response:
         ensure_catalog_database(catalog_db)
@@ -611,6 +665,37 @@ def create_app(
         filename = _download_filename(material_key, "thermal_expansion.dat")
         return Response(
             content="\n".join(lines) + "\n",
+            media_type="text/plain; charset=utf-8",
+            headers=_attachment_headers(filename),
+        )
+
+    @app.get("/api/materials/{material_key}/download/thermal_expansion_{curve_kind}.dat")
+    def material_anisotropic_thermal_expansion_download(
+        material_key: str,
+        curve_kind: str,
+    ) -> Response:
+        if curve_kind not in {"cartesian", "directional"}:
+            raise HTTPException(status_code=404, detail="Unknown anisotropic curve kind")
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        curves = detail.get("anisotropic_thermal_expansion") or {}
+        curve = curves.get(curve_kind)
+        if not curve:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Material has no stored {curve_kind} thermal-expansion curve",
+            )
+        release = detail.get("dataset_release") or {}
+        content = _anisotropic_curve_download_text(material_key, release, curve)
+        filename = _download_filename(
+            material_key,
+            f"thermal_expansion_{curve_kind}.dat",
+        )
+        return Response(
+            content=content,
             media_type="text/plain; charset=utf-8",
             headers=_attachment_headers(filename),
         )

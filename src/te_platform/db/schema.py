@@ -7,7 +7,7 @@ from typing import Iterator
 from urllib.parse import quote
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -114,6 +114,37 @@ CREATE TABLE IF NOT EXISTS precision_thermal_expansion_curves (
     parsed_at TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES calculation_jobs(id) ON DELETE CASCADE
 );
+
+-- Full tensor-aware thermal-expansion exports are kept separately from the
+-- historical scalar QHA table above.  ``points_json`` contains one object per
+-- temperature and preserves every column in the source Cartesian or
+-- directional file.  The release/material key makes the table immutable and
+-- prevents a later workspace job from shadowing a published curve.
+CREATE TABLE IF NOT EXISTS anisotropic_thermal_expansion_curves (
+    dataset_release_id INTEGER NOT NULL,
+    material_id INTEGER NOT NULL,
+    curve_kind TEXT NOT NULL,
+    points_json TEXT NOT NULL,
+    columns_json TEXT NOT NULL,
+    column_units_json TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    method TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    temperature_min_k REAL NOT NULL,
+    temperature_max_k REAL NOT NULL,
+    point_count INTEGER NOT NULL,
+    parsed_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_release_id, material_id, curve_kind),
+    FOREIGN KEY (dataset_release_id) REFERENCES dataset_releases(id) ON DELETE CASCADE,
+    FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE,
+    CHECK (curve_kind IN ('cartesian', 'directional')),
+    CHECK (point_count >= 2),
+    CHECK (temperature_max_k >= temperature_min_k)
+);
+
+CREATE INDEX IF NOT EXISTS idx_anisotropic_curves_material
+ON anisotropic_thermal_expansion_curves(dataset_release_id, material_id);
 
 CREATE TABLE IF NOT EXISTS composite_designs (
     id TEXT PRIMARY KEY,

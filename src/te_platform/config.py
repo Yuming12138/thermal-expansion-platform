@@ -12,18 +12,18 @@ DEFAULT_AGENT_BASE_URL = "https://api.cmsg666.xyz/v1"
 DEFAULT_AGENT_MODEL = "gpt-5.6-luna"
 DEFAULT_AGENT_ENV_PATH = PROJECT_ROOT / "var" / "config" / "agent.env"
 DEFAULT_COMPUTE_ENV_PATH = PROJECT_ROOT / "var" / "config" / "compute.env"
-DEFAULT_RELEASE_SLUG = "nte-candidates-6701-v1-1"
+DEFAULT_RELEASE_SLUG = "nte-candidates-3665-agv2-v2"
 DEFAULT_PTE_RELEASE_SLUG = "pte-reference-185-v1"
 DEFAULT_COPYRIGHT_OWNER = "负热膨胀材料研究课题组"
 DEFAULT_DATASET_PATH = (
     PROJECT_ROOT
     / "datasets"
     / "releases"
-    / "nte_candidates_6701_v1_1"
-    / "nte_candidates_6701.json.gz"
+    / "nte_candidates_3665_agv2_v2"
+    / "nte_candidates_3665.json.gz"
 )
 DEFAULT_MANIFEST_PATH = (
-    PROJECT_ROOT / "datasets" / "manifests" / "nte_candidates_6701_v1_1.json"
+    PROJECT_ROOT / "datasets" / "manifests" / "nte_candidates_3665_agv2_v2.json"
 )
 
 

@@ -8,9 +8,10 @@ from fastapi.testclient import TestClient
 
 from te_platform.api.app import create_app
 from te_platform.agent.tools import default_registry
-from te_platform.config import DEFAULT_CATALOG_DATABASE_PATH
 from te_platform.workers.alignn_runner import AlignnWorkerPrediction
 from te_platform.workers.mattersim_runner import MatterSimPrediction
+
+from catalog_fixture import build_catalog_database
 
 
 POSCAR = b"""BaCrSi4O10
@@ -42,13 +43,22 @@ class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_directory = tempfile.TemporaryDirectory()
-        cls.workspace_database = Path(cls.temp_directory.name) / "workspace.sqlite"
+        temp_path = Path(cls.temp_directory.name)
+        # 由仓库内 Git LFS 快照构建临时目录库（全量 6701 条 NTE + 一条合成 QHA 曲线），
+        # 测试不再依赖维护者机器上的 var/releases/catalog-v1.sqlite。
+        cls.import_summary = build_catalog_database(temp_path / "catalog-v1.sqlite")
+        cls.catalog_database = temp_path / "catalog-v1.sqlite"
+        cls.workspace_database = temp_path / "workspace.sqlite"
+        cls.expected_materials = cls.import_summary.unique_materials
+        # 仓库不含 PTE 参考集（185 条来自原始科研目录），因此 fixture 目录库
+        # 的材料总数等于 NTE 计数；真实发布库中该值为 6701 + 185 = 6886。
+        cls.expected_catalog_materials = cls.import_summary.unique_materials
         cls.catalog_hash_before = hashlib.sha256(
-            DEFAULT_CATALOG_DATABASE_PATH.read_bytes()
+            cls.catalog_database.read_bytes()
         ).hexdigest()
         cls.client_context = TestClient(
             create_app(
-                catalog_database=DEFAULT_CATALOG_DATABASE_PATH,
+                catalog_database=cls.catalog_database,
                 workspace_database=cls.workspace_database,
             )
         )
@@ -58,7 +68,7 @@ class ApiTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.client_context.__exit__(None, None, None)
         catalog_hash_after = hashlib.sha256(
-            DEFAULT_CATALOG_DATABASE_PATH.read_bytes()
+            cls.catalog_database.read_bytes()
         ).hexdigest()
         if catalog_hash_after != cls.catalog_hash_before:
             raise AssertionError("API tests modified the immutable catalog database")
@@ -93,12 +103,14 @@ class ApiTests(unittest.TestCase):
         about = self.client.get("/api/about")
         self.assertEqual(about.status_code, 200)
         self.assertEqual(about.json()["software"]["version"], "0.10.0")
-        self.assertEqual(about.json()["datasets"]["catalog_materials"], 6886)
+        self.assertEqual(
+            about.json()["datasets"]["catalog_materials"], self.expected_catalog_materials
+        )
         self.assertIn("160.21766208", about.json()["descriptor"]["bonding_modulus"])
 
         dataset = self.client.get("/api/datasets/current")
         self.assertEqual(dataset.status_code, 200)
-        self.assertEqual(dataset.json()["counts"]["materials"], 6701)
+        self.assertEqual(dataset.json()["counts"]["materials"], self.expected_materials)
 
         fig1d = self.client.get("/static/fig1d-reference.json")
         self.assertEqual(fig1d.status_code, 200)
@@ -191,7 +203,7 @@ class ApiTests(unittest.TestCase):
             [item["material"]["material_key"] for item in comparison.json()["materials"]],
             compare_keys,
         )
-        registry = default_registry(DEFAULT_CATALOG_DATABASE_PATH)
+        registry = default_registry(self.catalog_database)
         self.assertIn("compare_catalog_materials", registry.names())
         agent_comparison = registry.call(
             "compare_catalog_materials",

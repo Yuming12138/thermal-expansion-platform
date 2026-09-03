@@ -86,11 +86,67 @@ def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
     return {
         "job_id": job["id"],
         "model_name": job["model_name"],
+        "method": result.get("thermal_expansion_method") or job["model_name"],
         "updated_at": job["updated_at"],
         "points": points,
         "quality_warnings": result.get("quality_warnings", []),
         "source_path": job["source_path"] or result.get("thermal_expansion_source_path"),
     }
+
+
+def _anisotropic_thermal_expansion(rows: list[Any]) -> dict[str, Any] | None:
+    """Decode the published tensor-aware curves stored in the release catalog.
+
+    ``points_json`` deliberately remains a JSON payload in SQLite so that the
+    release is immutable and portable.  The API exposes a small, stable shape
+    independent of the source file's on-disk location.
+    """
+    curves: dict[str, Any] = {}
+    for row in rows:
+        kind = str(row["curve_kind"])
+        try:
+            points = json.loads(row["points_json"])
+            columns = json.loads(row["columns_json"])
+            column_units = json.loads(row["column_units_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(points, list) or len(points) < 2:
+            continue
+        normalized_points: list[dict[str, float]] = []
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            normalized: dict[str, float] = {}
+            valid = True
+            for key, value in point.items():
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    valid = False
+                    break
+                if not math.isfinite(numeric):
+                    valid = False
+                    break
+                normalized[str(key)] = numeric
+            if valid and normalized:
+                normalized_points.append(normalized)
+        if len(normalized_points) < 2:
+            continue
+        curves[kind] = {
+            "curve_kind": kind,
+            "points": normalized_points,
+            "columns": columns if isinstance(columns, list) else [],
+            "column_units": column_units if isinstance(column_units, dict) else {},
+            "unit": row["unit"],
+            "method": row["method"],
+            "source_path": row["source_path"],
+            "source_sha256": row["source_sha256"],
+            "temperature_min_k": float(row["temperature_min_k"]),
+            "temperature_max_k": float(row["temperature_max_k"]),
+            "point_count": int(row["point_count"]),
+            "parsed_at": row["parsed_at"],
+        }
+    return curves or None
 
 
 def dataset_summary(
@@ -352,6 +408,17 @@ def material_detail(
             """,
             (material["release_id"], material["id"]),
         ).fetchall()
+        anisotropic_curves = connection.execute(
+            """
+            SELECT curve_kind, points_json, columns_json, column_units_json,
+                   unit, method, source_path, source_sha256,
+                   temperature_min_k, temperature_max_k, point_count, parsed_at
+            FROM anisotropic_thermal_expansion_curves
+            WHERE dataset_release_id = ? AND material_id = ?
+            ORDER BY curve_kind
+            """,
+            (material["release_id"], material["id"]),
+        ).fetchall()
         flags = connection.execute(
             """
             SELECT code, severity, message, observed_value_json
@@ -418,13 +485,18 @@ def material_detail(
             ),
             "CTE_ppm": (
                 "目录筛选字段用于材料检索和总体比较；精确温度依赖行为应优先参考"
-                "已关联的QHA thermal_expansion.dat曲线。"
+                "已关联的各向异性 Cartesian/directional 曲线或其 legacy 体积曲线。"
             ),
             "precision_thermal_expansion": (
-                "若存在，曲线来自数据库中已关联的成功QHA任务，并保留任务ID、模型名和质量提示。"
+                "legacy 体积曲线；AGV2 记录来自 Cartesian alpha_volume，QHA 记录来自标量 QHA。"
+            ),
+            "anisotropic_thermal_expansion": (
+                "AGV2 材料保留完整 Cartesian 六分量及晶轴 directional 曲线；"
+                "立方 QHA 材料为 alpha_V/3 的显式各向同性派生表示。"
             ),
         },
         "precision_thermal_expansion": _precision_thermal_expansion(precision_job),
+        "anisotropic_thermal_expansion": _anisotropic_thermal_expansion(anisotropic_curves),
         "structures": [dict(row) for row in structures],
         "quality_flags": [dict(row) for row in flags],
     }
@@ -507,6 +579,7 @@ def compare_materials(
                     ),
                 },
                 "curve": curve,
+                "anisotropic_thermal_expansion": detail["anisotropic_thermal_expansion"],
                 "dataset_release": detail["dataset_release"],
                 "quality_flags": detail["quality_flags"],
             }

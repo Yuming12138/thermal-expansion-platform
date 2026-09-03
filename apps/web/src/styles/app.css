@@ -1,0 +1,354 @@
+/* 应用外壳样式：只消费 tokens.css 的语义层，禁止裸色值。 */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* ---------- 页头 ---------- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-5) clamp(20px, 5vw, 70px);
+  background: linear-gradient(120deg, var(--color-header-from), var(--color-header-to));
+  color: var(--color-ink-inverted);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.6vw, 1.85rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.app-header .subtitle {
+  margin: 2px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.8rem;
+}
+
+.backend-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.13);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.backend-status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f1b84b;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12);
+}
+
+.backend-status.online .dot {
+  background: #63d7ae;
+}
+
+.backend-status.offline .dot {
+  background: #f18b84;
+}
+
+/* ---------- 工作区导航 ---------- */
+
+.workspace-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-header);
+  backdrop-filter: blur(12px);
+}
+
+.workspace-nav-inner {
+  display: flex;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.workspace-nav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 13px 18px 12px;
+  color: var(--tp-ink-400);
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition-quick), background var(--transition-quick);
+}
+
+.workspace-nav a svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-nav a:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.workspace-nav a[aria-current="page"] {
+  color: var(--color-accent-strong);
+}
+
+.workspace-nav a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  bottom: -1px;
+  left: 15px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-accent-vivid);
+}
+
+/* ---------- 材料上下文条（签名细节：跨工作区保持当前材料） ---------- */
+
+.material-context {
+  border-bottom: 1px solid #d9e5ec;
+  background: linear-gradient(90deg, #edf7f8, #f5f9fc);
+}
+
+.material-context-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 10px var(--space-5);
+}
+
+.material-context-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.material-context-identity strong {
+  overflow: hidden;
+  color: #173f55;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-context-identity span {
+  color: var(--tp-ink-400);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.material-context-hint {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 8px var(--space-5);
+  color: var(--tp-ink-300);
+  font-size: 0.74rem;
+}
+
+.classification-chip {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.classification-chip.nte {
+  color: var(--color-nte-fg);
+  background: var(--color-nte-bg);
+}
+
+.classification-chip.pte {
+  color: var(--color-pte-fg);
+  background: var(--color-pte-bg);
+}
+
+.context-clear {
+  width: 30px;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--tp-ink-400);
+  background: transparent;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.context-clear:hover {
+  color: var(--color-pte-fg);
+  background: var(--color-pte-bg);
+}
+
+/* ---------- 主体与面板 ---------- */
+
+main {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-5);
+}
+
+.page {
+  animation: page-enter var(--transition-page);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0.45;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.panel > h2 {
+  margin: 0 0 4px;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.panel > .panel-note {
+  margin: 0 0 var(--space-4);
+  color: var(--color-ink-secondary);
+  font-size: 0.82rem;
+}
+
+/* ---------- 工作区骨架页 ---------- */
+
+.workspace-scope {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.workspace-scope > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.32fr) 1fr;
+  gap: var(--space-3);
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border-faint);
+}
+
+.workspace-scope > div:last-child {
+  border-bottom: 0;
+}
+
+.workspace-scope dt {
+  color: var(--color-ink-secondary);
+  font-size: 0.78rem;
+}
+
+.workspace-scope dd {
+  margin: 0;
+  color: var(--tp-ink-700);
+  font-size: 0.86rem;
+}
+
+.wiring-note {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: var(--space-4);
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-card);
+  background: var(--color-accent-soft);
+  color: var(--tp-ink-500);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.wiring-note code {
+  font-family: var(--font-data);
+  font-size: 0.74rem;
+}
+
+.pending-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-inset);
+  color: var(--color-ink-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.about-formula {
+  color: var(--color-accent-strong);
+  font-family: var(--font-formula);
+  font-size: 1.02rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 720px) {
+  .app-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .workspace-scope > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
