@@ -986,24 +986,60 @@ function renderMaterialComparison(payload) {
   bindComparisonExports(payload);
 }
 
+function buildComparisonSeries(item, color) {
+  const aniso = item.anisotropic_thermal_expansion;
+  const source = aniso && (aniso.cartesian || aniso.directional);
+  const axialKeys = aniso && aniso.cartesian
+    ? ["alpha_xx", "alpha_yy", "alpha_zz"]
+    : ["alpha_a", "alpha_b", "alpha_c"];
+  let volume = [];
+  let axial = [];
+  let hasAnisotropic = false;
+  if (source && (source.points || []).length >= 2) {
+    const raw = source.points
+      .filter(point => Number.isFinite(Number(point.T_K)))
+      .map(point => {
+        const mapped = {x: Number(point.T_K)};
+        Object.keys(point).forEach(key => {
+          if (key !== "T_K") mapped[key] = Number(point[key]);
+        });
+        return mapped;
+      })
+      .filter(point => Number.isFinite(point.x));
+    volume = raw
+      .filter(point => Number.isFinite(point.alpha_volume))
+      .map(point => ({x: point.x, y: point.alpha_volume}));
+    axial = axialKeys
+      .map(key => ({
+        key,
+        points: raw
+          .filter(point => Number.isFinite(point[key]))
+          .map(point => ({x: point.x, y: point[key]})),
+      }))
+      .filter(part => part.points.length >= 2);
+    hasAnisotropic = volume.length >= 2;
+  }
+  if (!hasAnisotropic) {
+    volume = (item.curve?.points || [])
+      .map(point => ({x: Number(point.temperature_k), y: Number(point.alpha_ppm_per_k)}))
+      .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+  }
+  return {key: item.material.material_key, color, volume, axial, hasAnisotropic};
+}
+
 function drawMaterialComparisonCurves(payload) {
   const canvas = document.querySelector("#material-comparison-chart");
   if (!canvas) return;
   const series = payload.materials
-    .map((item, index) => ({
-      key: item.material.material_key,
-      color: COMPARISON_COLORS[index % COMPARISON_COLORS.length],
-      points: (item.curve?.points || [])
-        .map(point => ({x: Number(point.temperature_k), y: Number(point.alpha_ppm_per_k)}))
-        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)),
-    }))
-    .filter(item => item.points.length >= 2);
+    .map((item, index) => buildComparisonSeries(item, COMPARISON_COLORS[index % COMPARISON_COLORS.length]))
+    .filter(item => item.volume.length >= 2);
   if (!series.length) return;
   const {ctx, width, height} = prepareHiDpiCanvas(canvas);
   const margin = {left: 66, right: 20, top: 46, bottom: 50};
   const plotWidth = Math.max(1, width - margin.left - margin.right);
   const plotHeight = Math.max(1, height - margin.top - margin.bottom);
-  const allPoints = series.flatMap(item => item.points);
+  const allPoints = series.flatMap(item =>
+    item.volume.concat(...item.axial.map(part => part.points)));
   let xMin = Math.min(...allPoints.map(point => point.x));
   let xMax = Math.max(...allPoints.map(point => point.x));
   let yMin = Math.min(0, ...allPoints.map(point => point.y));
@@ -1052,10 +1088,22 @@ function drawMaterialComparisonCurves(payload) {
     ctx.setLineDash([]);
   }
   series.forEach(item => {
+    item.axial.forEach(part => {
+      ctx.strokeStyle = rgba(item.color, .48);
+      ctx.lineWidth = 1.15;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      part.points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
+        else ctx.lineTo(xScale(point.x), yScale(point.y));
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    item.points.forEach((point, index) => {
+    item.volume.forEach((point, index) => {
       if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
       else ctx.lineTo(xScale(point.x), yScale(point.y));
     });
@@ -1066,7 +1114,7 @@ function drawMaterialComparisonCurves(payload) {
   ctx.save();
   ctx.translate(16, margin.top + plotHeight / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText("体热膨胀系数 α (ppm/K)", 0, 0);
+  ctx.fillText("热膨胀系数 α (ppm/K)", 0, 0);
   ctx.restore();
   let legendX = margin.left;
   series.forEach(item => {
@@ -1078,6 +1126,12 @@ function drawMaterialComparisonCurves(payload) {
     ctx.fillText(label, legendX + 19, 20);
     legendX += Math.min(230, 38 + ctx.measureText(label).width);
   });
+  ctx.fillStyle = "#8496a5";
+  ctx.font = "11px Segoe UI, Microsoft YaHei, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("实线 = 体积 α_V（迹）· 虚线 = 轴向分量 α_xx/yy/zz（或 α_a/b/c）",
+    margin.left, 38);
+  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
   ctx.textAlign = "center";
   canvas.teRedraw = () => drawMaterialComparisonCurves(payload);
 }
