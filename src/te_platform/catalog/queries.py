@@ -20,6 +20,31 @@ ELEMENT_SYMBOLS = frozenset(
 )
 ELEMENT_PATTERN = re.compile(r"[A-Z][a-z]?")
 
+# Numeric catalog fields are normally stored in material_properties.numeric_value,
+# but the AGV2 (tensor-aware) release writes them into text_value as decimal
+# strings. Read both. The GLOB guard keeps JSON/text columns (component_summaries,
+# motif_family_counts, ...) from being coerced to 0.0 by CAST(x AS REAL), which
+# silently returns 0.0 for non-numeric input in SQLite.
+_NUMERIC_PROPERTY_SQL = """
+    CASE
+        WHEN mp.numeric_value IS NOT NULL THEN mp.numeric_value
+        WHEN mp.text_value IS NOT NULL
+             AND (mp.text_value GLOB '[0-9]*'
+                  OR mp.text_value GLOB '-[0-9]*'
+                  OR mp.text_value GLOB '+[0-9]*'
+                  OR mp.text_value GLOB '.[0-9]*')
+        THEN CAST(mp.text_value AS REAL)
+        ELSE NULL
+    END
+"""
+
+
+def _numeric_property(name: str, alias: str | None = None) -> str:
+    return (
+        f"MAX(CASE WHEN mp.name = '{name}' THEN {_NUMERIC_PROPERTY_SQL} END)"
+        f" AS {alias or name}"
+    )
+
 
 def _canonical_bonding_modulus(row: dict[str, Any]) -> tuple[float | None, str | None]:
     try:
@@ -29,8 +54,23 @@ def _canonical_bonding_modulus(row: dict[str, Any]) -> tuple[float | None, str |
             float(row["avg_cn"]),
         )
     except (KeyError, TypeError, ValueError):
-        return None, None
+        # AGV2 has no E_coh_eV_per_atom; it ships the bonding modulus E~ directly.
+        return _stored_bonding_modulus(row)
     return result.bonding_modulus_gpa, "paper_definition_UV_over_n"
+
+
+def _stored_bonding_modulus(row: dict[str, Any]) -> tuple[float | None, str | None]:
+    for key in ("stored_E_tilde_GPa", "bond_modulus"):
+        raw = row.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value > 0:
+            return value, "catalog_bond_modulus_field"
+    return None, None
 
 
 def _canonicalize_material_row(row: Any) -> dict[str, Any]:
@@ -275,13 +315,15 @@ def search_materials(
                     m.material_key,
                     m.formula,
                     m.external_id,
-                    MAX(CASE WHEN mp.name = 'K_GPa' THEN mp.numeric_value END) AS K_GPa,
-                    MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
-                    MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS stored_E_tilde_GPa,
-                    MAX(CASE WHEN mp.name = 'E_coh_eV_per_atom' THEN mp.numeric_value END) AS E_coh_eV_per_atom,
-                    MAX(CASE WHEN mp.name = 'AAV' THEN mp.numeric_value END) AS AAV,
-                    MAX(CASE WHEN mp.name = 'avg_cn' THEN mp.numeric_value END) AS avg_cn,
-                    MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
+                    {_numeric_property("K_GPa")},
+                    {_numeric_property("G_GPa")},
+                    {_numeric_property("E_tilde_GPa", "stored_E_tilde_GPa")},
+                    {_numeric_property("E_coh_eV_per_atom")},
+                    {_numeric_property("AAV")},
+                    {_numeric_property("avg_cn")},
+                    {_numeric_property("CTE_ppm")},
+                    {_numeric_property("bond_modulus")},
+                    {_numeric_property("xi", "stored_xi")}
                 FROM dataset_releases dr
                 JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
                 JOIN materials m ON m.id = dm.material_id
@@ -306,7 +348,8 @@ def search_materials(
                 FROM material_metrics
             )
             SELECT material_key, formula, external_id, K_GPa, G_GPa,
-                   stored_E_tilde_GPa, E_coh_eV_per_atom, AAV, avg_cn, CTE_ppm
+                   stored_E_tilde_GPa, E_coh_eV_per_atom, AAV, avg_cn, CTE_ppm,
+                   bond_modulus, stored_xi
             FROM canonical_metrics
             WHERE (? IS NULL OR CTE_ppm >= ?)
               AND (? IS NULL OR CTE_ppm <= ?)
@@ -604,16 +647,18 @@ def material_landscape(
         raise ValueError("limit must be between 1 and 7001")
     with connect_readonly_database(database_path) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 m.material_key,
                 m.formula,
-                MAX(CASE WHEN mp.name = 'G_GPa' THEN mp.numeric_value END) AS G_GPa,
-                MAX(CASE WHEN mp.name = 'E_tilde_GPa' THEN mp.numeric_value END) AS stored_E_tilde_GPa,
-                MAX(CASE WHEN mp.name = 'E_coh_eV_per_atom' THEN mp.numeric_value END) AS E_coh_eV_per_atom,
-                MAX(CASE WHEN mp.name = 'AAV' THEN mp.numeric_value END) AS AAV,
-                MAX(CASE WHEN mp.name = 'avg_cn' THEN mp.numeric_value END) AS avg_cn,
-                MAX(CASE WHEN mp.name = 'CTE_ppm' THEN mp.numeric_value END) AS CTE_ppm
+                {_numeric_property("G_GPa")},
+                {_numeric_property("E_tilde_GPa", "stored_E_tilde_GPa")},
+                {_numeric_property("E_coh_eV_per_atom")},
+                {_numeric_property("AAV")},
+                {_numeric_property("avg_cn")},
+                {_numeric_property("CTE_ppm")},
+                {_numeric_property("bond_modulus")},
+                {_numeric_property("xi", "stored_xi")}
             FROM dataset_releases dr
             JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
             JOIN materials m ON m.id = dm.material_id
