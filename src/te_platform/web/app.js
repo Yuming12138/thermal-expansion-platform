@@ -49,6 +49,9 @@ let zteCandidateStructureViewers = [];
 const zteSelectedPairIds = new Set();
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
+// Portal Fig1d renders cubic (large) vs non-cubic (small) points with a
+// consistent linear radius ratio of ~1.2566 across all marker shapes.
+const LANDSCAPE_CUBIC_SIZE_RATIO = 1.2566;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
 const MATERIAL_COMPARE_STORAGE_KEY = "tep.material-compare.v1";
 const ANALYSIS_PROJECT_STORAGE_KEY = "tep.analysis-projects.v1";
@@ -1911,6 +1914,11 @@ function rgba(hex, opacity) {
   return "rgba(" + red + "," + green + "," + blue + "," + opacity + ")";
 }
 
+function landscapeDomainSizeFactor(point) {
+  // Portal Fig1d: cubic points are drawn as large dots, non-cubic as small dots.
+  return point && point.figure_domain_100K === "cubic" ? LANDSCAPE_CUBIC_SIZE_RATIO : 1;
+}
+
 function drawLandscapeMarker(ctx, point, x, y, size, color) {
   ctx.fillStyle = color;
   ctx.strokeStyle = "rgba(255,255,255,.86)";
@@ -2012,12 +2020,13 @@ function drawLandscape() {
     const pointX = x(point.x_gpa);
     const pointY = y(point.g_gpa);
     const color = point.classification === "NTE" ? "rgba(68,119,170,.78)" : "rgba(253,56,39,.72)";
-    drawLandscapeMarker(ctx, point, pointX, pointY, markerSize, color);
+    const pointSize = markerSize * landscapeDomainSizeFactor(point);
+    drawLandscapeMarker(ctx, point, pointX, pointY, pointSize, color);
     landscapeHitPoints.push({
       ...point,
       canvasX: pointX,
       canvasY: pointY,
-      hitRadius: Math.max(7, markerSize * 1.9),
+      hitRadius: Math.max(7, pointSize * 1.9),
     });
   });
 
@@ -2075,6 +2084,12 @@ function drawLandscape() {
   ctx.fillText("PTE", legendX + 72, legendY + 4);
   drawSelectedStar(ctx, legendX + 130, legendY);
   ctx.fillText("当前材料", legendX + 144, legendY + 4);
+
+  const sizeLegendY = legendY + 24;
+  drawLandscapeMarker(ctx, {source: "Exp."}, legendX, sizeLegendY, LANDSCAPE_REFERENCE_MARKER_SIZE * LANDSCAPE_CUBIC_SIZE_RATIO, "rgba(40,40,48,.85)");
+  ctx.fillText("立方", legendX + 13, sizeLegendY + 4);
+  drawLandscapeMarker(ctx, {source: "Exp."}, legendX + 62, sizeLegendY, LANDSCAPE_REFERENCE_MARKER_SIZE, "rgba(40,40,48,.85)");
+  ctx.fillText("非立方", legendX + 75, sizeLegendY + 4);
 }
 
 function setupLandscapeInteraction() {
