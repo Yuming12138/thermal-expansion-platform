@@ -6,5 +6,8 @@
 *.yml text eol=lf
 *.ps1 text eol=crlf
 
+# CSV data exports are served verbatim (UTF-8 BOM + CRLF); never normalize.
+*.csv -text
+
 # Version the compressed dataset snapshot with Git LFS.
 datasets/releases/**/*.json.gz filter=lfs diff=lfs merge=lfs -text

@@ -2044,10 +2044,13 @@ function setupLandscapeInteraction() {
       tooltip.hidden = true;
       return;
     }
-    tooltip.innerHTML = "<strong>" + escapeHtml(nearest.material_key) + "</strong><br>" +
+    const displayName = nearest.formula || nearest.material_key;
+    tooltip.innerHTML = "<strong>" + escapeHtml(displayName) + "</strong><br>" +
       escapeHtml(nearest.classification) + " · " + escapeHtml(nearest.source || "—") +
+      (nearest.figure_domain_100K ? " · " + escapeHtml(nearest.figure_domain_100K) : "") +
       (nearest.year ? " · " + nearest.year : "") + "<br>Ẽ=" + nearest.x_gpa.toFixed(3) +
-      " GPa · G=" + nearest.g_gpa.toFixed(3) + " GPa";
+      " GPa · G=" + nearest.g_gpa.toFixed(3) + " GPa" +
+      (nearest.xi_g_over_e != null ? " · ξ=" + Number(nearest.xi_g_over_e).toFixed(3) : "");
     tooltip.hidden = false;
     const left = Math.min(event.clientX - rect.left + 14, wrap.clientWidth - tooltip.offsetWidth - 8);
     const top = Math.max(8, event.clientY - rect.top - tooltip.offsetHeight - 10);
