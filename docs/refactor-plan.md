@@ -126,7 +126,7 @@ var/workspace.sqlite             读写工作库
 | 服务端状态 | TanStack Query | 统一 loading / 错误 / 重试 / 竞态，替代手写 `api()` |
 | 客户端状态 | Zustand | 轻量，替代 28 个全局 `let` |
 | 图表 | Apache ECharts | 需承载 6701 点散点、多曲线叠加、2D 热图；canvas 渲染，体积小于 Plotly |
-| 3D 结构 | 3Dmol.js（保留） | 现有 `vendor/` 已内置，迁移成本最低 |
+| 3D 结构 | Crystal Toolkit（Materials Project 同源） | Dash/VTK.js 组件挂载于 FastAPI `/ctk/`，详情页直接嵌入；3Dmol 仅保留给上传/组合工作区 |
 | 类型生成 | openapi-typescript | 从 FastAPI OpenAPI 生成 TS 类型，契约单一真值 |
 | 后端契约 | Pydantic v2 + `response_model` 全覆盖 | 现状 0 个响应模型，是最大契约缺口 |
 | 迁移 | 轻量顺序迁移器（版本化 SQL 文件） | 替代 `CREATE TABLE IF NOT EXISTS` |
@@ -196,7 +196,7 @@ var/workspace.sqlite             读写工作库
 1. **P0-1 物理真值**：全库筛选是否应当补上 Kerner 弹性修正项？补上会使筛选变慢（修正项是逐点向量运算），需评估 185×6701 规模下的性能影响。
 2. **P0-2 边界值**：`2.84` 与 `2.84151` 哪个是正式值？
 3. **死路由处置**：20 个无前端消费者的端点（`/api/materials/landscape`、`/api/composites/rom`、`/api/agent/tools`、`/structures/alignn-shear` 等）是删除还是保留供 CLI / Agent 使用？
-4. **3D 结构**：继续用 3Dmol.js，还是评估 CrystalToolkit 等方案？
+4. **3D 结构**：已采用 Crystal Toolkit；后续可将上传/组合工作区的临时 3Dmol 视图统一迁移到同一组件。
 5. **精准计算链路**：`precision/` 依赖 WSL + Conda + MatterSim + VASPKIT + Phonopy 的固定环境。重构时是否保留这条链路，还是改为容器化？
 
 ## 7. 风险与对策

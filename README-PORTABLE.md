@@ -65,7 +65,7 @@ var/config/agent.env             用户自己的 Agent 配置和密钥
 
 ## 功能边界
 
-- 材料查询、CrystalNN 周期三维结构、历史 QHA 曲线、Fig. 1d、SBR、ZTE 设计和 Agent 数据工具可以使用基础便携环境运行。
+- 材料查询、CrystalNN 周期三维结构、Crystal Toolkit（Materials Project 风格）交互查看器、历史 QHA 曲线、Fig. 1d、SBR、ZTE 设计和 Agent 数据工具可以使用基础便携环境运行。
 - ALIGNN、MatterSim、Phonopy、VASPKIT 和模型权重属于可选科学计算环境，不包含在基础便携包中。
 - 精准弹性和 QHA 新计算需要根据接收电脑的操作系统、硬件和模型授权单独配置，或者连接后续的远程计算服务。
 

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from a2wsgi import WSGIMiddleware
 
 from te_platform import __version__
 from te_platform.api.services import (
@@ -49,6 +50,7 @@ from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.reports.zte_report import build_zte_screening_report_pdf
 from te_platform.structures import build_structure_view
+from te_platform.structures.crystal_toolkit_viewer import create_crystal_toolkit_app
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
@@ -323,6 +325,15 @@ def create_app(
         allow_headers=["*"],
     )
     app.mount("/static", StaticFiles(directory=WEB_DIRECTORY), name="static")
+    # Crystal Toolkit is the same Materials Project component ecosystem used by
+    # the MP structure viewer.  It is mounted in-process as a Dash/WSGI app so
+    # the SPA and the structure scene share the catalog and port.
+    crystal_toolkit_app = create_crystal_toolkit_app(catalog_db, DEFAULT_RELEASE_SLUG)
+    app.mount(
+        "/ctk",
+        WSGIMiddleware(crystal_toolkit_app.server),
+        name="crystal-toolkit",
+    )
     agent_tools = default_registry(catalog_db, workspace_db)
 
     @app.get("/", include_in_schema=False)
@@ -372,7 +383,8 @@ def create_app(
                 "catalog_materials": nte["counts"]["materials"] + pte["counts"]["materials"],
             },
             "technology": [
-                "FastAPI", "SQLite", "pymatgen/CrystalNN", "3Dmol.js",
+                "FastAPI", "SQLite", "pymatgen/CrystalNN", "Crystal Toolkit",
+                "Dash/VTK.js", "3Dmol.js",
                 "ALIGNN", "MatterSim", "Phonopy", "VASPKIT",
             ],
             "scientific_scope": (

@@ -872,7 +872,6 @@ function detailPropertyText(property, fallbackUnit = "") {
 
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
-  const structure = preferredMaterialStructure(data.structures);
   const detailTitle = data.material.formula || data.material.material_key || key;
   document.querySelector("#material-detail-breadcrumb")?.replaceChildren(document.createTextNode(detailTitle));
   document.title = detailTitle + " · 材料详情 · 热膨胀材料智能计算与设计平台";
@@ -904,7 +903,7 @@ async function loadDetail(key) {
     "</p></div><button class='compare-toggle' data-compare-key='" + encodedKey +
     "' type='button'>收藏</button></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
-    "<div class='material-detail-overview'>" + renderStructureViewer(data.structures) +
+    "<div class='material-detail-overview'>" + renderStructureViewer(data.structures, data.material.material_key) +
     "<section class='material-properties-card'><div class='detail-card-heading'><div><p class='detail-card-kicker'>关键属性</p>" +
     "<h3>力学与热膨胀</h3></div><span class='elastic-status " +
     (hasElasticTensor ? "available" : "missing") + "'>弹性张量 · " +
@@ -918,7 +917,6 @@ async function loadDetail(key) {
   const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
   detailCompareButton.addEventListener("click", () => toggleComparisonMaterial(data.material.material_key));
   updateComparisonButtons();
-  drawMaterialStructure(data.material, structure, data.structure_view);
   drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
   selectLandscapeMaterial(data);
 }
@@ -1274,38 +1272,22 @@ async function loadMaterialComparison() {
   }
 }
 
-function renderStructureViewer(structures) {
+function renderStructureViewer(structures, materialKey = "") {
   const structure = preferredMaterialStructure(structures);
   if (!structure) {
     return "<h3>三维晶体结构</h3><p class='muted'>暂无可用于三维显示的结构文件。</p>";
   }
+  const encodedKey = escapeHtml(encodeURIComponent(materialKey));
+  const viewerUrl = "/ctk/?material_key=" + encodedKey;
   return "<section class='structure-panel' id='structure-panel'>" +
     "<div class='structure-heading'><div><h3>三维晶体结构</h3>" +
-    "<p class='curve-note'>左键拖拽旋转 · 滚轮缩放 · 中键或 Ctrl+拖拽平移</p></div>" +
-    "<span id='material-structure-summary' class='structure-summary-badge'>正在加载…</span></div>" +
-    "<div class='structure-stage'>" +
-    "<div id='structure-viewer' class='structure-viewer' role='img' aria-label='可旋转缩放的三维晶体结构'></div>" +
-    "<div class='structure-viewer-tools' role='toolbar' aria-label='三维结构工具'>" +
-    structureToolButton("structure-fullscreen", "全屏", "fullscreen") +
-    structureToolButton("structure-settings-button", "显示设置", "settings") +
-    structureToolButton("structure-reset", "重置视角", "reset") +
-    structureToolButton("structure-snapshot", "保存图片", "camera") +
+    "<p class='curve-note'>Crystal Toolkit · 拖拽旋转 · 滚轮缩放 · 设置中切换显示方式</p></div>" +
+    "<a class='structure-open-link' href='" + viewerUrl + "' target='_blank' rel='noopener'>在新页面打开</a></div>" +
+    "<div class='structure-stage structure-ctk-stage'>" +
+    "<iframe id='structure-ctk-frame' class='structure-ctk-frame' src='" + viewerUrl + "' " +
+    "title='Crystal Toolkit 三维晶体结构' loading='eager' allow='fullscreen'></iframe>" +
     "</div>" +
-    "<div id='structure-settings' class='structure-settings' hidden>" +
-    "<strong>显示设置</strong>" +
-    "<label>原子样式<select id='structure-style'><option value='ball-stick'>球棍</option>" +
-    "<option value='spacefill'>空间填充</option><option value='stick'>键线</option></select></label>" +
-    "<label>显示范围<select id='structure-supercell'><option value='periodic'>周期邻居（推荐）</option>" +
-    "<option value='1'>1×1×1 原胞</option>" +
-    "<option value='2'>2×2×2</option><option value='3'>3×3×3</option></select></label>" +
-    "<label class='structure-checkbox'><input id='structure-unit-cell' type='checkbox' checked>显示晶胞边框</label>" +
-    "<label class='structure-checkbox'><input id='structure-unit-cell-fill' type='checkbox' checked>晶胞淡色填充</label>" +
-    "</div>" +
-    "<div id='structure-axis-viewer' class='structure-axis-viewer' role='img' " +
-    "aria-label='随晶体旋转的三维坐标轴'></div>" +
-    "<div id='structure-element-legend' class='structure-element-legend' aria-label='元素图例'></div>" +
-    "</div>" +
-    "<p id='structure-atom-info' class='structure-atom-info'>点击原子可查看元素和笛卡尔坐标。</p>" +
+    "<p class='structure-atom-info'>结构由 Crystal Toolkit 渲染；右上角设置可切换晶胞、原子半径、键、多面体和导出选项。</p>" +
     "</section>";
 }
 
@@ -1423,6 +1405,108 @@ function fractionalToCartesian(fractional, lattice) {
   ));
 }
 
+function subtractStructurePoints(left, right) {
+  return {x: left.x - right.x, y: left.y - right.y, z: left.z - right.z};
+}
+
+function crossStructurePoints(left, right) {
+  return {
+    x: left.y * right.z - left.z * right.y,
+    y: left.z * right.x - left.x * right.z,
+    z: left.x * right.y - left.y * right.x,
+  };
+}
+
+function dotStructurePoints(left, right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+function structurePointNorm(point) {
+  return Math.hypot(point.x, point.y, point.z);
+}
+
+function convexHullTriangleFaces(points) {
+  const faces = [];
+  const seen = new Set();
+  const tolerance = 1e-6;
+  for (let left = 0; left < points.length - 2; left += 1) {
+    for (let middle = left + 1; middle < points.length - 1; middle += 1) {
+      const leftEdge = subtractStructurePoints(points[middle], points[left]);
+      for (let right = middle + 1; right < points.length; right += 1) {
+        const normal = crossStructurePoints(
+          leftEdge,
+          subtractStructurePoints(points[right], points[left]),
+        );
+        if (structurePointNorm(normal) < tolerance) continue;
+        let hasPositive = false;
+        let hasNegative = false;
+        for (let other = 0; other < points.length; other += 1) {
+          if (other === left || other === middle || other === right) continue;
+          const signedDistance = dotStructurePoints(
+            normal,
+            subtractStructurePoints(points[other], points[left]),
+          );
+          if (signedDistance > tolerance) hasPositive = true;
+          if (signedDistance < -tolerance) hasNegative = true;
+          if (hasPositive && hasNegative) break;
+        }
+        if (hasPositive && hasNegative) continue;
+        const key = [left, middle, right].sort((a, b) => a - b).join(":");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        faces.push([left, middle, right]);
+      }
+    }
+  }
+  return faces;
+}
+
+function mixStructureColor(hex, whiteFraction = .22) {
+  const value = String(hex || "#9aa9b8").replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return "#b8c8d7";
+  const channels = [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16));
+  const mixed = channels.map(channel => Math.round(channel + (255 - channel) * whiteFraction));
+  return "#" + mixed.map(channel => channel.toString(16).padStart(2, "0")).join("");
+}
+
+function addStructurePolyhedra(viewer, atoms, centralCount) {
+  if (!viewer || !Array.isArray(atoms) || !atoms.length) return 0;
+  const requestedCount = Number(centralCount);
+  const maxCenters = Math.min(
+    atoms.length,
+    Number.isFinite(requestedCount) && requestedCount > 0 ? requestedCount : atoms.length,
+    180,
+  );
+  let rendered = 0;
+  for (let centerIndex = 0; centerIndex < maxCenters; centerIndex += 1) {
+    const center = atoms[centerIndex];
+    const neighborIndices = Array.from(new Set((center.bonds || []).map(Number)))
+      .filter(index => Number.isInteger(index) && index >= 0 && index < atoms.length && index !== centerIndex)
+      .map(index => ({index, atom: atoms[index]}))
+      .filter(({atom}) => Number.isFinite(Number(atom.x)) && Number.isFinite(Number(atom.y)) && Number.isFinite(Number(atom.z)))
+      .sort((left, right) => {
+        const leftDistance = structurePointNorm(subtractStructurePoints(left.atom, center));
+        const rightDistance = structurePointNorm(subtractStructurePoints(right.atom, center));
+        return leftDistance - rightDistance;
+      })
+      .slice(0, 12);
+    if (neighborIndices.length < 3) continue;
+    const points = neighborIndices.map(({atom}) => ({x: Number(atom.x), y: Number(atom.y), z: Number(atom.z)}));
+    const faces = convexHullTriangleFaces(points);
+    if (!faces.length) continue;
+    viewer.addShape({
+      vertexArr: points,
+      faceArr: faces.flat(),
+      color: mixStructureColor(structureElementColors[center.elem]),
+      alpha: .28,
+      wireframe: true,
+      linewidth: 1,
+    });
+    rendered += 1;
+  }
+  return rendered;
+}
+
 function translatedCartesian(atom, translation, lattice) {
   const offset = fractionalToCartesian(translation, lattice);
   return atom.cart.map((value, index) => value + offset[index]);
@@ -1495,8 +1579,8 @@ function addStructureUnitCell(viewer, lattice, {fill = false} = {}) {
         0, 2, 6, 0, 6, 4,
         1, 5, 7, 1, 7, 3,
       ],
-      color: "#b8d2e6",
-      alpha: 0.09,
+      color: "#9fc5df",
+      alpha: 0.16,
       wireframe: false,
     });
   }
@@ -1505,7 +1589,7 @@ function addStructureUnitCell(viewer, lattice, {fill = false} = {}) {
       const end = corners.find(candidate =>
         candidate.a === corner.a + delta[0] && candidate.b === corner.b + delta[1] && candidate.c === corner.c + delta[2]
       );
-      if (end) viewer.addLine({start: corner, end, color: "#77879b", linewidth: 1});
+      if (end) viewer.addLine({start: corner, end, color: "#5d7890", linewidth: 1.6});
     });
   });
 }
@@ -1627,6 +1711,10 @@ function drawMaterialStructure(material, structure, structureView = null) {
       stick: {radius: periodicImage ? .07 : .08, color, opacity: periodicImage ? .86 : .96},
     },
     spacefill: {sphere: {scale: periodicImage ? .62 : .70, color, opacity: periodicImage ? .78 : 1}},
+    polyhedral: {
+      sphere: {radius: periodicImage ? .24 : .30, color, opacity: periodicImage ? .84 : 1},
+      stick: {radius: periodicImage ? .035 : .045, color, opacity: periodicImage ? .52 : .68},
+    },
     stick: {stick: {radius: periodicImage ? .07 : .09, color, opacity: periodicImage ? .72 : .96}},
   })[state.style];
 
@@ -1729,6 +1817,12 @@ function drawMaterialStructure(material, structure, structureView = null) {
           addStructureUnitCell(materialStructureViewer, parsedStructure.lattice, {fill: state.unitCellFill});
         }
         else materialStructureViewer.addUnitCell(model, {box: {color: "#7d8ba2", linewidth: 1}});
+      }
+      if (state.style === "polyhedral") {
+        const polyhedralCentralCount = state.display === "periodic" && structureView
+          ? Number(structureView.central_count)
+          : baseAtomCount || atoms.length;
+        addStructurePolyhedra(materialStructureViewer, atoms, polyhedralCentralCount);
       }
       applyDefaultStructureView();
       materialStructureViewer.render();
