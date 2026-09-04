@@ -42,6 +42,10 @@ apps/web/dist/
 src/te_platform/web/dist/
 *.tsbuildinfo
 
+# Local browser inspection artifacts
+.playwright-cli/
+output/playwright/
+
 # Local WorkBuddy assistant state (session memory, not part of the codebase)
 .workbuddy/
 
