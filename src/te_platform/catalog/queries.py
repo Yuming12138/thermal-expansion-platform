@@ -447,7 +447,16 @@ def material_detail(
             SELECT format, content, content_sha256, LENGTH(content) AS content_characters
             FROM structures
             WHERE dataset_release_id = ? AND material_id = ?
-            ORDER BY format
+            -- A detail view needs a renderable crystallographic structure first.
+            -- Elastic tensors are stored alongside POSCAR/CIF files, but are
+            -- not structure documents and must never become the viewer input.
+            ORDER BY CASE UPPER(format)
+                       WHEN 'POSCAR' THEN 0
+                       WHEN 'VASP' THEN 0
+                       WHEN 'CIF' THEN 1
+                       ELSE 2
+                     END,
+                     format
             """,
             (material["release_id"], material["id"]),
         ).fetchall()
@@ -528,7 +537,7 @@ def material_detail(
             ),
             "CTE_ppm": (
                 "目录筛选字段用于材料检索和总体比较；精确温度依赖行为应优先参考"
-                "已关联的各向异性 Cartesian/directional 曲线或其 legacy 体积曲线。"
+                "已关联的各向异性 Cartesian/directional alpha_volume 曲线。"
             ),
             "precision_thermal_expansion": (
                 "legacy 体积曲线；AGV2 记录来自 Cartesian alpha_volume，QHA 记录来自标量 QHA。"
@@ -573,6 +582,45 @@ def _curve_alpha_at_temperature(
     ) else None
 
 
+def _anisotropic_alpha_at_temperature(
+    curves: dict[str, Any] | None,
+    temperature_k: float,
+) -> float | None:
+    """Interpolate the tensor-aware volumetric component at one temperature.
+
+    Cartesian is preferred because it is the canonical six-component export;
+    directional is a compatible fallback for releases that only contain the
+    crystallographic-axis representation.  The returned value is in ppm/K,
+    matching the catalog CTE field and the browser plots.
+    """
+    for kind in ("cartesian", "directional"):
+        curve = (curves or {}).get(kind) or {}
+        points = curve.get("points") or []
+        normalized = []
+        for point in points:
+            try:
+                temperature = float(point["T_K"])
+                alpha = float(point["alpha_volume"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(temperature) and math.isfinite(alpha):
+                normalized.append((temperature, alpha))
+        if len(normalized) < 2:
+            continue
+        normalized.sort(key=lambda item: item[0])
+        if temperature_k < normalized[0][0] or temperature_k > normalized[-1][0]:
+            continue
+        for (left_t, left_alpha), (right_t, right_alpha) in zip(normalized, normalized[1:]):
+            if left_t <= temperature_k <= right_t:
+                if temperature_k == left_t or right_t == left_t:
+                    return left_alpha
+                fraction = (temperature_k - left_t) / (right_t - left_t)
+                return left_alpha + fraction * (right_alpha - left_alpha)
+        if temperature_k == normalized[-1][0]:
+            return normalized[-1][1]
+    return None
+
+
 def compare_materials(
     database_path: str | Path,
     release_slug: str,
@@ -606,6 +654,14 @@ def compare_materials(
             else None
         )
         curve = detail["precision_thermal_expansion"]
+        anisotropic_curves = detail["anisotropic_thermal_expansion"]
+        alpha_at_temperature = _anisotropic_alpha_at_temperature(
+            anisotropic_curves, temperature_k
+        )
+        if alpha_at_temperature is None:
+            # Keep older catalog releases readable while all current 3665
+            # records use the tensor-aware export above.
+            alpha_at_temperature = _curve_alpha_at_temperature(curve, temperature_k)
         compared.append(
             {
                 "material": detail["material"],
@@ -617,9 +673,7 @@ def compare_materials(
                     "K_GPa": numeric_property("K_GPa"),
                     "E_coh_eV_per_atom": numeric_property("E_coh_eV_per_atom"),
                     "avg_cn": numeric_property("avg_cn"),
-                    "alpha_at_temperature_ppm_per_k": _curve_alpha_at_temperature(
-                        curve, temperature_k
-                    ),
+                    "alpha_at_temperature_ppm_per_k": alpha_at_temperature,
                 },
                 "curve": curve,
                 "anisotropic_thermal_expansion": detail["anisotropic_thermal_expansion"],
@@ -633,7 +687,7 @@ def compare_materials(
         "material_count": len(compared),
         "materials": compared,
         "method_note": (
-            "表格比较目录字段；alpha(T)列由各材料已存储的真实QHA曲线在线性插值后得到。"
+            "表格比较目录字段；alpha(T)列由已存储的各向异性 alpha_volume 曲线线性插值得到。"
         ),
     }
 

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-15">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-18">
   </head>
   <body>
     <header>
@@ -67,7 +67,7 @@
             <details class="catalog-filter-details">
               <summary>
                 <span class="catalog-filter-summary-title">筛选与排序</span>
-                <span id="catalog-filter-summary" class="catalog-filter-summary-hint">默认排序 · 全部 CTE · 50 条</span>
+                <span id="catalog-filter-summary" class="catalog-filter-summary-hint">默认排序 · 全部 αV · 50 条</span>
               </summary>
               <div class="catalog-analysis-toolbar" aria-label="材料排序与筛选">
                 <label>排序字段
@@ -85,13 +85,13 @@
                     <option value="descending">从大到小</option>
                   </select>
                 </label>
-                <label>CTE 范围
+                <label>αV 范围
                   <select id="material-cte-filter">
                     <option value="all">全部</option>
-                    <option value="strong">强 NTE（≤ -20）</option>
+                    <option value="strong">强 NTE（αV ≤ -20）</option>
                     <option value="moderate">-20 ～ -5</option>
-                    <option value="near-zero">近零（-5 ～ 5）</option>
-                    <option value="positive">正膨胀（≥ 5）</option>
+                    <option value="near-zero">近零（αV -5 ～ 5）</option>
+                    <option value="positive">正膨胀（αV ≥ 5）</option>
                   </select>
                 </label>
                 <label>显示数量
@@ -118,16 +118,12 @@
             </div>
             <div id="material-results" class="table-wrap"></div>
           </article>
-          <article class="panel detail-panel">
-            <h2>材料详情</h2>
-            <div id="material-detail" class="placeholder">从左侧选择一条材料。</div>
-          </article>
         </section>
         <section id="material-compare-panel" class="panel material-compare-panel">
           <div class="compare-heading">
             <div>
               <h2>收藏与材料对比</h2>
-              <p class="muted">收藏 2–4 个材料，对比 G、Ẽ、ξ、目录 CTE 以及体积/各向异性热膨胀曲线。</p>
+              <p class="muted">收藏 2–4 个材料，对比 G、Ẽ、ξ、目录 αV 以及各向异性热膨胀曲线。</p>
             </div>
             <div class="compare-actions">
               <label>比较温度
@@ -150,6 +146,15 @@
           <div id="material-compare-result" class="compare-result placeholder">至少收藏两个材料后即可生成对比。</div>
         </section>
       </div>
+      <section class="workspace-page material-detail-page" data-page="material" hidden>
+        <div class="material-route-bar">
+          <a href="/database" data-page-link="database" class="material-back-link">← 返回材料数据库</a>
+          <span id="material-detail-breadcrumb">材料详情</span>
+        </div>
+        <article class="panel detail-panel">
+          <div id="material-detail" class="placeholder">正在读取材料详情…</div>
+        </article>
+      </section>
       <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
         <h2>上传结构与分级预测（实验性扩展）</h2>
         <p class="muted">该工作区用于展示软件的未来扩展能力，当前版本的重点是内置数据库查询与分析；没有配置科研计算环境时不会执行真实任务。</p>
@@ -409,6 +414,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-24"></script>
+    <script src="/static/app.js?v=0.10.0-28"></script>
   </body>
 </html>

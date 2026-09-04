@@ -103,6 +103,28 @@ def _attachment_headers(filename: str) -> dict[str, str]:
     }
 
 
+def _preferred_structure(structures: list[dict[str, object]]) -> dict[str, object] | None:
+    """Return the best crystallographic file for a 3-D viewer.
+
+    Release catalogs also store ``ELASTIC_TENSOR`` as a downloadable structure
+    record.  It is intentionally ranked after POSCAR/VASP/CIF because it is a
+    six-by-six matrix, not a crystallographic structure.  Keeping this choice
+    in one helper prevents the material and composite detail endpoints from
+    silently selecting the tensor when both records are present.
+    """
+    priority = {"POSCAR": 0, "VASP": 0, "CIF": 1}
+    candidates = [item for item in structures if item.get("content")]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda item: (
+            priority.get(str(item.get("format", "")).upper(), 2),
+            str(item.get("format", "")),
+        ),
+    )
+
+
 def _anisotropic_curve_download_text(
     material_key: str,
     release: dict[str, object],
@@ -309,6 +331,7 @@ def create_app(
     @app.get("/landscape", include_in_schema=False)
     @app.get("/zte", include_in_schema=False)
     @app.get("/about", include_in_schema=False)
+    @app.get("/materials/{material_key:path}", include_in_schema=False)
     def web_home() -> FileResponse:
         return FileResponse(WEB_DIRECTORY / "index.html")
 
@@ -720,10 +743,7 @@ def create_app(
         ensure_catalog_database(catalog_db)
         try:
             detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
-            structure = next(
-                (item for item in detail["structures"] if item.get("content")),
-                None,
-            )
+            structure = _preferred_structure(detail["structures"])
             if structure:
                 try:
                     detail["structure_view"] = build_structure_view(
@@ -819,10 +839,7 @@ def create_app(
             detail = material_detail(catalog_db, release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        structure = next(
-            (item for item in detail["structures"] if item.get("content")),
-            None,
-        )
+        structure = _preferred_structure(detail["structures"])
         if structure:
             try:
                 detail["structure_view"] = build_structure_view(
