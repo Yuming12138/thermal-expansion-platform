@@ -1219,7 +1219,9 @@ function drawMaterialComparisonCurves(payload) {
       ctx.setLineDash([]);
     });
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     item.volume.forEach((point, index) => {
       if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
@@ -2037,7 +2039,9 @@ function drawAnisotropicThermalExpansion(curves) {
   ctx.setLineDash([]);
   series.forEach(item => {
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = item.key === "alpha_volume" ? 2.2 : 1.7;
+    ctx.lineWidth = item.key === "alpha_volume" ? 3.4 : 1.7;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     let started = false;
     points.forEach(point => {
@@ -2063,7 +2067,7 @@ function drawAnisotropicThermalExpansion(curves) {
   let legendX = margin.left;
   series.forEach(item => {
     ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, 16, 18, 3);
+    ctx.fillRect(legendX, 16, 18, item.key === "alpha_volume" ? 5 : 3);
     ctx.fillStyle = "#40586a";
     ctx.fillText(item.key, legendX + 23, 20);
     legendX += 92;
