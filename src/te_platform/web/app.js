@@ -879,9 +879,9 @@ async function loadDetail(key) {
     String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
   ));
   const metricDefinitions = [
-    ["G_GPa", "剪切模量 G", "GPa", "featured"],
+    ["xi", "剪切—键合比 ξ", "", "featured"],
+    ["G_GPa", "剪切模量 G", "GPa", ""],
     ["E_tilde_GPa", "键合模量 Ẽ", "GPa", ""],
-    ["xi", "剪切—键合比 ξ", "", ""],
     ["CTE_ppm", "体积 αV", "ppm/K", ""],
     ["TE_300K", "300 K αV", "ppm/K", ""],
     ["K_GPa", "体积模量 K", "GPa", ""],
