@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-14">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-15">
   </head>
   <body>
     <header>
@@ -42,66 +42,80 @@
     </section>
     <main>
       <div class="workspace-page" data-page="database">
-        <section class="catalog-summary" id="stats" aria-live="polite"></section>
         <section class="grid material-workspace">
           <article class="panel catalog-panel">
-          <div class="catalog-panel-heading">
-            <div>
-              <h2>材料数据库</h2>
-              <p class="muted">按化学式、材料编号或组成元素检索 NTE 候选材料。</p>
+            <div class="catalog-panel-heading">
+              <div class="catalog-title-block">
+                <h2>材料数据库</h2>
+                <p class="muted">搜索化学式、MP ID，或用元素筛选。</p>
+              </div>
+              <div class="catalog-heading-meta">
+                <div id="stats" class="catalog-stats" aria-live="polite"></div>
+                <span id="material-view-summary" class="catalog-view-summary">正在加载…</span>
+              </div>
             </div>
-            <span id="material-view-summary" class="catalog-view-summary">正在加载…</span>
-          </div>
-            <div class="catalog-search-row">
-              <input id="search-input" placeholder="化学式、MP ID或材料名称">
+            <div class="catalog-search-row" role="search">
+              <label class="search-field" for="search-input">
+                <svg class="search-field-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="11" cy="11" r="6.5"></circle>
+                  <path d="m16 16 4.5 4.5"></path>
+                </svg>
+                <input id="search-input" aria-label="搜索材料" placeholder="化学式、MP ID或材料名称">
+              </label>
               <button id="search-button">检索</button>
             </div>
-            <div class="catalog-analysis-toolbar" aria-label="材料排序与筛选">
-              <label>排序字段
-                <select id="material-sort-by">
-                  <option value="material_key">材料名称</option>
-                  <option value="CTE_ppm">热膨胀系数 CTE</option>
-                  <option value="G_GPa">剪切模量 G</option>
-                  <option value="E_tilde_GPa">键合模量 Ẽ</option>
-                  <option value="xi">剪切—键合比 ξ</option>
-                </select>
-              </label>
-              <label>顺序
-                <select id="material-sort-order">
-                  <option value="ascending">从小到大</option>
-                  <option value="descending">从大到小</option>
-                </select>
-              </label>
-              <label>CTE 范围
-                <select id="material-cte-filter">
-                  <option value="all">全部</option>
-                  <option value="strong">强 NTE（≤ -20）</option>
-                  <option value="moderate">-20 ～ -5</option>
-                  <option value="near-zero">近零（-5 ～ 5）</option>
-                  <option value="positive">正膨胀（≥ 5）</option>
-                </select>
-              </label>
-              <label>显示数量
-                <select id="material-limit">
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                  <option value="200">200</option>
-                </select>
-              </label>
-            </div>
-            <div id="element-filter" class="element-filter">
-            <div class="element-filter-toolbar">
-              <div class="element-mode" role="group" aria-label="元素筛选方式">
-                <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
-                <button type="button" data-element-mode="exact">仅含所选元素</button>
+            <details class="catalog-filter-details">
+              <summary>
+                <span class="catalog-filter-summary-title">筛选与排序</span>
+                <span id="catalog-filter-summary" class="catalog-filter-summary-hint">默认排序 · 全部 CTE · 50 条</span>
+              </summary>
+              <div class="catalog-analysis-toolbar" aria-label="材料排序与筛选">
+                <label>排序字段
+                  <select id="material-sort-by">
+                    <option value="material_key">材料名称</option>
+                    <option value="CTE_ppm">热膨胀系数 CTE</option>
+                    <option value="G_GPa">剪切模量 G</option>
+                    <option value="E_tilde_GPa">键合模量 Ẽ</option>
+                    <option value="xi">剪切—键合比 ξ</option>
+                  </select>
+                </label>
+                <label>顺序
+                  <select id="material-sort-order">
+                    <option value="ascending">从小到大</option>
+                    <option value="descending">从大到小</option>
+                  </select>
+                </label>
+                <label>CTE 范围
+                  <select id="material-cte-filter">
+                    <option value="all">全部</option>
+                    <option value="strong">强 NTE（≤ -20）</option>
+                    <option value="moderate">-20 ～ -5</option>
+                    <option value="near-zero">近零（-5 ～ 5）</option>
+                    <option value="positive">正膨胀（≥ 5）</option>
+                  </select>
+                </label>
+                <label>显示数量
+                  <select id="material-limit">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                  </select>
+                </label>
               </div>
-              <span id="element-selection" class="element-selection">尚未选择元素</span>
-              <button id="element-clear" class="secondary-button" type="button" disabled>清除</button>
+            </details>
+            <div id="element-filter" class="element-filter">
+              <div class="element-filter-toolbar">
+                <div class="element-mode" role="group" aria-label="元素筛选方式">
+                  <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
+                  <button type="button" data-element-mode="exact">仅含所选元素</button>
+                </div>
+                <span id="element-selection" class="element-selection">尚未选择元素</span>
+                <button id="element-clear" class="secondary-button" type="button" disabled>清除</button>
+              </div>
+              <div class="periodic-table-scroll">
+                <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
+              </div>
             </div>
-            <div class="periodic-table-scroll">
-              <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
-            </div>
-          </div>
             <div id="material-results" class="table-wrap"></div>
           </article>
           <article class="panel detail-panel">
@@ -395,6 +409,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-23"></script>
+    <script src="/static/app.js?v=0.10.0-24"></script>
   </body>
 </html>

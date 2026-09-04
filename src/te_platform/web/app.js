@@ -116,11 +116,10 @@ async function loadStats() {
   document.querySelector("#health-status").textContent = "服务正常";
   const counts = dataset.counts;
   document.querySelector("#stats").innerHTML =
-    "<div class='catalog-summary-main'><span>NTE 材料数据库</span><strong>" +
-    escapeHtml(counts.materials) + "</strong><span>个活跃材料</span></div>" +
-    "<div class='catalog-summary-meta'><span>结构 " + escapeHtml(counts.structures) +
-    "</span><span>属性值 " + escapeHtml(counts.property_values) +
-    "</span><span>数据版本 " + escapeHtml(dataset.release.version) + "</span></div>";
+    "<strong>" + escapeHtml(counts.materials) + "</strong><span>条 NTE</span>" +
+    "<span class='catalog-stats-meta'>结构 " + escapeHtml(counts.structures) +
+    " · 属性 " + escapeHtml(counts.property_values) +
+    " · v" + escapeHtml(dataset.release.version) + "</span>";
 }
 
 async function loadAbout() {
@@ -649,6 +648,20 @@ function comparisonFilterBounds() {
   }[selected] || {};
 }
 
+function updateCatalogFilterSummary() {
+  const summary = document.querySelector("#catalog-filter-summary");
+  if (!summary) return;
+  const sortBy = document.querySelector("#material-sort-by");
+  const sortOrder = document.querySelector("#material-sort-order");
+  const cteFilter = document.querySelector("#material-cte-filter");
+  const limit = document.querySelector("#material-limit");
+  const sortLabel = sortBy?.selectedOptions?.[0]?.textContent || "材料名称";
+  const orderLabel = sortOrder?.value === "descending" ? "从大到小" : "从小到大";
+  const cteLabel = cteFilter?.selectedOptions?.[0]?.textContent || "全部 CTE";
+  const limitLabel = limit?.value || "50";
+  summary.textContent = sortLabel + " · " + orderLabel + " · " + cteLabel + " · " + limitLabel + " 条";
+}
+
 function renderMaterials(items) {
   const container = document.querySelector("#material-results");
   const filterDescription = selectedCatalogElements.size
@@ -664,14 +677,24 @@ function renderMaterials(items) {
     const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
     const selectedClass = comparisonSelected(item.material_key) ? " selected" : "";
     const selectedText = comparisonSelected(item.material_key) ? "已收藏" : "收藏";
-    return "<tr><td>" + escapeHtml(item.material_key) + "</td><td>" + numeric(item.G_GPa) +
+    return "<tr><td class='material-key'>" + escapeHtml(item.material_key) + "</td><td>" + numeric(item.G_GPa) +
       "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
       "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
       "<button class='compare-toggle" + selectedClass + "' data-compare-key='" + encodedKey +
       "' aria-pressed='" + String(comparisonSelected(item.material_key)) + "'>" + selectedText +
       "</button><button data-key='" + encodedKey + "'>详情</button></div></td></tr>";
   }).join("");
-  container.innerHTML = "<table><thead><tr><th>材料</th><th>G</th><th>Ẽ</th><th>ξ</th><th>CTE</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>";
+  container.innerHTML =
+    "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
+    "<caption class='sr-only'>材料的剪切模量、键合模量、剪切—键合比和体积热膨胀系数</caption>" +
+    "<thead><tr>" +
+    "<th scope='col'>材料</th>" +
+    "<th scope='col'>G <span class='table-unit'>(GPa)</span></th>" +
+    "<th scope='col'>Ẽ <span class='table-unit'>(GPa)</span></th>" +
+    "<th scope='col'>ξ</th>" +
+    "<th scope='col'>CTE <span class='table-unit'>(ppm/K)</span></th>" +
+    "<th scope='col'>操作</th>" +
+    "</tr></thead><tbody>" + rows + "</tbody></table>";
   container.querySelectorAll("button[data-key]").forEach(button => {
     button.addEventListener("click", () => loadDetail(decodeURIComponent(button.dataset.key)));
   });
@@ -4275,7 +4298,11 @@ async function initialize() {
     if (event.key === "Enter") searchMaterials();
   });
   ["#material-sort-by", "#material-sort-order", "#material-cte-filter", "#material-limit"]
-    .forEach(selector => document.querySelector(selector).addEventListener("change", searchMaterials));
+    .forEach(selector => document.querySelector(selector).addEventListener("change", () => {
+      updateCatalogFilterSummary();
+      searchMaterials();
+    }));
+  updateCatalogFilterSummary();
   document.querySelector("#material-compare-run").addEventListener("click", loadMaterialComparison);
   document.querySelector("#material-compare-clear").addEventListener("click", () => {
     comparisonMaterialKeys = [];
