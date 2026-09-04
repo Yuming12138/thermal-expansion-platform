@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from dash import Dash, Input, Output, dcc, html
 from flask_caching import Cache
@@ -100,47 +100,21 @@ def create_crystal_toolkit_app(
         scene_settings={"zoomToFit2D": True},
     )
 
-    # The component's own controls and scene are deliberately retained: they
-    # provide the same interaction model as the MP viewer, including the
-    # Polyhedra toggle and native PNG/structure export.
+    # Keep the component's own controls and scene, but do not add a second
+    # application chrome around it.  The parent material page already owns the
+    # section heading; this Dash surface is intentionally just the MP-like
+    # structure canvas plus a small error status when a record cannot load.
     layout = html.Div(
         [
             dcc.Location(id="ctk-location", refresh=False),
             html.Div(
-                [
-                    html.Div(
-                        [
-                            html.P("CRYSTAL TOOLKIT", className="ctk-eyebrow"),
-                            html.H1("晶体结构查看器", id="ctk-page-title"),
-                            html.P(
-                                "Materials Project 风格的交互结构视图。可在设置中切换晶胞、配位、多面体和元素显示。",
-                                className="ctk-subtitle",
-                            ),
-                        ],
-                        className="ctk-header-copy",
-                    ),
-                    html.Div(
-                        [
-                            html.Span("正在读取材料…", id="ctk-status", className="ctk-status"),
-                            html.A("返回材料详情", id="ctk-back", href="/", className="ctk-back-link"),
-                        ],
-                        className="ctk-header-actions",
-                    ),
-                ],
-                className="ctk-header",
-            ),
-            html.Div(
                 structure_component.title_layout(),
                 className="ctk-structure-title",
             ),
+            html.Div(id="ctk-status", className="ctk-status", role="status"),
             html.Div(
                 structure_component.layout(size="100%"),
                 className="ctk-structure-frame",
-            ),
-            html.P(
-                "结构来源：当前发布目录中的原始 POSCAR/CIF；键和多面体为 Crystal Toolkit 的 CrystalNN 近邻可视化。",
-                id="ctk-provenance",
-                className="ctk-provenance",
             ),
         ],
         className="ctk-page",
@@ -166,28 +140,13 @@ def create_crystal_toolkit_app(
         {%css%}
         <style>
             :root { color-scheme: light; font-family: Inter, "Segoe UI", sans-serif; }
-            html, body { margin: 0; min-height: 100%; background: #f7f9fc; color: #1d2939; }
-            body { overflow-y: auto; }
-            .ctk-page { box-sizing: border-box; min-height: 100vh; padding: 28px clamp(18px, 4vw, 56px) 40px; }
-            .ctk-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1240px; margin: 0 auto 18px; }
-            .ctk-eyebrow { margin: 0 0 7px; color: #526581; font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .13em; }
-            .ctk-header h1 { margin: 0; color: #16263d; font-size: clamp(23px, 3vw, 34px); letter-spacing: -.025em; }
-            .ctk-subtitle { max-width: 690px; margin: 8px 0 0; color: #61718a; font-size: 14px; line-height: 1.55; }
-            .ctk-header-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
-            .ctk-status { color: #526581; font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
-            .ctk-back-link { color: #365f99; font-size: 13px; text-decoration: none; }
-            .ctk-back-link:hover { text-decoration: underline; }
-            .ctk-structure-title { max-width: 1240px; margin: 0 auto 8px; color: #16263d; }
-            .ctk-structure-title h2 { margin: 0; font-size: 18px; font-weight: 650; }
-            .ctk-structure-frame { box-sizing: border-box; width: 100%; max-width: 1240px; height: min(720px, 72vh); min-height: 500px; margin: 0 auto; overflow: hidden; border: 1px solid #d9e1ec; border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(28, 45, 72, .08); }
+            html, body, #react-entry-point { width: 100%; height: 100%; margin: 0; background: #fff; color: #1d2939; }
+            body { overflow: hidden; }
+            .ctk-page { position: relative; box-sizing: border-box; width: 100%; height: 100%; min-height: 100%; padding: 0; background: #fff; }
+            .ctk-structure-title { display: none; }
+            .ctk-status { position: absolute; z-index: 5; inset: 16px 18px auto; color: #526581; font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; }
+            .ctk-structure-frame { box-sizing: border-box; width: 100%; height: 100%; min-height: 100%; overflow: hidden; border: 0; border-radius: 0; background: #fff; }
             .ctk-structure-frame > div { width: 100% !important; height: 100% !important; }
-            .ctk-provenance { max-width: 1240px; margin: 12px auto 0; color: #718096; font-size: 12px; line-height: 1.5; }
-            @media (max-width: 720px) {
-                .ctk-page { padding: 18px 12px 28px; }
-                .ctk-header { align-items: flex-start; flex-direction: column; gap: 12px; }
-                .ctk-header-actions { justify-content: flex-start; }
-                .ctk-structure-frame { height: 620px; min-height: 480px; border-radius: 9px; }
-            }
         </style>
     </head>
     <body>
@@ -210,25 +169,22 @@ def create_crystal_toolkit_app(
 
     @app.callback(
         Output(structure_component.id(), "data"),
-        Output("ctk-page-title", "children"),
         Output("ctk-status", "children"),
-        Output("ctk-back", "href"),
+        Output("ctk-status", "style"),
         Input("ctk-location", "search"),
     )
     def load_material(search: str | None):
         material_key = _material_key_from_search(search)
         if not material_key:
-            return None, "晶体结构查看器", "请从材料详情页打开一个材料。", "/"
+            return None, "请从材料详情页打开一个材料。", {"display": "block"}
         try:
             structure, record = _load_structure(str(catalog_database), release_slug, material_key)
         except (ValueError, OSError, RuntimeError) as error:
-            return None, "晶体结构查看器", f"结构加载失败：{error}", "/"
-        formula = structure.composition.reduced_formula
+            return None, f"结构加载失败：{error}", {"display": "block"}
         return (
             structure.as_dict(),
-            formula,
-            f"{material_key} · {record.get('format', 'POSCAR')}",
-            f"/materials/{quote(material_key, safe='')}",
+            "",
+            {"display": "none"},
         )
 
     # ``CrystalToolkitPlugin`` uses dynamic callbacks for its scene.  Keeping

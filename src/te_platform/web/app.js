@@ -1280,14 +1280,11 @@ function renderStructureViewer(structures, materialKey = "") {
   const encodedKey = escapeHtml(encodeURIComponent(materialKey));
   const viewerUrl = "/ctk/?material_key=" + encodedKey;
   return "<section class='structure-panel' id='structure-panel'>" +
-    "<div class='structure-heading'><div><h3>三维晶体结构</h3>" +
-    "<p class='curve-note'>Crystal Toolkit · 拖拽旋转 · 滚轮缩放 · 设置中切换显示方式</p></div>" +
-    "<a class='structure-open-link' href='" + viewerUrl + "' target='_blank' rel='noopener'>在新页面打开</a></div>" +
+    "<div class='structure-heading'><div><h3>三维晶体结构</h3></div></div>" +
     "<div class='structure-stage structure-ctk-stage'>" +
     "<iframe id='structure-ctk-frame' class='structure-ctk-frame' src='" + viewerUrl + "' " +
     "title='Crystal Toolkit 三维晶体结构' loading='eager' allow='fullscreen'></iframe>" +
     "</div>" +
-    "<p class='structure-atom-info'>结构由 Crystal Toolkit 渲染；右上角设置可切换晶胞、原子半径、键、多面体和导出选项。</p>" +
     "</section>";
 }
 
