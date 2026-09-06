@@ -240,6 +240,40 @@ def dataset_summary(
     }
 
 
+def distinct_material_count(
+    database_path: str | Path,
+    release_slugs: list[str] | tuple[str, ...],
+) -> int:
+    """Count materials once across a set of releases.
+
+    A material can intentionally belong to more than one role release (for
+    example a synthetic test fixture may reuse an NTE structure as a PTE
+    placeholder).  Summing per-release counts would then report duplicates as
+    separate catalog materials.
+    """
+    normalized = tuple(
+        dict.fromkeys(
+            str(slug).strip()
+            for slug in release_slugs
+            if str(slug).strip()
+        )
+    )
+    if not normalized:
+        return 0
+    placeholders = ",".join("?" for _ in normalized)
+    with connect_readonly_database(database_path) as connection:
+        row = connection.execute(
+            f"""
+            SELECT COUNT(DISTINCT dm.material_id) AS material_count
+            FROM dataset_memberships dm
+            JOIN dataset_releases dr ON dr.id = dm.dataset_release_id
+            WHERE dr.slug IN ({placeholders})
+            """,
+            normalized,
+        ).fetchone()
+    return int(row["material_count"] or 0)
+
+
 def search_materials(
     database_path: str | Path,
     release_slug: str,

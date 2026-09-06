@@ -20,7 +20,11 @@ def _generated_at() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _anisotropic_series(detail: dict[str, Any]) -> dict[str, tuple[list[float], list[float]]]:
+def _anisotropic_series(
+    detail: dict[str, Any],
+    *,
+    require_curve: bool = True,
+) -> dict[str, tuple[list[float], list[float]]]:
     """Return plotted series from the tensor-aware alpha(T) export.
 
     The current release stores Cartesian or crystallographic-axis components
@@ -57,7 +61,11 @@ def _anisotropic_series(detail: dict[str, Any]) -> dict[str, tuple[list[float], 
         if series:
             return series
 
-    curve = detail.get("precision_thermal_expansion") or {}
+    # Comparison reports pass the legacy scalar curve under ``curve`` while
+    # material detail responses expose it as ``precision_thermal_expansion``.
+    # Accept both shapes so old catalogs without tensor-aware rows remain
+    # downloadable and reportable.
+    curve = detail.get("precision_thermal_expansion") or detail.get("curve") or {}
     points = curve.get("points") or []
     legacy = {
         "alpha_volume": (
@@ -66,6 +74,8 @@ def _anisotropic_series(detail: dict[str, Any]) -> dict[str, tuple[list[float], 
         )
     }
     if len(legacy["alpha_volume"][0]) < 2:
+        if not require_curve:
+            return {}
         raise ValueError("Material has no stored anisotropic thermal-expansion curve")
     return legacy
 
@@ -197,7 +207,10 @@ def build_comparison_report_pdf(
                 cell.set_text_props(weight="bold", color="#27475a")
         table_axis.set_title(display_title, fontsize=15, fontweight="bold", pad=16)
         for index, item in enumerate(materials):
-            curve_data = _anisotropic_series(item)
+            # A comparison can include catalog records without a stored
+            # temperature-dependent curve.  Keep those rows in the report
+            # table and simply omit their line from the plot.
+            curve_data = _anisotropic_series(item, require_curve=False)
             volume = curve_data.get("alpha_volume")
             if volume:
                 curve_axis.plot(
@@ -222,7 +235,9 @@ def build_comparison_report_pdf(
         curve_axis.set_xlabel("Temperature T (K)")
         curve_axis.set_ylabel("Thermal expansion α (ppm/K)")
         curve_axis.grid(True, color="#e2e8ee", linewidth=0.8)
-        curve_axis.legend(fontsize=7.5, loc="best")
+        handles, labels = curve_axis.get_legend_handles_labels()
+        if labels:
+            curve_axis.legend(handles, labels, fontsize=7.5, loc="best")
         figure.text(
             0.01,
             0.01,

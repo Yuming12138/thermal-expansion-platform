@@ -49,6 +49,7 @@ class ApiTests(unittest.TestCase):
         cls.import_summary = build_catalog_database(temp_path / "catalog-v1.sqlite")
         cls.catalog_database = temp_path / "catalog-v1.sqlite"
         cls.workspace_database = temp_path / "workspace.sqlite"
+        cls.nte_release_slug = cls.import_summary.release_slug
         cls.expected_materials = cls.import_summary.unique_materials
         # 仓库不含 PTE 参考集（185 条来自原始科研目录），因此 fixture 目录库
         # 的材料总数等于 NTE 计数；真实发布库中该值为 6701 + 185 = 6886。
@@ -60,6 +61,7 @@ class ApiTests(unittest.TestCase):
             create_app(
                 catalog_database=cls.catalog_database,
                 workspace_database=cls.workspace_database,
+                nte_release_slug=cls.nte_release_slug,
             )
         )
         cls.client = cls.client_context.__enter__()
@@ -78,8 +80,9 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-23", home.text)
-        self.assertIn("/static/styles.css?v=0.10.0-13", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-34", home.text)
+        self.assertIn("/static/styles.css?v=0.10.0-22", home.text)
+        self.assertNotIn("material-compare-panel", home.text)
         self.assertIn("分段目标曲线", home.text)
         self.assertIn("鲁棒性与实验配方参数", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
@@ -114,8 +117,8 @@ class ApiTests(unittest.TestCase):
 
         fig1d = self.client.get("/static/fig1d-reference.json")
         self.assertEqual(fig1d.status_code, 200)
-        self.assertEqual(len(fig1d.json()["points"]), 354)
-        self.assertAlmostEqual(fig1d.json()["axis"]["boundary_c"], 2.84151)
+        self.assertEqual(len(fig1d.json()["points"]), 324)
+        self.assertAlmostEqual(fig1d.json()["axis"]["boundary_c"], 2.6937919673014115)
 
         viewer_library = self.client.get("/static/vendor/3Dmol-2.5.5.min.js")
         self.assertEqual(viewer_library.status_code, 200)
@@ -203,7 +206,10 @@ class ApiTests(unittest.TestCase):
             [item["material"]["material_key"] for item in comparison.json()["materials"]],
             compare_keys,
         )
-        registry = default_registry(self.catalog_database)
+        registry = default_registry(
+            self.catalog_database,
+            nte_release_slug=self.nte_release_slug,
+        )
         self.assertIn("compare_catalog_materials", registry.names())
         agent_comparison = registry.call(
             "compare_catalog_materials",

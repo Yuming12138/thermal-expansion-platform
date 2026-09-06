@@ -25,6 +25,9 @@ from te_platform.screening.sbr import classify_sbr
 def default_registry(
     catalog_database: Path | None = None,
     workspace_database: Path | None = None,
+    *,
+    nte_release_slug: str | None = None,
+    pte_release_slug: str | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
@@ -68,7 +71,10 @@ def default_registry(
         },
     )
     if catalog_database is not None:
-        releases = {"nte": DEFAULT_RELEASE_SLUG, "pte": DEFAULT_PTE_RELEASE_SLUG}
+        releases = {
+            "nte": nte_release_slug or DEFAULT_RELEASE_SLUG,
+            "pte": pte_release_slug or DEFAULT_PTE_RELEASE_SLUG,
+        }
 
         registry.register(
             "describe_database",
@@ -230,8 +236,8 @@ def default_registry(
             "design_zte_material_pair",
             lambda **kwargs: optimize_material_pair(
                 catalog_database,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=releases["pte"],
+                nte_release_slug=releases["nte"],
                 **kwargs,
             ),
             description=(
@@ -305,8 +311,8 @@ def default_registry(
             "screen_zte_material_pairs",
             lambda **kwargs: screen_material_pairs(
                 catalog_database,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=releases["pte"],
+                nte_release_slug=releases["nte"],
                 **kwargs,
             ),
             description=(

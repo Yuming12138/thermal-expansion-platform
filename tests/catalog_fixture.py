@@ -59,17 +59,17 @@ def build_catalog_database(target: Path) -> ImportSummary:
 
     with connect_database(target) as connection:
         _register_pte_placeholder(connection)
-        _inject_synthetic_curve(connection)
+        _inject_synthetic_curve(connection, summary.release_slug)
 
     return summary
 
 
 def _register_pte_placeholder(connection: sqlite3.Connection) -> None:
-    """Register an empty PTE release so app startup validation passes.
+    """Register a minimal PTE release so app startup validation passes.
 
     The real 185-record PTE reference set comes from the maintainer's research
-    directories and is not redistributable; API tests either mock PTE curve
-    lookups or exercise the NTE release only.
+    directories and is not redistributable.  The fixture adds one shared
+    material after registration so composite endpoints can be exercised.
     """
     connection.execute(
         """INSERT INTO dataset_releases
@@ -88,7 +88,7 @@ def _register_pte_placeholder(connection: sqlite3.Connection) -> None:
     )
 
 
-def _inject_synthetic_curve(connection: sqlite3.Connection) -> None:
+def _inject_synthetic_curve(connection: sqlite3.Connection, nte_release_slug: str) -> None:
     nte_material_id = _find_material_id(connection, CURVED_MATERIAL_KEY_PREFIX)
     pte_material_id = _find_material_id(connection, PTE_MATERIAL_KEY)
     import_historical_thermal_expansion_curve(
@@ -112,6 +112,43 @@ def _inject_synthetic_curve(connection: sqlite3.Connection) -> None:
            SELECT id, ?, 0, ?
            FROM dataset_releases WHERE slug = ?""",
         (pte_material_id, "0" * 64, PTE_RELEASE_SLUG),
+    )
+    # The PTE fixture reuses one material from the NTE snapshot.  Mirror its
+    # release-scoped structure/properties so composite detail and download
+    # endpoints exercise the same contract as a real PTE release instead of
+    # returning an empty placeholder record.
+    connection.execute(
+        """
+        INSERT INTO structures(
+            dataset_release_id, material_id, format, content,
+            content_sha256
+        )
+        SELECT pte.id, s.material_id, s.format, s.content, s.content_sha256
+        FROM structures s
+        JOIN dataset_releases nte ON nte.id = s.dataset_release_id
+        JOIN dataset_releases pte ON pte.slug = ?
+        WHERE nte.slug = ? AND s.material_id = ?
+        """,
+        (PTE_RELEASE_SLUG, nte_release_slug, pte_material_id),
+    )
+    connection.execute(
+        """
+        INSERT INTO material_properties(
+            dataset_release_id, material_id, name, numeric_value,
+            text_value, unit
+        )
+        SELECT pte.id, mp.material_id, mp.name, mp.numeric_value,
+               mp.text_value, mp.unit
+        FROM material_properties mp
+        JOIN dataset_releases nte ON nte.id = mp.dataset_release_id
+        JOIN dataset_releases pte ON pte.slug = ?
+        WHERE nte.slug = ? AND mp.material_id = ?
+        """,
+        (PTE_RELEASE_SLUG, nte_release_slug, pte_material_id),
+    )
+    connection.execute(
+        "UPDATE dataset_releases SET record_count = 1 WHERE slug = ?",
+        (PTE_RELEASE_SLUG,),
     )
 
 
