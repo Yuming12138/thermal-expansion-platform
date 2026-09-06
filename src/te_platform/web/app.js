@@ -535,23 +535,24 @@ function renderMaterials(items) {
   }
   const rows = items.map(item => {
     const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
-    return "<tr><td class='material-key'><a class='material-record-link' href='/materials/" + encodedKey +
-      "' data-material-link='" + encodedKey + "'>" + escapeHtml(item.material_key) + "</a></td><td>" + numeric(item.G_GPa) +
-      "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
-      "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
-      "<a class='detail-link' href='/materials/" + encodedKey +
-      "' data-material-link='" + encodedKey + "'>详情</a></div></td></tr>";
+    const formula = escapeHtml(item.formula || item.material_key || "—");
+    const externalId = escapeHtml(item.external_id || item.material_key || "—");
+    const materialLink = "<a class='material-record-link' href='/materials/" + encodedKey +
+      "' data-material-link='" + encodedKey + "'>" + externalId + "</a>";
+    return "<tr><td class='material-mp-id'>" + materialLink + "</td><td class='material-formula'>" + formula +
+      "</td><td>" + numeric(item.G_GPa) + "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
+      "</td><td>" + numeric(item.CTE_ppm) + "</td></tr>";
   }).join("");
   container.innerHTML =
     "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
-    "<caption class='sr-only'>材料的剪切模量、键合模量、剪切—键合比和体积热膨胀系数 αV</caption>" +
+    "<caption class='sr-only'>材料 MP ID、化学式、剪切模量、键合模量、剪切—键合比和体积热膨胀系数 αV</caption>" +
     "<thead><tr>" +
-    "<th scope='col'>材料</th>" +
+    "<th scope='col'>MP ID</th>" +
+    "<th scope='col'>化学式</th>" +
     "<th scope='col'>G <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>Ẽ <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>ξ</th>" +
     "<th scope='col'>αV <span class='table-unit'>(ppm/K)</span></th>" +
-    "<th scope='col'>详情</th>" +
     "</tr></thead><tbody>" + rows + "</tbody></table>";
   container.querySelectorAll("[data-material-link]").forEach(link => {
     link.addEventListener("click", event => {
