@@ -83,6 +83,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("/static/app.js?v=0.10.0-34", home.text)
         self.assertIn("/static/styles.css?v=0.10.0-22", home.text)
         self.assertNotIn("material-compare-panel", home.text)
+        self.assertNotIn("论文原始散点与渐变背景", home.text)
+        self.assertNotIn("下载绘图数据 CSV", home.text)
         self.assertIn("分段目标曲线", home.text)
         self.assertIn("鲁棒性与实验配方参数", home.text)
         self.assertIn("zte-pareto-tooltip", home.text)
