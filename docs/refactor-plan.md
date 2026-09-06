@@ -178,7 +178,7 @@ var/workspace.sqlite             读写工作库
 **前端（阶段 3F）**
 
 1. Vite + React + TS 脚手架，`apps/web/`。
-2. 按工作区拆分页组件：检索、Fig.1d 景观、结构、收藏对比、ZTE 设计、ZTE 筛选、Agent 对话。
+2. 按工作区拆分页组件：检索、Fig.1d 景观、结构详情、ZTE 设计、ZTE 筛选、Agent 对话；材料数据库不再提供独立的收藏/材料对比工作区。
 3. ECharts 替换 9 个自研 Canvas 绘图器。
 4. 统一持久化策略：筛选结果与 Agent 历史纳入持久化（现状刷新即失，但 URL 恢复逻辑 `app.js:3359` 仍假定其存在）。
 5. XSS 由 React 默认转义兜底，消除 98 处人工 `escapeHtml`；补充 CSP。

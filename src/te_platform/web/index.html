@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-20">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-21">
   </head>
   <body>
     <header>
@@ -118,32 +118,6 @@
             </div>
             <div id="material-results" class="table-wrap"></div>
           </article>
-        </section>
-        <section id="material-compare-panel" class="panel material-compare-panel">
-          <div class="compare-heading">
-            <div>
-              <h2>收藏与材料对比</h2>
-              <p class="muted">收藏 2–4 个材料，对比 G、Ẽ、ξ、目录 αV 以及各向异性热膨胀曲线。</p>
-            </div>
-            <div class="compare-actions">
-              <label>比较温度
-                <span><input id="material-compare-temperature" type="number" min="0" max="2000" step="10" value="300"> K</span>
-              </label>
-              <button id="material-compare-run" type="button" disabled>生成对比</button>
-              <button id="material-compare-clear" class="secondary-button" type="button" disabled>清空</button>
-            </div>
-          </div>
-          <div id="material-compare-selection" class="compare-selection muted">尚未收藏材料。</div>
-          <div class="analysis-project-toolbar" aria-label="分析项目管理">
-            <input id="analysis-project-name" placeholder="分析项目名称，例如：强 NTE 候选对比" maxlength="80">
-            <button id="analysis-project-save" type="button" disabled>保存项目</button>
-            <select id="analysis-project-select" aria-label="已保存分析项目">
-              <option value="">选择已保存项目…</option>
-            </select>
-            <button id="analysis-project-load" class="secondary-button" type="button" disabled>载入</button>
-            <button id="analysis-project-delete" class="secondary-button danger-button" type="button" disabled>删除</button>
-          </div>
-          <div id="material-compare-result" class="compare-result placeholder">至少收藏两个材料后即可生成对比。</div>
         </section>
       </div>
       <section class="workspace-page material-detail-page" data-page="material" hidden>
@@ -414,6 +388,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-32"></script>
+    <script src="/static/app.js?v=0.10.0-33"></script>
   </body>
 </html>

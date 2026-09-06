@@ -31,10 +31,6 @@ let structureFullscreenHandlerInstalled = false;
 let catalogElementMode = "contains";
 let catalogElementCounts = {};
 let catalogSearchSequence = 0;
-let comparisonMaterialKeys = [];
-let analysisProjects = [];
-let activeAnalysisProjectId = null;
-let lastComparisonPayload = null;
 let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
 let lastZteScreeningParameters = null;
@@ -53,8 +49,6 @@ const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 // consistent linear radius ratio of ~1.2566 across all marker shapes.
 const LANDSCAPE_CUBIC_SIZE_RATIO = 1.2566;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
-const MATERIAL_COMPARE_STORAGE_KEY = "tep.material-compare.v1";
-const ANALYSIS_PROJECT_STORAGE_KEY = "tep.analysis-projects.v1";
 const COMPARISON_COLORS = ["#d84a3a", "#2864c7", "#15906f", "#d98624", "#7b57b2", "#5d6a76"];
 
 const PERIODIC_MAIN_ROWS = [
@@ -504,192 +498,7 @@ function setupWorkspaceNavigation() {
   showWorkspacePage(workspacePageFromPath());
 }
 
-function restoreComparisonMaterials() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(MATERIAL_COMPARE_STORAGE_KEY));
-    comparisonMaterialKeys = Array.isArray(stored)
-      ? [...new Set(stored.filter(item => typeof item === "string" && item.trim()))].slice(0, 4)
-      : [];
-  } catch (error) {
-    console.warn("无法恢复材料收藏", error);
-    comparisonMaterialKeys = [];
-  }
-}
-
-function persistComparisonMaterials() {
-  try {
-    window.localStorage.setItem(MATERIAL_COMPARE_STORAGE_KEY, JSON.stringify(comparisonMaterialKeys));
-  } catch (error) {
-    console.warn("无法保存材料收藏", error);
-  }
-}
-
-function restoreAnalysisProjects() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(ANALYSIS_PROJECT_STORAGE_KEY));
-    analysisProjects = Array.isArray(stored)
-      ? stored.filter(project => project && typeof project.id === "string" &&
-        typeof project.name === "string" && Array.isArray(project.material_keys)).slice(0, 30)
-      : [];
-  } catch (error) {
-    console.warn("无法恢复分析项目", error);
-    analysisProjects = [];
-  }
-}
-
-function persistAnalysisProjects() {
-  try {
-    window.localStorage.setItem(ANALYSIS_PROJECT_STORAGE_KEY, JSON.stringify(analysisProjects));
-  } catch (error) {
-    console.warn("无法保存分析项目", error);
-  }
-}
-
-function renderAnalysisProjectList() {
-  const select = document.querySelector("#analysis-project-select");
-  const sorted = [...analysisProjects].sort((left, right) =>
-    String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
-  );
-  select.innerHTML = "<option value=''>选择已保存项目…</option>" + sorted.map(project =>
-    "<option value='" + escapeHtml(project.id) + "'>" + escapeHtml(project.name) +
-    "（" + project.material_keys.length + "个材料）</option>"
-  ).join("");
-  if (activeAnalysisProjectId && analysisProjects.some(item => item.id === activeAnalysisProjectId)) {
-    select.value = activeAnalysisProjectId;
-  } else {
-    activeAnalysisProjectId = null;
-    select.value = "";
-  }
-  const hasSelection = Boolean(select.value);
-  document.querySelector("#analysis-project-load").disabled = !hasSelection;
-  document.querySelector("#analysis-project-delete").disabled = !hasSelection;
-}
-
-function saveAnalysisProject() {
-  const input = document.querySelector("#analysis-project-name");
-  const name = input.value.trim();
-  if (comparisonMaterialKeys.length < 2) return;
-  if (!name) {
-    input.focus();
-    input.placeholder = "请先输入分析项目名称";
-    return;
-  }
-  const now = new Date().toISOString();
-  let project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
-  if (!project) project = analysisProjects.find(item => item.name === name);
-  if (project) {
-    project.name = name;
-    project.material_keys = [...comparisonMaterialKeys];
-    project.temperature_k = Number(document.querySelector("#material-compare-temperature").value) || 300;
-    project.updated_at = now;
-  } else {
-    project = {
-      id: "analysis-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
-      name,
-      material_keys: [...comparisonMaterialKeys],
-      temperature_k: Number(document.querySelector("#material-compare-temperature").value) || 300,
-      created_at: now,
-      updated_at: now,
-    };
-    analysisProjects.push(project);
-  }
-  activeAnalysisProjectId = project.id;
-  persistAnalysisProjects();
-  renderAnalysisProjectList();
-  const result = document.querySelector("#material-compare-result");
-  if (!lastComparisonPayload) {
-    result.className = "compare-result placeholder";
-    result.textContent = "分析项目已保存。点击“生成对比”读取属性和各向异性曲线。";
-  }
-}
-
-async function loadAnalysisProject() {
-  const selectedId = document.querySelector("#analysis-project-select").value;
-  const project = analysisProjects.find(item => item.id === selectedId);
-  if (!project) return;
-  activeAnalysisProjectId = project.id;
-  document.querySelector("#analysis-project-name").value = project.name;
-  document.querySelector("#material-compare-temperature").value = String(project.temperature_k || 300);
-  comparisonMaterialKeys = [...new Set(project.material_keys)].slice(0, 4);
-  persistComparisonMaterials();
-  renderComparisonSelection();
-  renderAnalysisProjectList();
-  await loadMaterialComparison();
-}
-
-function deleteAnalysisProject() {
-  const selectedId = document.querySelector("#analysis-project-select").value;
-  if (!selectedId) return;
-  analysisProjects = analysisProjects.filter(item => item.id !== selectedId);
-  if (activeAnalysisProjectId === selectedId) activeAnalysisProjectId = null;
-  persistAnalysisProjects();
-  document.querySelector("#analysis-project-name").value = "";
-  renderAnalysisProjectList();
-}
-
-function comparisonSelected(materialKey) {
-  return comparisonMaterialKeys.includes(materialKey);
-}
-
-function updateComparisonButtons() {
-  document.querySelectorAll("button[data-compare-key]").forEach(button => {
-    const materialKey = decodeURIComponent(button.dataset.compareKey);
-    const selected = comparisonSelected(materialKey);
-    button.classList.toggle("selected", selected);
-    button.textContent = selected ? "已收藏" : "收藏";
-    button.setAttribute("aria-pressed", String(selected));
-  });
-}
-
-function renderComparisonSelection() {
-  lastComparisonPayload = null;
-  const selection = document.querySelector("#material-compare-selection");
-  const runButton = document.querySelector("#material-compare-run");
-  const clearButton = document.querySelector("#material-compare-clear");
-  runButton.disabled = comparisonMaterialKeys.length < 2;
-  clearButton.disabled = comparisonMaterialKeys.length === 0;
-  document.querySelector("#analysis-project-save").disabled = comparisonMaterialKeys.length < 2;
-  if (!comparisonMaterialKeys.length) {
-    selection.className = "compare-selection muted";
-    selection.textContent = "尚未收藏材料。";
-  } else {
-    selection.className = "compare-selection";
-    selection.innerHTML = comparisonMaterialKeys.map(materialKey =>
-      "<span class='compare-chip'><span>" + escapeHtml(materialKey) + "</span>" +
-      "<button type='button' data-compare-remove='" +
-      escapeHtml(encodeURIComponent(materialKey)) + "' aria-label='移除 " +
-      escapeHtml(materialKey) + "'>×</button></span>"
-    ).join("");
-    selection.querySelectorAll("button[data-compare-remove]").forEach(button => {
-      button.addEventListener("click", () => toggleComparisonMaterial(
-        decodeURIComponent(button.dataset.compareRemove),
-      ));
-    });
-  }
-  updateComparisonButtons();
-  const result = document.querySelector("#material-compare-result");
-  result.className = "compare-result placeholder";
-  result.textContent = comparisonMaterialKeys.length >= 2
-    ? "收藏列表已更新，请点击“生成对比”读取属性和各向异性曲线。"
-    : "至少收藏两个材料后即可生成对比。";
-}
-
-function toggleComparisonMaterial(materialKey) {
-  if (comparisonSelected(materialKey)) {
-    comparisonMaterialKeys = comparisonMaterialKeys.filter(item => item !== materialKey);
-  } else if (comparisonMaterialKeys.length >= 4) {
-    const result = document.querySelector("#material-compare-result");
-    result.className = "compare-result";
-    result.textContent = "一次最多收藏并对比 4 个材料，请先移除一个材料。";
-    return;
-  } else {
-    comparisonMaterialKeys.push(materialKey);
-  }
-  persistComparisonMaterials();
-  renderComparisonSelection();
-}
-
-function comparisonFilterBounds() {
+function cteFilterBounds() {
   const selected = document.querySelector("#material-cte-filter").value;
   return {
     strong: {cte_max_ppm: "-20"},
@@ -726,15 +535,11 @@ function renderMaterials(items) {
   }
   const rows = items.map(item => {
     const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
-    const selectedClass = comparisonSelected(item.material_key) ? " selected" : "";
-    const selectedText = comparisonSelected(item.material_key) ? "已收藏" : "收藏";
     return "<tr><td class='material-key'><a class='material-record-link' href='/materials/" + encodedKey +
       "' data-material-link='" + encodedKey + "'>" + escapeHtml(item.material_key) + "</a></td><td>" + numeric(item.G_GPa) +
       "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
       "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
-      "<button class='compare-toggle" + selectedClass + "' data-compare-key='" + encodedKey +
-      "' aria-pressed='" + String(comparisonSelected(item.material_key)) + "'>" + selectedText +
-      "</button><a class='detail-link' href='/materials/" + encodedKey +
+      "<a class='detail-link' href='/materials/" + encodedKey +
       "' data-material-link='" + encodedKey + "'>详情</a></div></td></tr>";
   }).join("");
   container.innerHTML =
@@ -746,7 +551,7 @@ function renderMaterials(items) {
     "<th scope='col'>Ẽ <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>ξ</th>" +
     "<th scope='col'>αV <span class='table-unit'>(ppm/K)</span></th>" +
-    "<th scope='col'>操作</th>" +
+    "<th scope='col'>详情</th>" +
     "</tr></thead><tbody>" + rows + "</tbody></table>";
   container.querySelectorAll("[data-material-link]").forEach(link => {
     link.addEventListener("click", event => {
@@ -754,11 +559,6 @@ function renderMaterials(items) {
       event.preventDefault();
       navigateToMaterial(decodeURIComponent(link.dataset.materialLink));
     });
-  });
-  container.querySelectorAll("button[data-compare-key]").forEach(button => {
-    button.addEventListener("click", () => toggleComparisonMaterial(
-      decodeURIComponent(button.dataset.compareKey),
-    ));
   });
 }
 
@@ -773,7 +573,7 @@ async function searchMaterials() {
     element_mode: catalogElementMode,
     sort_by: document.querySelector("#material-sort-by").value,
     sort_order: document.querySelector("#material-sort-order").value,
-    ...comparisonFilterBounds(),
+    ...cteFilterBounds(),
   });
   try {
     const items = await api("/api/materials?" + params.toString());
@@ -895,13 +695,11 @@ async function loadDetail(key) {
     .map(([name, label, unit, modifier]) => "<div class='detail-property " + modifier + "'><dt>" +
       label + "</dt><dd>" + detailPropertyText(data.properties[name], unit) + "</dd></div>")
     .join("");
-  const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
   document.querySelector("#material-detail").innerHTML =
     "<div class='material-detail-identity'><div><h3>" +
     escapeHtml(data.material.formula || data.material.material_key) + "</h3>" +
     "<p class='material-detail-id'>" + escapeHtml(data.material.external_id || data.material.material_key) +
-    "</p></div><button class='compare-toggle' data-compare-key='" + encodedKey +
-    "' type='button'>收藏</button></div>" +
+    "</p></div></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
     "<div class='material-detail-overview'>" + renderStructureViewer(data.structures, data.material.material_key) +
     "<section class='material-properties-card'><div class='detail-card-heading'><div><p class='detail-card-kicker'>关键属性</p>" +
@@ -914,15 +712,8 @@ async function loadDetail(key) {
     renderAnisotropicThermalExpansion(data.anisotropic_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
     escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
-  const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
-  detailCompareButton.addEventListener("click", () => toggleComparisonMaterial(data.material.material_key));
-  updateComparisonButtons();
   drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
   selectLandscapeMaterial(data);
-}
-
-function comparisonMetric(value, unit = "") {
-  return Number.isFinite(Number(value)) ? numeric(value) + (unit ? " " + unit : "") : "—";
 }
 
 function safeExportStem(value) {
@@ -942,336 +733,6 @@ function downloadBlob(content, mediaType, filename) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function comparisonProjectName() {
-  return document.querySelector("#analysis-project-name").value.trim() || "material-comparison";
-}
-
-function comparisonExportPayload(payload) {
-  const comparison = {
-    ...payload,
-    materials: (payload.materials || []).map(item => {
-      const {curve, ...anisotropicItem} = item;
-      return anisotropicItem;
-    }),
-  };
-  return {
-    report: {
-      project_name: comparisonProjectName(),
-      generated_at: new Date().toISOString(),
-      platform: "Thermal Expansion Materials Platform",
-      descriptor_definition: "E_tilde=160.21766208*abs(E_coh)/(AAV*avg_cn)",
-    },
-    comparison,
-  };
-}
-
-function comparisonCsv(payload) {
-  const columns = [
-    "material_key", "formula", "external_id", "G_GPa", "E_tilde_GPa", "xi",
-    "catalog_alpha_volume_ppm_per_K", "alpha_at_temperature_ppm_per_K", "temperature_K",
-    "K_GPa", "E_coh_eV_per_atom", "avg_cn", "dataset_version", "anisotropic_curve_kinds",
-  ];
-  const csvCell = value => {
-    const text = String(value ?? "");
-    return /[\",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
-  };
-  const rows = payload.materials.map(item => [
-    item.material.material_key,
-    item.material.formula,
-    item.material.external_id,
-    item.metrics.G_GPa,
-    item.metrics.E_tilde_GPa,
-    item.metrics.xi,
-    item.metrics.CTE_ppm,
-    item.metrics.alpha_at_temperature_ppm_per_k,
-    payload.temperature_k,
-    item.metrics.K_GPa,
-    item.metrics.E_coh_eV_per_atom,
-    item.metrics.avg_cn,
-    item.dataset_release?.version,
-    Object.keys(item.anisotropic_thermal_expansion || {}).join(";"),
-  ]);
-  return [columns, ...rows].map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
-}
-
-function comparisonHtml(payload) {
-  const chart = document.querySelector("#material-comparison-chart");
-  const chartImage = chart ? chart.toDataURL("image/png") : "";
-  const headers = payload.materials.map(item =>
-    "<th>" + escapeHtml(item.material.material_key) + "</th>"
-  ).join("");
-  const rows = [
-    ["G (GPa)", "G_GPa"],
-    ["Ẽ (GPa)", "E_tilde_GPa"],
-    ["ξ = G/Ẽ", "xi"],
-    ["目录 αV (ppm/K)", "CTE_ppm"],
-    ["α(" + numeric(payload.temperature_k) + " K) (ppm/K)", "alpha_at_temperature_ppm_per_k"],
-  ].map(([label, key]) => "<tr><th>" + escapeHtml(label) + "</th>" +
-    payload.materials.map(item => "<td>" + comparisonMetric(item.metrics[key]) + "</td>").join("") +
-    "</tr>").join("");
-  return "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>" +
-    escapeHtml(comparisonProjectName()) + "</title><style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;" +
-    "max-width:1100px;margin:32px auto;color:#21384a}table{width:100%;border-collapse:collapse}" +
-    "th,td{border:1px solid #d9e3ea;padding:8px;text-align:center}th{background:#eef5f7}" +
-    "img{width:100%;margin-top:18px;border:1px solid #d9e3ea}small{color:#687b8a}</style></head><body>" +
-    "<h1>" + escapeHtml(comparisonProjectName()) + "</h1><p><small>生成时间：" +
-    escapeHtml(new Date().toLocaleString()) + " · 数据版本：" +
-    escapeHtml(payload.materials[0]?.dataset_release?.version || "—") +
-    " · Ẽ=160.21766208×|E_coh|/(AAV×avg_cn)</small></p><table><thead><tr><th>指标</th>" +
-    headers + "</tr></thead><tbody>" + rows + "</tbody></table>" +
-    (chartImage ? "<img src='" + chartImage + "' alt='各向异性热膨胀曲线对比'>" : "") +
-    "</body></html>";
-}
-
-function exportComparisonPdf(payload) {
-  const params = new URLSearchParams({
-    material_keys: payload.materials.map(item => item.material.material_key).join("|"),
-    temperature_k: String(payload.temperature_k),
-    project_name: comparisonProjectName(),
-  });
-  const link = document.createElement("a");
-  link.href = "/api/materials/compare/report.pdf?" + params.toString();
-  link.download = safeExportStem(comparisonProjectName()) + "_comparison_report.pdf";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-function bindComparisonExports(payload) {
-  const stem = safeExportStem(comparisonProjectName());
-  document.querySelector("#comparison-export-json").addEventListener("click", () =>
-    downloadBlob(
-      JSON.stringify(comparisonExportPayload(payload), null, 2),
-      "application/json;charset=utf-8",
-      stem + "_comparison.json",
-    ));
-  document.querySelector("#comparison-export-csv").addEventListener("click", () =>
-    downloadBlob(comparisonCsv(payload), "text/csv;charset=utf-8", stem + "_comparison.csv"));
-  document.querySelector("#comparison-export-html").addEventListener("click", () =>
-    downloadBlob(comparisonHtml(payload), "text/html;charset=utf-8", stem + "_report.html"));
-  document.querySelector("#comparison-export-pdf").addEventListener("click", () =>
-    exportComparisonPdf(payload));
-}
-
-function renderMaterialComparison(payload) {
-  lastComparisonPayload = payload;
-  const result = document.querySelector("#material-compare-result");
-  const temperature = Number(payload.temperature_k);
-  const columns = payload.materials.map(item =>
-    "<th>" + escapeHtml(item.material.material_key) + "</th>"
-  ).join("");
-  const metricRows = [
-    ["G", "G_GPa", "GPa"],
-    ["Ẽ", "E_tilde_GPa", "GPa"],
-    ["ξ = G/Ẽ", "xi", ""],
-    ["目录 αV", "CTE_ppm", "ppm/K"],
-    [temperature.toFixed(0) + " K 曲线 α", "alpha_at_temperature_ppm_per_k", "ppm/K"],
-    ["体积模量 K", "K_GPa", "GPa"],
-    ["内聚能", "E_coh_eV_per_atom", "eV/atom"],
-    ["平均配位数", "avg_cn", ""],
-  ].map(([label, key, unit]) =>
-    "<tr><th>" + escapeHtml(label) + "</th>" + payload.materials.map(item =>
-      "<td>" + comparisonMetric(item.metrics[key], unit) + "</td>"
-    ).join("") + "</tr>"
-  ).join("");
-  const detailButtons = payload.materials.map(item =>
-    "<td><button type='button' data-comparison-detail='" +
-    escapeHtml(encodeURIComponent(item.material.material_key)) + "'>查看详情</button></td>"
-  ).join("");
-  const curveCount = payload.materials.filter(item => {
-    const curves = item.anisotropic_thermal_expansion || {};
-    return Object.values(curves).some(curve => (curve.points || []).length >= 2);
-  }).length;
-  result.className = "compare-result";
-  result.innerHTML =
-    "<div class='compare-summary'><strong>已比较 " + payload.material_count + " 个材料</strong>" +
-    "<span>" + escapeHtml(payload.method_note) + "</span></div>" +
-    "<div class='table-wrap'><table class='comparison-table'><thead><tr><th>指标</th>" + columns +
-    "</tr></thead><tbody>" + metricRows + "<tr><th>材料详情</th>" + detailButtons +
-    "</tr></tbody></table></div>" +
-    (curveCount
-      ? "<canvas id='material-comparison-chart' class='comparison-chart' width='1100' height='480' " +
-        "aria-label='收藏材料的各向异性热膨胀曲线对比'></canvas>"
-      : "<p class='muted'>所选材料暂无可共同展示的各向异性曲线。</p>") +
-    "<div class='comparison-export-actions'><span>导出分析结果</span>" +
-    "<button id='comparison-export-csv' type='button'>CSV</button>" +
-    "<button id='comparison-export-json' type='button'>JSON</button>" +
-    "<button id='comparison-export-html' type='button'>HTML报告</button>" +
-    "<button id='comparison-export-pdf' type='button'>PDF报告</button></div>";
-  result.querySelectorAll("button[data-comparison-detail]").forEach(button => {
-    button.addEventListener("click", async () => {
-      await navigateToMaterial(decodeURIComponent(button.dataset.comparisonDetail));
-    });
-  });
-  if (curveCount) drawMaterialComparisonCurves(payload);
-  bindComparisonExports(payload);
-}
-
-function buildComparisonSeries(item, color) {
-  const aniso = item.anisotropic_thermal_expansion;
-  const source = aniso && (aniso.cartesian || aniso.directional);
-  const axialKeys = aniso && aniso.cartesian
-    ? ["alpha_xx", "alpha_yy", "alpha_zz"]
-    : ["alpha_a", "alpha_b", "alpha_c"];
-  let volume = [];
-  let axial = [];
-  let hasAnisotropic = false;
-  if (source && (source.points || []).length >= 2) {
-    const raw = source.points
-      .filter(point => Number.isFinite(Number(point.T_K)))
-      .map(point => {
-        const mapped = {x: Number(point.T_K)};
-        Object.keys(point).forEach(key => {
-          if (key !== "T_K") mapped[key] = Number(point[key]);
-        });
-        return mapped;
-      })
-      .filter(point => Number.isFinite(point.x));
-    volume = raw
-      .filter(point => Number.isFinite(point.alpha_volume))
-      .map(point => ({x: point.x, y: point.alpha_volume}));
-    axial = axialKeys
-      .map(key => ({
-        key,
-        points: raw
-          .filter(point => Number.isFinite(point[key]))
-          .map(point => ({x: point.x, y: point[key]})),
-      }))
-      .filter(part => part.points.length >= 2);
-    hasAnisotropic = volume.length >= 2;
-  }
-  return {key: item.material.material_key, color, volume, axial, hasAnisotropic};
-}
-
-function drawMaterialComparisonCurves(payload) {
-  const canvas = document.querySelector("#material-comparison-chart");
-  if (!canvas) return;
-  const series = payload.materials
-    .map((item, index) => buildComparisonSeries(item, COMPARISON_COLORS[index % COMPARISON_COLORS.length]))
-    .filter(item => item.volume.length >= 2);
-  if (!series.length) return;
-  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
-  const margin = {left: 66, right: 20, top: 46, bottom: 50};
-  const plotWidth = Math.max(1, width - margin.left - margin.right);
-  const plotHeight = Math.max(1, height - margin.top - margin.bottom);
-  const allPoints = series.flatMap(item =>
-    item.volume.concat(...item.axial.map(part => part.points)));
-  let xMin = Math.min(...allPoints.map(point => point.x));
-  let xMax = Math.max(...allPoints.map(point => point.x));
-  let yMin = Math.min(0, ...allPoints.map(point => point.y));
-  let yMax = Math.max(0, ...allPoints.map(point => point.y));
-  if (xMax === xMin) xMax = xMin + 1;
-  if (yMax === yMin) yMax = yMin + 1;
-  const yPadding = Math.max(1, (yMax - yMin) * .08);
-  yMin -= yPadding;
-  yMax += yPadding;
-  const xScale = value => margin.left + (value - xMin) / (xMax - xMin) * plotWidth;
-  const yScale = value => margin.top + plotHeight - (value - yMin) / (yMax - yMin) * plotHeight;
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (let index = 0; index <= 5; index += 1) {
-    const xValue = xMin + (xMax - xMin) * index / 5;
-    const yValue = yMin + (yMax - yMin) * index / 5;
-    const x = xScale(xValue);
-    const y = yScale(yValue);
-    ctx.strokeStyle = "#e7edf2";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, margin.top);
-    ctx.lineTo(x, margin.top + plotHeight);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(margin.left, y);
-    ctx.lineTo(margin.left + plotWidth, y);
-    ctx.stroke();
-    ctx.fillStyle = "#657889";
-    ctx.fillText(xValue.toFixed(0), x, height - 28);
-    ctx.textAlign = "right";
-    ctx.fillText(yValue.toFixed(1), margin.left - 9, y);
-    ctx.textAlign = "center";
-  }
-  if (yMin <= 0 && yMax >= 0) {
-    ctx.strokeStyle = "#9aa8b4";
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.moveTo(margin.left, yScale(0));
-    ctx.lineTo(margin.left + plotWidth, yScale(0));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  series.forEach(item => {
-    item.axial.forEach(part => {
-      ctx.strokeStyle = rgba(item.color, .48);
-      ctx.lineWidth = 1.15;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      part.points.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
-        else ctx.lineTo(xScale(point.x), yScale(point.y));
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-    });
-    ctx.strokeStyle = item.color;
-    ctx.lineWidth = 3.2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    item.volume.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
-      else ctx.lineTo(xScale(point.x), yScale(point.y));
-    });
-    ctx.stroke();
-  });
-  ctx.fillStyle = "#445b6d";
-  ctx.fillText("温度 T (K)", margin.left + plotWidth / 2, height - 10);
-  ctx.save();
-  ctx.translate(16, margin.top + plotHeight / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText("热膨胀系数 α (ppm/K)", 0, 0);
-  ctx.restore();
-  let legendX = margin.left;
-  series.forEach(item => {
-    const label = item.key.length > 24 ? item.key.slice(0, 22) + "…" : item.key;
-    ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, 18, 14, 3);
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#40586a";
-    ctx.fillText(label, legendX + 19, 20);
-    legendX += Math.min(230, 38 + ctx.measureText(label).width);
-  });
-  ctx.fillStyle = "#8496a5";
-  ctx.font = "11px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText("实线 = 体积 α_V（迹）· 虚线 = 轴向分量 α_xx/yy/zz（或 α_a/b/c）",
-    margin.left, 38);
-  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "center";
-  canvas.teRedraw = () => drawMaterialComparisonCurves(payload);
-}
-
-async function loadMaterialComparison() {
-  if (comparisonMaterialKeys.length < 2) return;
-  const result = document.querySelector("#material-compare-result");
-  result.className = "compare-result placeholder";
-  result.textContent = "正在读取材料属性和各向异性曲线…";
-  const temperature = Number(document.querySelector("#material-compare-temperature").value);
-  const params = new URLSearchParams({
-    material_keys: comparisonMaterialKeys.join("|"),
-    temperature_k: Number.isFinite(temperature) && temperature >= 0 ? String(temperature) : "300",
-  });
-  try {
-    renderMaterialComparison(await api("/api/materials/compare?" + params.toString()));
-  } catch (error) {
-    result.className = "compare-result";
-    result.textContent = error.message;
-  }
 }
 
 function renderStructureViewer(structures, materialKey = "") {
@@ -4479,10 +3940,6 @@ async function designZteComposite() {
 
 async function initialize() {
   restoreLandscapeContext();
-  restoreComparisonMaterials();
-  restoreAnalysisProjects();
-  renderComparisonSelection();
-  renderAnalysisProjectList();
   setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
@@ -4518,30 +3975,8 @@ async function initialize() {
     .forEach(selector => document.querySelector(selector).addEventListener("change", () => {
       updateCatalogFilterSummary();
       searchMaterials();
-    }));
+  }));
   updateCatalogFilterSummary();
-  document.querySelector("#material-compare-run").addEventListener("click", loadMaterialComparison);
-  document.querySelector("#material-compare-clear").addEventListener("click", () => {
-    comparisonMaterialKeys = [];
-    persistComparisonMaterials();
-    renderComparisonSelection();
-    const result = document.querySelector("#material-compare-result");
-    result.className = "compare-result placeholder";
-    result.textContent = "至少收藏两个材料后即可生成对比。";
-  });
-  document.querySelector("#analysis-project-save").addEventListener("click", saveAnalysisProject);
-  document.querySelector("#analysis-project-load").addEventListener("click", () =>
-    loadAnalysisProject().catch(error => {
-      document.querySelector("#material-compare-result").textContent = error.message;
-    }));
-  document.querySelector("#analysis-project-delete").addEventListener("click", deleteAnalysisProject);
-  document.querySelector("#analysis-project-select").addEventListener("change", event => {
-    activeAnalysisProjectId = event.target.value || null;
-    const project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
-    if (project) document.querySelector("#analysis-project-name").value = project.name;
-    document.querySelector("#analysis-project-load").disabled = !activeAnalysisProjectId;
-    document.querySelector("#analysis-project-delete").disabled = !activeAnalysisProjectId;
-  });
   document.querySelector("#pte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#nte-search-button").addEventListener("click", () =>
