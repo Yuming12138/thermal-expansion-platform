@@ -91,7 +91,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("NTE Materials", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-39", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-40", home.text)
         self.assertIn("/static/styles.css?v=0.10.0-26", home.text)
         self.assertNotIn('data-page-link="about"', home.text)
         self.assertNotIn("material-compare-panel", home.text)
@@ -164,6 +164,12 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/materials/{material_key}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["material"]["material_key"], material_key)
+        # Historical generated MP aliases should resolve to the canonical
+        # record so bookmarks from older releases remain usable.
+        formula_prefix = material_key.replace("_mp-", "-mp-").rsplit("-mp-", 1)[0]
+        legacy_detail = self.client.get(f"/api/materials/{formula_prefix}-mp-aaaabcws")
+        self.assertEqual(legacy_detail.status_code, 200)
+        self.assertEqual(legacy_detail.json()["material"]["material_key"], material_key)
         properties = detail.json()["properties"]
         expected_bonding = (
             160.21766208

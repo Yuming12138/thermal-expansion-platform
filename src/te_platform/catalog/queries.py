@@ -9,6 +9,7 @@ from typing import Any
 
 from te_platform.db.schema import connect_readonly_database
 from te_platform.screening.fast_sbr import calculate_bonding_modulus_from_atomic_volume
+from pymatgen.core import Composition
 
 
 ELEMENT_SYMBOLS = frozenset(
@@ -97,6 +98,37 @@ def _selected_elements(elements: list[str] | tuple[str, ...] | None) -> frozense
     if invalid:
         raise ValueError(f"Unknown element symbols: {', '.join(invalid)}")
     return selected
+
+
+def _formula_from_material_key(material_key: str) -> str | None:
+    """Extract a formula-like prefix from legacy material keys.
+
+    Older releases used generated MP aliases (for example
+    ``BaCrSi4O10-mp-aaaabcws``), while the current catalog stores the
+    canonical MP id.  The formula prefix is the only stable part shared by
+    those keys.  Return ``None`` for keys that are not safe to interpret as a
+    formula so a failed lookup still produces the normal 404 response.
+    """
+    match = re.match(r"^(?P<formula>.+?)[-_]mp-[A-Za-z0-9]+$", str(material_key))
+    if match is None:
+        return None
+    prefix = match.group("formula")
+    prefix = re.sub(r"^\d+[._-]", "", prefix)
+    prefix = prefix.replace("_", "")
+    if not prefix or not re.fullmatch(r"[A-Za-z0-9()]+", prefix):
+        return None
+    try:
+        Composition(prefix)
+    except (TypeError, ValueError):
+        return None
+    return prefix
+
+
+def _same_composition(formula_a: str, formula_b: str) -> bool:
+    try:
+        return Composition(formula_a).reduced_formula == Composition(formula_b).reduced_formula
+    except (TypeError, ValueError):
+        return False
 
 
 def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
@@ -452,6 +484,33 @@ def material_detail(
             """,
             (release_slug, material_key),
         ).fetchone()
+        if material is None:
+            # Keep old shared links usable after a release switches from
+            # generated MP aliases to canonical MP ids.  Resolve only when
+            # the formula prefix identifies exactly one material; silently
+            # picking among polymorphs would be worse than a clear 404.
+            legacy_formula = _formula_from_material_key(material_key)
+            if legacy_formula is not None:
+                alias_rows = connection.execute(
+                    """
+                    SELECT m.id, m.material_key, m.formula, m.external_id,
+                           dr.id AS release_id, dr.slug AS release_slug,
+                           dr.title AS release_title, dr.version AS release_version,
+                           dr.source_file_name, dr.source_sha256, dr.imported_at
+                    FROM dataset_releases dr
+                    JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+                    JOIN materials m ON m.id = dm.material_id
+                    WHERE dr.slug = ?
+                    ORDER BY m.material_key
+                    """,
+                    (release_slug,),
+                ).fetchall()
+                matches = [
+                    row for row in alias_rows
+                    if _same_composition(legacy_formula, str(row["formula"] or ""))
+                ]
+                if len(matches) == 1:
+                    material = matches[0]
         if material is None:
             raise ValueError(f"Material is not present in {release_slug}: {material_key}")
         properties = connection.execute(

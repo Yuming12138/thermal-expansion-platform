@@ -737,6 +737,16 @@ function renderMaterialProperties(data, hasElasticTensor) {
 
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
+  // A bookmarked URL can carry a generated MP alias from an older release.
+  // Once the API resolves it, keep the address bar on the canonical key so
+  // reloads and copied links point at the current catalog record.
+  const canonicalKey = data.material?.material_key;
+  if (canonicalKey && canonicalKey !== key) {
+    const canonicalPath = "/materials/" + encodeURIComponent(canonicalKey);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState(null, "", canonicalPath + window.location.search);
+    }
+  }
   const detailTitle = data.material.formula || data.material.material_key || key;
   document.querySelector("#material-detail-breadcrumb")?.replaceChildren(document.createTextNode(detailTitle));
   document.title = detailTitle + " · 材料详情 · NTE Materials";
