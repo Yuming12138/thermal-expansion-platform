@@ -90,9 +90,10 @@ class ApiTests(unittest.TestCase):
     def test_health_and_dataset_summary(self) -> None:
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
-        self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-36", home.text)
-        self.assertIn("/static/styles.css?v=0.10.0-23", home.text)
+        self.assertIn("NTE Materials", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-37", home.text)
+        self.assertIn("/static/styles.css?v=0.10.0-24", home.text)
+        self.assertNotIn('data-page-link="about"', home.text)
         self.assertNotIn("material-compare-panel", home.text)
         self.assertNotIn("论文原始散点与渐变背景", home.text)
         self.assertNotIn("下载绘图数据 CSV", home.text)

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   热膨胀材料智能计算与设计平台
+   NTE Materials
    Design system — White Lab / Indigo Signal
    Pure-white canvas + cool ink + one indigo interaction accent. The deliberately
    restrained geometry keeps the research-workbench character distinct from a
@@ -251,6 +251,24 @@ header {
 }
 header > div { min-width: 0; }
 header .eyebrow { color: var(--accent-700); }
+.site-brand { display: flex; align-items: center; gap: var(--space-md); }
+.site-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--accent-300);
+  border-radius: var(--radius-sm);
+  color: var(--accent-800);
+  background: var(--accent-50);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.04em;
+  text-decoration: none;
+}
+.site-brand-mark:hover { color: var(--accent-900); background: var(--accent-100); text-decoration: none; }
+.site-brand-copy h1 { font-size: clamp(1.18rem, 2.1vw, 1.52rem); }
 
 .status {
   flex: 0 0 auto;
@@ -1560,56 +1578,6 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
 .zte-model-note code { white-space: normal; word-break: break-word; }
 
 /* --------------------------------------------------------------------------
-   Page · About
-   -------------------------------------------------------------------------- */
-.about-page { display: grid; gap: var(--space-lg); }
-.about-hero { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xl); overflow: hidden; background: var(--surface-inset); }
-.about-hero h2 { margin-bottom: var(--space-sm); font-size: clamp(1.2rem, 2.2vw, 1.6rem); }
-.about-eyebrow { color: var(--accent-700); }
-.about-version-block {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  min-width: 132px;
-  padding: var(--space-lg) var(--space-xl);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-}
-.about-version-block span { color: var(--text-tertiary); font-size: var(--text-2xs); }
-.about-version-block strong { margin-top: 5px; color: var(--text-primary); font-family: var(--font-mono); font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
-.about-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-lg); }
-.about-grid .panel { min-height: 190px; }
-.about-list { display: grid; gap: 0; margin: 0; }
-.about-list div { display: grid; grid-template-columns: minmax(120px, 0.45fr) 1fr; gap: var(--space-md); padding: var(--space-sm) 0; border-bottom: 1px solid var(--border-hairline); }
-.about-list div:last-child { border-bottom: 0; }
-.about-list dt { color: var(--text-tertiary); font-size: var(--text-xs); }
-.about-list dd { margin: 0; color: var(--text-primary); font-size: var(--text-sm); overflow-wrap: anywhere; }
-.about-formula {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  padding: var(--space-md);
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-sm);
-  background: var(--surface-inset);
-}
-.about-formula + .about-formula { margin-top: var(--space-sm); }
-.about-formula span { color: var(--text-tertiary); font-size: var(--text-xs); }
-.about-formula strong { color: var(--text-primary); font-family: var(--font-mono); font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.about-tags { display: flex; gap: var(--space-sm); flex-wrap: wrap; }
-.about-tags span {
-  padding: 5px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
-  color: var(--text-secondary);
-  background: var(--surface-inset);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-}
-
-/* --------------------------------------------------------------------------
    Structure viewer (Crystal Toolkit) + thermal panel
    -------------------------------------------------------------------------- */
 .material-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-lg); align-items: stretch; margin: var(--space-lg) 0; }
@@ -1925,7 +1893,7 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
 
 @media (max-width: 950px) {
   .stats, .grid.two, .grid.three, .prediction-actions, .prediction-metrics,
-  .composite-pickers, .composite-window, .material-visual-grid, .about-grid,
+  .composite-pickers, .composite-window, .material-visual-grid,
   .zte-analysis-grid, .zte-phase-grid, .zte-robustness-grid { grid-template-columns: 1fr; }
   .mechanical-property-grid { grid-template-columns: 1fr; }
   .zte-engineering-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1977,9 +1945,7 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   .properties-count { text-align: left; }
   .mechanical-metric-grid { grid-template-columns: 1fr; }
   .provenance-card dl { grid-template-columns: 1fr; gap: 3px; }
-  .structure-heading, .about-hero { align-items: stretch; flex-direction: column; }
-  .about-version-block { width: 100%; }
-  .about-list div { grid-template-columns: 1fr; gap: var(--space-xs); }
+  .structure-heading { align-items: stretch; flex-direction: column; }
   .structure-viewer, .structure-ctk-stage { height: 360px; }
   .thermal-empty { min-height: 300px; }
   .structure-viewer-tools { top: var(--space-sm); right: var(--space-sm); }

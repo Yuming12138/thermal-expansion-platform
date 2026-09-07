@@ -334,7 +334,7 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="热膨胀材料智能计算与设计平台",
+        title="NTE Materials",
         version=__version__,
         lifespan=lifespan,
     )
@@ -389,7 +389,7 @@ def create_app(
         pte = dataset_summary(catalog_db, active_pte_release_slug)
         return {
             "software": {
-                "name_zh": "热膨胀材料智能计算与设计平台",
+                "name_zh": "NTE Materials",
                 "name_en": "Thermal Expansion Materials Platform",
                 "version": __version__,
                 "copyright_owner": copyright_owner(),

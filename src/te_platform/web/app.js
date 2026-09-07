@@ -83,7 +83,6 @@ const WORKSPACE_PAGES = {
   predict: {path: "/predict", title: "结构预测"},
   landscape: {path: "/landscape", title: "热膨胀景观"},
   zte: {path: "/zte", title: "ZTE 复合设计"},
-  about: {path: "/about", title: "关于软件"},
 };
 
 function prepareHiDpiCanvas(canvas) {
@@ -117,31 +116,6 @@ async function loadStats() {
     "<span class='catalog-stats-meta'>结构 " + escapeHtml(counts.structures) +
     " · 属性 " + escapeHtml(counts.property_values) +
     " · v" + escapeHtml(dataset.release.version) + "</span>";
-}
-
-async function loadAbout() {
-  const payload = await api("/api/about");
-  const software = payload.software;
-  const datasets = payload.datasets;
-  document.querySelector("#about-name").textContent = software.name_zh;
-  document.querySelector("#about-name-en").textContent = software.name_en;
-  document.querySelector("#about-version").textContent = "v" + software.version;
-  document.querySelector("#about-owner").textContent = software.copyright_owner;
-  const repository = document.querySelector("#about-repository");
-  repository.href = software.repository;
-  repository.textContent = software.repository.replace("https://github.com/", "");
-  document.querySelector("#about-nte").textContent =
-    datasets.nte_materials + " 条 · " + datasets.nte.version;
-  document.querySelector("#about-pte").textContent =
-    datasets.pte_materials + " 条 · " + datasets.pte.version;
-  document.querySelector("#about-total").textContent = datasets.catalog_materials + " 条";
-  document.querySelector("#about-descriptor").textContent =
-    payload.descriptor.bonding_modulus + "；正式分类边界 ξc=" +
-    Number(payload.descriptor.formal_boundary).toFixed(5) + "。";
-  document.querySelector("#about-scope").textContent = payload.scientific_scope;
-  document.querySelector("#about-technology").innerHTML = payload.technology
-    .map(item => "<span>" + escapeHtml(item) + "</span>")
-    .join("");
 }
 
 function elementFamily(symbol) {
@@ -377,7 +351,7 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     if (link.dataset.pageLink === navigationPage) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
-  document.title = page.title + " · 热膨胀材料智能计算与设计平台";
+  document.title = page.title + " · NTE Materials";
   const targetUrl = workspaceUrl(selectedPage);
   if (updateHistory && window.location.pathname + window.location.search !== targetUrl) {
     window.history.pushState({page: selectedPage}, "", targetUrl);
@@ -732,7 +706,7 @@ async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
   const detailTitle = data.material.formula || data.material.material_key || key;
   document.querySelector("#material-detail-breadcrumb")?.replaceChildren(document.createTextNode(detailTitle));
-  document.title = detailTitle + " · 材料详情 · 热膨胀材料智能计算与设计平台";
+  document.title = detailTitle + " · 材料详情 · NTE Materials";
   const hasElasticTensor = Boolean(data.structures?.some(item =>
     String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
   ));
@@ -4147,7 +4121,6 @@ async function initialize() {
       loadPeriodicElementCounts(),
       searchMaterials(),
       api("/static/fig1d-reference.json"),
-      loadAbout(),
     ]);
     fig1dReference = results[3];
     try {
