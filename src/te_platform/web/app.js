@@ -42,6 +42,8 @@ let zteFocusedPairId = null;
 let zteCandidateDetailPayload = null;
 let zteCandidateReturnUrl = "/zte";
 let zteCandidateStructureViewers = [];
+let predictionProgressStartedAt = null;
+let predictionPollTimer = null;
 const zteSelectedPairIds = new Set();
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
@@ -1844,6 +1846,56 @@ function setPredictionButtonsDisabled(disabled) {
   });
 }
 
+function clearPredictionProgressTimer() {
+  if (predictionPollTimer) window.clearTimeout(predictionPollTimer);
+  predictionPollTimer = null;
+  predictionProgressStartedAt = null;
+}
+
+function formatElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes} 分 ${String(remainder).padStart(2, "0")} 秒`;
+}
+
+function predictionStatusLabel(status) {
+  return {
+    PENDING: "准备中",
+    QUEUED: "排队中",
+    RUNNING: "计算中",
+    SUCCEEDED: "已完成",
+    FAILED: "失败",
+    CANCELLED: "已取消",
+  }[String(status || "").toUpperCase()] || String(status || "处理中");
+}
+
+function predictionStageLabel(stage, mode) {
+  return {
+    elastic: "弹性张量：应变结构计算",
+    agv2_force_constants: "AGV2：各向异性力常数",
+    elastic_force_constants: "弹性张量：力常数",
+    qha_force_constants: "QHA：位移力常数",
+    fast_screening: "快速筛选：ALIGNN + MatterSim",
+  }[stage] || (mode === "thermal" ? "热膨胀工作流" : "弹性工作流");
+}
+
+function predictionProgressDetail(progress) {
+  if (!progress) return "正在等待计算节点…";
+  const completed = ["completed_states", "completed_strains", "completed_displacements"]
+    .find(key => Number.isFinite(Number(progress[key])));
+  const total = completed ? {
+    completed_states: "total_states",
+    completed_strains: "total_strains",
+    completed_displacements: "total_displacements",
+  }[completed] : null;
+  if (completed && total && Number.isFinite(Number(progress[total]))) {
+    return `${progress[completed]} / ${progress[total]} 个任务单元`;
+  }
+  return "已进入计算流程";
+}
+
 function classificationText(value) {
   return {
     high_probability_nte: "高概率 NTE",
@@ -1989,52 +2041,99 @@ function renderThermalExpansionPrediction(file, result) {
   );
 }
 
-function renderJobProgress(job, label) {
-  const progress = job.progress || {};
-  const progressText = Number.isFinite(Number(progress.percent)) ? " · " + progress.percent + "%" : "";
+function renderJobProgress(job, label, mode) {
+  const progress = job.progress || null;
+  const rawPercent = Number(progress?.percent);
+  const hasPercent = Number.isFinite(rawPercent) && rawPercent >= 0 && rawPercent <= 100;
+  const percent = hasPercent ? Math.max(0, Math.min(100, rawPercent)) : null;
+  const method = job.parameters?.actual_method || job.routing?.method;
+  const methodLabel = method === "agv2"
+    ? "非立方 · AGV2"
+    : method === "qha" || mode === "qha"
+      ? "立方 · QHA"
+      : mode === "thermal" ? "自动路由" : "完整弹性";
+  const elapsed = predictionProgressStartedAt
+    ? formatElapsed(Date.now() - predictionProgressStartedAt)
+    : "—";
+  const trackClass = percent === null ? "prediction-progress-track indeterminate" : "prediction-progress-track";
+  const trackStyle = percent === null ? "" : ` style="--progress:${percent}%"`;
+  const progressAria = percent === null
+    ? " role='progressbar' aria-label='计算进度'"
+    : ` role='progressbar' aria-label='计算进度' aria-valuemin='0' aria-valuemax='100' aria-valuenow='${percent}'`;
   document.querySelector("#prediction-result").innerHTML =
-    "<h3>" + escapeHtml(label) + "</h3><p>任务 " + escapeHtml(job.id) +
-    " · " + escapeHtml(job.status) + progressText + "</p>";
+    "<div class='prediction-progress-heading'><h3>" + escapeHtml(label) +
+    "</h3><span class='prediction-status'>" + escapeHtml(predictionStatusLabel(job.status)) + "</span></div>" +
+    "<div class='prediction-progress-meta'><span>" + escapeHtml(methodLabel) + "</span><span>任务 " +
+    escapeHtml(job.id) + "</span><span>已用 " + escapeHtml(elapsed) + "</span></div>" +
+    "<div class='" + trackClass + "'" + progressAria + trackStyle + "><span></span></div>" +
+    "<div class='prediction-progress-foot'><span>" + escapeHtml(predictionStageLabel(progress?.stage, mode)) +
+    " · " + escapeHtml(predictionProgressDetail(progress)) + "</span><strong>" +
+    (percent === null ? "处理中" : escapeHtml(percent.toFixed(1) + "%")) + "</strong></div>";
+}
+
+function predictionEndpoint(mode) {
+  return mode === "elastic"
+    ? "/api/precision/elastic-jobs"
+    : "/api/precision/thermal-expansion-jobs";
+}
+
+function renderPredictionFailure(job, mode, file) {
+  const result = document.querySelector("#prediction-result");
+  result.innerHTML =
+    "<div class='prediction-progress-heading'><h3>计算未完成</h3><span class='prediction-status error'>" +
+    escapeHtml(predictionStatusLabel(job.status)) + "</span></div>" +
+    "<p class='prediction-error-message'>" + escapeHtml(job.error_message || "请查看任务日志并重试。") + "</p>" +
+    "<div class='prediction-progress-meta'><span>任务 " + escapeHtml(job.id) +
+    "</span><span>可以使用同一结构重新提交</span></div>" +
+    "<button id='prediction-retry-button' class='secondary-button' type='button'>重新提交</button>";
+  document.querySelector("#prediction-retry-button").addEventListener("click", () => {
+    submitPredictionJob(predictionEndpoint(mode), mode, file);
+  });
 }
 
 async function pollPredictionJob(jobId, mode, file) {
   try {
     const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
-    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "热膨胀计算中");
+    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "热膨胀计算中", mode);
     if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
-      window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
+      predictionPollTimer = window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
       return;
     }
     setPredictionButtonsDisabled(false);
     if (job.status !== "SUCCEEDED") {
-      document.querySelector("#prediction-result").innerHTML =
-        "<h3>计算失败</h3><p>" + escapeHtml(job.error_message || "请查看任务日志。") + "</p>";
+      renderPredictionFailure(job, mode, file);
+      clearPredictionProgressTimer();
       return;
     }
+    clearPredictionProgressTimer();
     if (mode === "elastic") renderElasticPrediction(file, job.result);
     else if (mode === "thermal") renderThermalExpansionPrediction(file, job.result);
     else renderQhaPrediction(job.result);
   } catch (error) {
     setPredictionButtonsDisabled(false);
+    clearPredictionProgressTimer();
     document.querySelector("#prediction-result").textContent = error.message;
   }
 }
 
-async function submitPredictionJob(endpoint, mode) {
-  const file = uploadedStructure();
+async function submitPredictionJob(endpoint, mode, selectedFile = null) {
+  const file = selectedFile || uploadedStructure();
   if (!file) {
     document.querySelector("#prediction-result").textContent = "请先选择 CIF 或 POSCAR 文件。";
     return;
   }
+  clearPredictionProgressTimer();
+  predictionProgressStartedAt = Date.now();
   setPredictionButtonsDisabled(true);
   document.querySelector("#prediction-result").textContent = mode === "elastic"
     ? "正在提交完整弹性张量计算…" : "正在按晶体系统提交热膨胀计算…";
   try {
     const job = await api(endpoint, {method: "POST", body: structureBody(file)});
-    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "热膨胀任务已提交");
-    window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
+    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "热膨胀任务已提交", mode);
+    predictionPollTimer = window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
   } catch (error) {
     setPredictionButtonsDisabled(false);
+    clearPredictionProgressTimer();
     document.querySelector("#prediction-result").textContent = error.message;
   }
 }
@@ -4190,8 +4289,12 @@ async function initialize() {
     agentToggle.textContent = collapsed ? "+" : "−";
     agentToggle.setAttribute("aria-expanded", String(!collapsed));
     agentToggle.setAttribute("aria-label", collapsed ? "展开 Agent" : "最小化 Agent");
+    agentToggle.title = collapsed ? "展开 Agent" : "最小化 Agent";
+    try { window.localStorage.setItem("tep.agent-collapsed.v1", String(collapsed)); } catch (_) {}
   };
-  if (window.matchMedia("(max-width: 560px)").matches) setAgentCollapsed(true);
+  let storedAgentCollapsed = null;
+  try { storedAgentCollapsed = window.localStorage.getItem("tep.agent-collapsed.v1"); } catch (_) {}
+  setAgentCollapsed(storedAgentCollapsed === null ? true : storedAgentCollapsed !== "false");
   agentToggle.addEventListener("click", () => {
     setAgentCollapsed(!agentWidget.classList.contains("collapsed"));
   });
@@ -4441,6 +4544,14 @@ async function initialize() {
       ? `${capability.model} · 已连接`
       : `尚未配置 AI 密钥`;
     statusDot.classList.add(capability.configured ? "online" : "offline");
+    const agentFile = document.querySelector("#agent-file");
+    const agentMessage = document.querySelector("#agent-message");
+    const agentSend = document.querySelector("#agent-send");
+    [agentFile, agentMessage, agentSend].forEach(control => {
+      control.disabled = !capability.configured;
+      if (!capability.configured) control.title = "请先配置 AI 密钥";
+    });
+    agentWidget.classList.toggle("agent-unconfigured", !capability.configured);
     const pendingApprovals = await api("/api/agent/approvals?status=PENDING_APPROVAL&limit=10");
     (pendingApprovals.requests || []).forEach(item => appendAgentApproval({
       approval_id: item.id,
@@ -4451,6 +4562,10 @@ async function initialize() {
   } catch (error) {
     document.querySelector("#agent-status").textContent = error.message;
     document.querySelector("#agent-status-dot").classList.add("offline");
+    document.querySelector("#agent-file").disabled = true;
+    document.querySelector("#agent-message").disabled = true;
+    document.querySelector("#agent-send").disabled = true;
+    document.querySelector("#agent-widget").classList.add("agent-unconfigured");
   }
 }
 

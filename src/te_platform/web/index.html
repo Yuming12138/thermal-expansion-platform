@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-22">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-23">
   </head>
   <body>
     <header>
@@ -354,7 +354,7 @@
         </section>
       </section>
     </main>
-    <aside id="agent-widget" class="agent-widget" aria-label="热膨胀材料 Agent">
+    <aside id="agent-widget" class="agent-widget collapsed" aria-label="热膨胀材料 Agent">
       <div class="agent-header">
         <div class="agent-identity">
           <span id="agent-status-dot" class="agent-status-dot" aria-hidden="true"></span>
@@ -363,9 +363,9 @@
             <span id="agent-status">正在检查配置…</span>
           </div>
         </div>
-        <button id="agent-toggle" class="agent-toggle" type="button" aria-expanded="true" aria-label="最小化 Agent">−</button>
+        <button id="agent-toggle" class="agent-toggle" type="button" aria-expanded="false" aria-controls="agent-body" aria-label="展开 Agent" title="展开 Agent">+</button>
       </div>
-      <div class="agent-body">
+      <div id="agent-body" class="agent-body">
         <div id="agent-messages" class="agent-messages" aria-live="polite">
           <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析热膨胀曲线、设计 ZTE 配比，也可以为上传结构规划快速、弹性或按对称性路由的热膨胀计算。</div>
         </div>
@@ -385,6 +385,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-35"></script>
+    <script src="/static/app.js?v=0.10.0-36"></script>
   </body>
 </html>
