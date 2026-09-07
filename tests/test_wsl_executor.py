@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command
+from te_platform.precision.wsl_executor import (
+    PrecisionTaskConfig,
+    build_anisotropic_command,
+    build_precision_command,
+)
 
 
 class WslExecutorTests(unittest.TestCase):
@@ -33,6 +37,31 @@ class WslExecutorTests(unittest.TestCase):
 
             self.assertIn("--elastic-only", elastic[-1])
             self.assertIn("--thermal-only", qha[-1])
+
+    @unittest.skipUnless(os.name == "nt", "WSL command construction is Windows-specific")
+    def test_builds_native_agv2_command_without_qha_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            (work / "POSCAR").write_text("test", encoding="utf-8")
+            tools = work / "workflow_scripts"
+            (tools / "agv2").mkdir(parents=True)
+            (tools / "complete_properties_calc.sh").write_text("#!/bin/bash", encoding="utf-8")
+            (tools / "agv2" / "run_gruneisen_thermal_expansion_v2.py").write_text(
+                "# runner", encoding="utf-8"
+            )
+            settings = {
+                "TEP_WSL_DISTRO": "Ubuntu-24.04",
+                "TEP_PRECISION_CONDA_INIT": "/opt/conda/etc/profile.d/conda.sh",
+                "TEP_PRECISION_CONDA_ENV": "mattersim",
+                "TEP_VASPKIT_BIN_DIR": "/opt/vaspkit/bin",
+            }
+            with patch.dict("os.environ", settings):
+                command = build_anisotropic_command(work, PrecisionTaskConfig())
+            shell = command[-1]
+            self.assertIn("/tmp/tep-agv2-", shell)
+            self.assertIn("run_gruneisen_thermal_expansion_v2.py", shell)
+            self.assertIn("trap 'rm -rf -- /tmp/tep-agv2-", shell)
+            self.assertNotIn("--thermal-only", shell)
 
 
 if __name__ == "__main__":

@@ -179,8 +179,12 @@ def build_anisotropic_command(
         f"cp -a {shlex.quote(native_wsl)}/elastic {shlex.quote(work_wsl)}/ && "
         f"cp -a {shlex.quote(native_wsl)}/gruneisen_aniso_1M_v2 {shlex.quote(work_wsl)}/"
     )
+    # Always remove the native scratch copy, including on a failed elastic or
+    # AGV2 stage.  The durable Windows work directory is synced back before
+    # the trap runs, so this does not affect result visibility or recovery.
+    cleanup = f"trap 'rm -rf -- {native_wsl}' EXIT"
     command = (
         f"source {shlex.quote(conda_init)} && export PATH={shlex.quote(vaspkit_bin)}:\"$PATH\" && "
-        f"{elastic_cmd} && {agv2_cmd} && {sync_back}"
+        f"{cleanup} && {elastic_cmd} && {agv2_cmd} && {sync_back}"
     )
     return ["wsl", "-d", distro, "--", "bash", "-lc", command]
