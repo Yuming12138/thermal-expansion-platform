@@ -24,6 +24,17 @@ Ba Cr Si O
 Direct
 """
 
+ORTHO_POSCAR = b"""Si orthorhombic
+1.0
+3.000000 0.000000 0.000000
+0.000000 4.000000 0.000000
+0.000000 0.000000 5.000000
+Si
+1
+Direct
+0.000000 0.000000 0.000000
+"""
+
 CIF = b"""data_example
 _cell_length_a 5.0
 _cell_length_b 5.0
@@ -80,7 +91,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/")
         self.assertEqual(home.status_code, 200)
         self.assertIn("热膨胀材料智能计算与设计平台", home.text)
-        self.assertIn("/static/app.js?v=0.10.0-34", home.text)
+        self.assertIn("/static/app.js?v=0.10.0-35", home.text)
         self.assertIn("/static/styles.css?v=0.10.0-22", home.text)
         self.assertNotIn("material-compare-panel", home.text)
         self.assertNotIn("论文原始散点与渐变背景", home.text)
@@ -757,6 +768,45 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], "job-123")
         self.assertEqual(submission_mock.call_args.args[0], self.workspace_database)
+
+    @patch("te_platform.api.app.submit_thermal_expansion_job")
+    def test_thermal_expansion_endpoint_routes_non_cubic_to_agv2(self, submission_mock) -> None:
+        submission_mock.return_value = {
+            "id": "thermal-123",
+            "status": "PENDING",
+            "parameters": {"actual_method": "agv2"},
+        }
+        response = self.client.post(
+            "/api/precision/thermal-expansion-jobs",
+            files={"file": ("POSCAR", ORTHO_POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["routing"]["method"], "agv2")
+        self.assertFalse(response.json()["routing"]["is_cubic"])
+        self.assertEqual(submission_mock.call_args.args[0], self.workspace_database)
+
+    @patch("te_platform.api.app.submit_thermal_expansion_job")
+    def test_thermal_expansion_endpoint_routes_cubic_to_qha(self, submission_mock) -> None:
+        submission_mock.return_value = {
+            "id": "thermal-124",
+            "status": "PENDING",
+            "parameters": {"actual_method": "qha"},
+        }
+        response = self.client.post(
+            "/api/precision/thermal-expansion-jobs",
+            files={"file": ("POSCAR", POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["routing"]["method"], "qha")
+        self.assertTrue(response.json()["routing"]["is_cubic"])
+
+    def test_scalar_qha_endpoint_rejects_non_cubic_structure(self) -> None:
+        response = self.client.post(
+            "/api/precision/qha-jobs",
+            files={"file": ("POSCAR", ORTHO_POSCAR, "text/plain")},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("restricted to cubic", response.json()["detail"])
 
     @patch("te_platform.api.app.submit_elastic_job")
     def test_elastic_job_submission_endpoint(self, submission_mock) -> None:

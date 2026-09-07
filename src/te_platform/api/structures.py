@@ -6,12 +6,31 @@ from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
+class StructureSymmetry:
+    """Crystallographic routing facts used by the precision workflow.
+
+    ``is_cubic`` is deliberately tri-state.  A failed crystallographic parse
+    must not silently route a non-cubic upload through scalar QHA.
+    """
+
+    crystal_system: str | None = None
+    space_group_symbol: str | None = None
+    space_group_number: int | None = None
+    is_cubic: bool | None = None
+    source: str = "unresolved"
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StructureInspection:
     format: str
     atom_count: int | None
     cell_volume_a3: float | None
     elements: tuple[str, ...]
     warnings: tuple[str, ...]
+    symmetry: StructureSymmetry = StructureSymmetry()
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -102,12 +121,85 @@ def inspect_cif(text: str) -> StructureInspection:
     )
 
 
+def _metric_symmetry_from_inspection(inspection: StructureInspection, text: str) -> StructureSymmetry:
+    """Best-effort fallback for truncated uploads used in smoke tests.
+
+    Real uploads are parsed by pymatgen below.  The metric fallback only
+    claims cubic when all three lengths and angles are unambiguously cubic;
+    otherwise it returns ``None`` so the caller can refuse unsafe routing.
+    """
+    try:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if inspection.format == "poscar" and len(lines) >= 5:
+            scale = abs(float(lines[1]))
+            vectors = [[float(value) for value in lines[index].split()[:3]] for index in range(2, 5)]
+            lengths = [sum(value * value for value in vector) ** 0.5 * scale for vector in vectors]
+            dot = lambda left, right: sum(a * b for a, b in zip(left, right))
+            angles = []
+            for left, right in ((vectors[1], vectors[2]), (vectors[0], vectors[2]), (vectors[0], vectors[1])):
+                denom = (dot(left, left) * dot(right, right)) ** 0.5
+                angles.append(90.0 if denom == 0 else math.degrees(math.acos(max(-1.0, min(1.0, dot(left, right) / denom)))))
+        elif inspection.format == "cif":
+            a = _cif_number(text, "_cell_length_a")
+            b = _cif_number(text, "_cell_length_b")
+            c = _cif_number(text, "_cell_length_c")
+            alpha = _cif_number(text, "_cell_angle_alpha")
+            beta = _cif_number(text, "_cell_angle_beta")
+            gamma = _cif_number(text, "_cell_angle_gamma")
+            if None in (a, b, c, alpha, beta, gamma):
+                return StructureSymmetry(source="metric_fallback_unresolved")
+            lengths = [float(a), float(b), float(c)]
+            angles = [float(alpha), float(beta), float(gamma)]
+        else:
+            return StructureSymmetry(source="metric_fallback_unresolved")
+        equal_lengths = max(lengths) - min(lengths) <= max(1e-3, 1e-3 * max(lengths))
+        right_angles = max(abs(angle - 90.0) for angle in angles) <= 1e-2
+        if equal_lengths and right_angles:
+            return StructureSymmetry(
+                crystal_system="cubic",
+                is_cubic=True,
+                source="lattice_metric_fallback",
+            )
+    except (ArithmeticError, IndexError, TypeError, ValueError):
+        pass
+    return StructureSymmetry(source="metric_fallback_unresolved")
+
+
+def analyze_structure_symmetry(filename: str, content: bytes, inspection: StructureInspection | None = None) -> StructureSymmetry:
+    """Return the space-group based symmetry used for QHA/AGV2 routing."""
+    current = inspection or inspect_structure(filename, content)
+    try:
+        from pymatgen.core import Structure
+        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+        text = content.decode("utf-8", errors="replace")
+        fmt = "cif" if current.format == "cif" else "poscar"
+        structure = Structure.from_str(text, fmt=fmt)
+        analyzer = SpacegroupAnalyzer(structure, symprec=0.1, angle_tolerance=5.0)
+        crystal_system = analyzer.get_crystal_system()
+        return StructureSymmetry(
+            crystal_system=crystal_system,
+            space_group_symbol=analyzer.get_space_group_symbol(),
+            space_group_number=int(analyzer.get_space_group_number()),
+            is_cubic=crystal_system == "cubic",
+            source="pymatgen.SpacegroupAnalyzer",
+        )
+    except Exception:
+        return _metric_symmetry_from_inspection(current, content.decode("utf-8", errors="replace"))
+
+
 def inspect_structure(filename: str, content: bytes) -> StructureInspection:
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         text = content.decode("utf-8-sig", errors="replace")
     suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if suffix == "cif" or "_cell_length_a" in text:
-        return inspect_cif(text)
-    return inspect_poscar(text)
+    inspection = inspect_cif(text) if suffix == "cif" or "_cell_length_a" in text else inspect_poscar(text)
+    return StructureInspection(
+        format=inspection.format,
+        atom_count=inspection.atom_count,
+        cell_volume_a3=inspection.cell_volume_a3,
+        elements=inspection.elements,
+        warnings=inspection.warnings,
+        symmetry=analyze_structure_symmetry(filename, content, inspection),
+    )

@@ -1949,6 +1949,46 @@ function renderQhaPrediction(result) {
   );
 }
 
+function thermalMethodLabel(result) {
+  if (result?.calculation_method === "anisotropic_gruneisen_v2" || result?.calculation_mode === "agv2") {
+    return "各向异性 Grüneisen v2";
+  }
+  return "立方材料 QHA";
+}
+
+function renderThermalExpansionPrediction(file, result) {
+  const symmetry = result.symmetry || {};
+  const method = thermalMethodLabel(result);
+  const directional = Array.isArray(result.thermal_expansion_directional_curve)
+    ? result.thermal_expansion_directional_curve : [];
+  const at300 = directional.reduce((best, point) =>
+    !best || Math.abs(Number(point.T_K) - 300) < Math.abs(Number(best.T_K) - 300) ? point : best, null);
+  const directionalHtml = at300 ?
+    "<div class='directional-summary'><span>300 K 方向分量</span>" +
+    "<strong>αa " + numeric(Number(at300.alpha_a)) + "</strong>" +
+    "<strong>αb " + numeric(Number(at300.alpha_b)) + "</strong>" +
+    "<strong>αc " + numeric(Number(at300.alpha_c)) + "</strong> ppm/K</div>" : "";
+  document.querySelector("#prediction-result").innerHTML =
+    "<h3>热膨胀计算结果</h3>" +
+    metricCards([
+      ["300 K 体积热膨胀", numeric(result.alpha_300k_ppm_per_k) + " ppm/K"],
+      ["实际算法", method],
+      ["晶体系统", symmetry.crystal_system || "待解析"],
+      ["温度点数", String(result.thermal_expansion_curve?.length || 0)],
+    ]) +
+    directionalHtml +
+    "<canvas id='prediction-thermal-curve' class='prediction-thermal-curve' width='900' height='360'></canvas>" +
+    "<p class='curve-note'>" + escapeHtml(result.routing_reason || "按结构对称性自动选择计算方法。") + "</p>" +
+    (result.quality_warnings?.length ? "<p class='curve-note'>质量提示：" +
+      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "");
+  drawPrecisionThermalExpansion(
+    {points: (result.thermal_expansion_curve || []).map(point => ({
+      temperature_k: point[0], alpha_ppm_per_k: point[1] * 1_000_000,
+    }))},
+    "#prediction-thermal-curve",
+  );
+}
+
 function renderJobProgress(job, label) {
   const progress = job.progress || {};
   const progressText = Number.isFinite(Number(progress.percent)) ? " · " + progress.percent + "%" : "";
@@ -1960,7 +2000,7 @@ function renderJobProgress(job, label) {
 async function pollPredictionJob(jobId, mode, file) {
   try {
     const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
-    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "QHA 计算中");
+    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "热膨胀计算中");
     if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
       window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
       return;
@@ -1972,6 +2012,7 @@ async function pollPredictionJob(jobId, mode, file) {
       return;
     }
     if (mode === "elastic") renderElasticPrediction(file, job.result);
+    else if (mode === "thermal") renderThermalExpansionPrediction(file, job.result);
     else renderQhaPrediction(job.result);
   } catch (error) {
     setPredictionButtonsDisabled(false);
@@ -1987,10 +2028,10 @@ async function submitPredictionJob(endpoint, mode) {
   }
   setPredictionButtonsDisabled(true);
   document.querySelector("#prediction-result").textContent = mode === "elastic"
-    ? "正在提交完整弹性张量计算…" : "正在提交 MatterSim QHA 计算…";
+    ? "正在提交完整弹性张量计算…" : "正在按晶体系统提交热膨胀计算…";
   try {
     const job = await api(endpoint, {method: "POST", body: structureBody(file)});
-    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "QHA 任务已提交");
+    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "热膨胀任务已提交");
     window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
   } catch (error) {
     setPredictionButtonsDisabled(false);
@@ -4098,6 +4139,25 @@ async function initialize() {
         file.name + " · " + inspection.format.toUpperCase() + " · " +
         (inspection.atom_count ?? "待解析") + " atoms · " +
         (Number.isFinite(Number(inspection.cell_volume_a3)) ? Number(inspection.cell_volume_a3).toFixed(3) + " Å³" : "体积待解析");
+      const symmetry = inspection.symmetry || {};
+      const route = document.querySelector("#structure-method-route");
+      route.hidden = false;
+      if (symmetry.is_cubic === true) {
+        route.className = "method-route";
+        route.innerHTML = "<strong>" + escapeHtml(symmetry.crystal_system || "cubic") + " · " +
+          escapeHtml(symmetry.space_group_symbol || "立方空间群") + "</strong>" +
+          "<span class='method-route-arrow'>→</span><strong>立方材料 QHA</strong>" +
+          "<span class='method-route-reason'>自动路由，不使用 AGV2</span>";
+      } else if (symmetry.is_cubic === false) {
+        route.className = "method-route";
+        route.innerHTML = "<strong>" + escapeHtml(symmetry.crystal_system || "非立方") + " · " +
+          escapeHtml(symmetry.space_group_symbol || "") + "</strong>" +
+          "<span class='method-route-arrow'>→</span><strong>各向异性 Grüneisen v2</strong>" +
+          "<span class='method-route-reason'>先生成完整弹性张量，再计算 α<sub>V</sub>(T) 与方向分量</span>";
+      } else {
+        route.className = "method-route unresolved";
+        route.innerHTML = "<strong>晶体系统待解析</strong><span class='method-route-reason'>无法安全路由时不会静默使用 QHA，请检查结构文件</span>";
+      }
       document.querySelector("#prediction-result").textContent = "结构检查完成，请选择计算层级。";
     } catch (error) {
       document.querySelector("#structure-summary").textContent = error.message;
@@ -4122,7 +4182,7 @@ async function initialize() {
   document.querySelector("#elastic-button").addEventListener("click", () =>
     submitPredictionJob("/api/precision/elastic-jobs", "elastic"));
   document.querySelector("#qha-button").addEventListener("click", () =>
-    submitPredictionJob("/api/precision/qha-jobs", "qha"));
+    submitPredictionJob("/api/precision/thermal-expansion-jobs", "thermal"));
   const agentWidget = document.querySelector("#agent-widget");
   const agentToggle = document.querySelector("#agent-toggle");
   const setAgentCollapsed = collapsed => {
@@ -4196,6 +4256,7 @@ async function initialize() {
         fast_structure_screening: "快速预测",
         precision_elastic: "精准弹性",
         precision_qha: "QHA",
+        precision_thermal_expansion: "自动热膨胀",
       }[job.workflow] || "计算";
       bubble.textContent = `${jobLabel}任务 ${job.id}\n状态：${job.status}${percent}`;
       if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
@@ -4237,7 +4298,7 @@ async function initialize() {
       const canvasId = "agent-job-curve-" + job.id;
       bubble.classList.add("wide");
       bubble.innerHTML =
-        "<strong>QHA 热膨胀计算完成</strong>" +
+        "<strong>" + escapeHtml(result.calculation_method === "anisotropic_gruneisen_v2" ? "各向异性热膨胀计算完成" : "立方材料 QHA 计算完成") + "</strong>" +
         "<p>300 K：" + numeric(result.alpha_300k_ppm_per_k) + " ppm/K · " +
         escapeHtml(String(result.thermal_expansion_curve?.length || 0)) + " 个温度点</p>" +
         "<canvas id='" + canvasId + "' class='agent-job-curve' width='720' height='300'></canvas>";
@@ -4264,6 +4325,7 @@ async function initialize() {
       fast: "快速预测",
       elastic: "精准弹性预测",
       qha: "QHA 热膨胀计算",
+      thermal: "自动热膨胀计算",
     }[approval.mode] || "结构计算";
     title.textContent = "需要确认：提交" + modeLabel;
     const summary = document.createElement("div");

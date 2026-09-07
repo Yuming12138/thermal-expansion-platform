@@ -931,6 +931,25 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
    -------------------------------------------------------------------------- */
 .prediction-workbench { margin-bottom: var(--space-lg); }
 .structure-summary { margin: var(--space-sm) 0 var(--space-md); min-height: 22px; }
+.method-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+  margin: calc(-1 * var(--space-xs)) 0 var(--space-md);
+  padding: 10px 12px;
+  border: 1px solid var(--accent-200);
+  border-radius: var(--radius-sm);
+  background: var(--accent-50);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.method-route[hidden] { display: none; }
+.method-route strong { color: var(--accent-700); font-size: var(--text-sm); }
+.method-route-arrow { color: var(--accent-500); font-family: var(--font-mono); }
+.method-route-reason { color: var(--text-tertiary); text-align: right; }
+.method-route.unresolved { border-color: var(--border-strong); background: var(--surface-inset); }
+.method-route.unresolved strong { color: var(--text-primary); }
 .prediction-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-md); }
 .prediction-actions button {
   min-height: 78px;
@@ -955,6 +974,16 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   background: var(--surface-inset);
 }
 .prediction-result h3 { margin: 0 0 var(--space-sm); }
+.directional-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  margin: var(--space-sm) 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.directional-summary strong { color: var(--text-primary); font-family: var(--font-mono); font-weight: 600; }
 .context-jump-action {
   display: flex;
   align-items: center;
@@ -1696,6 +1725,9 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   .composite-pickers, .composite-window, .material-visual-grid, .about-grid,
   .zte-analysis-grid, .zte-phase-grid, .zte-robustness-grid { grid-template-columns: 1fr; }
   .zte-engineering-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .method-route { grid-template-columns: 1fr; }
+  .method-route-arrow { display: none; }
+  .method-route-reason { text-align: left; }
   .zte-candidate-header { grid-template-columns: 1fr; }
   .zte-candidate-actions { justify-content: flex-start; }
   .zte-candidate-content > .prediction-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }

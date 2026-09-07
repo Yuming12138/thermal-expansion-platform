@@ -16,6 +16,7 @@ ALLOWED_WORKFLOWS = frozenset(
         "precision_elastic_qha",
         "precision_elastic",
         "precision_qha",
+        "precision_thermal_expansion",
     }
 )
 

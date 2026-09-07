@@ -82,6 +82,7 @@ from te_platform.jobs.precision_runner import (
     submit_fast_screen_job,
     submit_precision_job,
     submit_qha_job,
+    submit_thermal_expansion_job,
 )
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
@@ -520,6 +521,12 @@ def create_app(
                     filename=structure_path.name,
                 ),
                 "qha": lambda: submit_qha_job(
+                    workspace_db,
+                    structure_path.read_bytes(),
+                    config,
+                    filename=structure_path.name,
+                ),
+                "thermal": lambda: submit_thermal_expansion_job(
                     workspace_db,
                     structure_path.read_bytes(),
                     config,
@@ -1159,7 +1166,8 @@ def create_app(
             "inspection": result.to_dict(),
             "next_step": (
                 "Use the ALIGNN worker to predict G, then calculate paper-defined E_tilde=U_V/n "
-                "and return the fast SBR result."
+                "and return the fast SBR result. For full alpha(T), cubic structures use scalar QHA "
+                "and non-cubic structures use the tensor-aware AGV2 workflow."
             ),
         }
 
@@ -1273,6 +1281,29 @@ def create_app(
             return submit_qha_job(
                 workspace_db, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
             )
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/precision/thermal-expansion-jobs")
+    async def submit_thermal_expansion(file: UploadFile = File(...)) -> dict[str, object]:
+        """Route cubic structures to scalar QHA and other systems to AGV2."""
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        try:
+            inspection = inspect_structure(file.filename or "POSCAR", content)
+            job = submit_thermal_expansion_job(
+                workspace_db,
+                content,
+                PrecisionTaskConfig(),
+                filename=file.filename or "POSCAR",
+            )
+            job["routing"] = {
+                "crystal_system": inspection.symmetry.crystal_system,
+                "is_cubic": inspection.symmetry.is_cubic,
+                "method": job["parameters"].get("actual_method"),
+            }
+            return job
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 

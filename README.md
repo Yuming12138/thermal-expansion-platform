@@ -28,8 +28,8 @@
 - ALIGNN预测G、快速E_tilde计算及带误差区间的上传结构预筛；
 - ALIGNN快速预筛链路及模型误差区间；运行时间取决于硬件与模型是否常驻，不作为对外性能承诺；
 - 两相线性ROM、Turner体积模量加权和Kerner基体约束模型的零热膨胀配比计算；
-- 分级结构预测入口：快速模式运行 ALIGNN G + MatterSim/CrystalNN Ẽ，精准模式独立计算完整弹性张量并使用 Hill G 完成 SBR，QHA 模式独立输出并保存 `alpha(T)`；
-- 受控 MatterSim 弹性张量与 QHA 任务：固定 WSL/Conda/MatterSim/VASPKIT/Phonopy 命令、任务状态机、日志、弹性正定性和质量门控；
+- 分级结构预测入口：快速模式运行 ALIGNN G + MatterSim/CrystalNN Ẽ，精准模式独立计算完整弹性张量并使用 Hill G 完成 SBR；热膨胀模式按晶体系统自动路由，立方材料使用标量 QHA，非立方材料先生成完整弹性张量再运行各向异性 Grüneisen v2，并保存 Cartesian、方向和体积 `alpha(T)`；
+- 受控 MatterSim 弹性张量、QHA 与 AGV2 任务：固定 WSL/Conda/MatterSim/VASPKIT/Phonopy 命令、任务状态机、日志、弹性正定性和质量门控；非立方任务没有静默 QHA 回退；
 - 失败后仅重跑 QHA 的恢复任务：复用已完成的弹性张量，不重复应变计算，并支持嵌套恢复链路；
 - QHA 位移级进度读取与虚频、非正定弹性张量、未应变弹性能异常等质量警告；
 - 基于真实PTE/NTE `alpha(T)` 曲线的温区ZTE设计：比较线性ROM、Turner与Kerner模型，自动读取体积模量、剪切模量和结构密度，输出体积/质量分数、误差、ZTE覆盖率、连续满足温区及完整混合曲线；Kerner允许指定PTE或NTE为连续基体；
@@ -149,7 +149,7 @@ uv run python -m te_platform build-release-catalog `
 
 配置 AI Agent：运行 `scripts\configure-agent.ps1`，脚本会用记事本打开项目内、已排除 Git 的 `var/config/agent.env`。将密钥粘贴在 `TEP_AGENT_API_KEY=` 后并保存。Agent 默认使用 OpenAI 兼容接口和 `gpt-5.6-luna`。模型获得的是目录库结构发现、只读SQL、领域数值算法、结构检查和审批式任务提交等少量通用工具，不会获得任意 shell、目录库写入或宿主机文件访问权限。
 
-Agent 对话框支持直接附加 CIF/POSCAR。模型可以自主检查结构并通过统一的 `request_calculation_task` 提出快速、精准弹性或 QHA 计划，但不能自行批准计算：平台会持久化一个 `PENDING_APPROVAL` 动作，只有用户点击“确认并提交”后才启动后台任务。待审批卡片在刷新页面后仍会恢复；存在待审批任务时，Agent循环会隐藏新的副作用工具，避免重复提交。任务运行期间对话框会显示进度，成功后展示相应指标或完整热膨胀曲线。
+Agent 对话框支持直接附加 CIF/POSCAR。模型可以自主检查结构并通过统一的 `request_calculation_task` 提出快速、精准弹性或按对称性自动路由的热膨胀计划，但不能自行批准计算：平台会持久化一个 `PENDING_APPROVAL` 动作，只有用户点击“确认并提交”后才启动后台任务。待审批卡片在刷新页面后仍会恢复；存在待审批任务时，Agent循环会隐藏新的副作用工具，避免重复提交。任务运行期间对话框会显示进度，成功后展示实际算法、方向分量和完整热膨胀曲线。
 
 模型会根据问题自动选择计算层级：快速判断 NTE/PTE 倾向使用 `fast`，完整弹性张量与精准 SBR 使用 `elastic`，直接获得 α(T) 使用 `qha`。三种模式都进入后台任务并经过相同的用户审批边界；批准后任务ID会写入对话历史，Agent和前端都可以继续查询进度与结果。
 

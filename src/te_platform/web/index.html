@@ -130,10 +130,11 @@
         </article>
       </section>
       <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
-        <h2>上传结构与分级预测（实验性扩展）</h2>
-        <p class="muted">该工作区用于展示软件的未来扩展能力，当前版本的重点是内置数据库查询与分析；没有配置科研计算环境时不会执行真实任务。</p>
+        <h2>上传结构与热膨胀计算</h2>
+        <p class="muted">上传结构后先判定晶体系统。立方材料使用标量 QHA；非立方材料先计算完整弹性张量，再使用各向异性 Grüneisen v2。</p>
         <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
         <div id="structure-summary" class="structure-summary muted">选择文件后将自动检查结构。</div>
+        <div id="structure-method-route" class="method-route" hidden aria-live="polite"></div>
         <div class="prediction-actions">
           <button id="fast-screen-button" type="button">
             <strong>1. 快速预测</strong><span>ALIGNN G + MatterSim Ẽ</span>
@@ -142,7 +143,7 @@
             <strong>2. 精准预测</strong><span>完整弹性张量 + SBR</span>
           </button>
           <button id="qha-button" type="button">
-            <strong>3. QHA 计算</strong><span>MatterSim α(T)</span>
+            <strong>3. 热膨胀计算</strong><span>自动路由：立方 QHA · 非立方 AGV2</span>
           </button>
         </div>
         <div id="prediction-result" class="prediction-result muted">尚未开始计算。</div>
@@ -366,7 +367,7 @@
       </div>
       <div class="agent-body">
         <div id="agent-messages" class="agent-messages" aria-live="polite">
-          <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析 QHA 曲线、设计 ZTE 配比，也可以为上传结构规划快速、弹性或 QHA 计算。</div>
+          <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析热膨胀曲线、设计 ZTE 配比，也可以为上传结构规划快速、弹性或按对称性路由的热膨胀计算。</div>
         </div>
         <div id="agent-attachment" class="agent-attachment" hidden>
           <span id="agent-attachment-name"></span>
@@ -384,6 +385,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-34"></script>
+    <script src="/static/app.js?v=0.10.0-35"></script>
   </body>
 </html>

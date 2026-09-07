@@ -11,8 +11,18 @@ from typing import Literal
 from te_platform.api.structures import inspect_structure
 from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
-from te_platform.precision.results import parse_elastic_results, parse_precision_results, parse_qha_results
-from te_platform.precision.wsl_executor import PrecisionTaskConfig, build_precision_command, prepare_precision_task
+from te_platform.precision.results import (
+    parse_anisotropic_results,
+    parse_elastic_results,
+    parse_precision_results,
+    parse_qha_results,
+)
+from te_platform.precision.wsl_executor import (
+    PrecisionTaskConfig,
+    build_anisotropic_command,
+    build_precision_command,
+    prepare_precision_task,
+)
 from te_platform.screening.fast_sbr import calculate_bonding_modulus
 from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
@@ -28,6 +38,17 @@ _QHA_DISPLACEMENT_PROGRESS = re.compile(
 
 def precision_progress(database: str | Path, job_id: str) -> dict[str, str | int | float] | None:
     work = Path(database).parent / "runs" / job_id
+    agv2_root = work / "gruneisen_aniso_1M_v2" / "work"
+    if agv2_root.is_dir():
+        states = [path for path in agv2_root.iterdir() if path.is_dir()]
+        if states:
+            completed = sum((path / "FORCE_CONSTANTS").is_file() for path in states)
+            return {
+                "stage": "agv2_force_constants",
+                "completed_states": completed,
+                "total_states": len(states),
+                "percent": round(100.0 * completed / len(states), 1),
+            }
     root = work / "elastic"
     if root.is_dir():
         tasks = [path for path in root.rglob("strain_*") if path.is_dir()]
@@ -76,7 +97,7 @@ def _qha_displacement_progress(work: Path) -> dict[str, str | int | float] | Non
     }
 
 
-CalculationMode = Literal["combined", "elastic", "qha"]
+CalculationMode = Literal["combined", "elastic", "qha", "thermal"]
 
 
 def submit_fast_screen_job(
@@ -151,7 +172,10 @@ def submit_precision_job(
     config: PrecisionTaskConfig,
     filename: str = "POSCAR",
 ) -> dict[str, object]:
-    return _submit_job(database, structure, config, filename=filename, mode="combined")
+    # ``/api/precision/jobs`` predates the explicit endpoint.  Keep it as a
+    # compatibility alias, but route through the symmetry-aware workflow so
+    # non-cubic uploads can never be sent to scalar QHA by accident.
+    return _submit_job(database, structure, config, filename=filename, mode="thermal")
 
 
 def submit_elastic_job(
@@ -172,6 +196,16 @@ def submit_qha_job(
     return _submit_job(database, structure, config, filename=filename, mode="qha")
 
 
+def submit_thermal_expansion_job(
+    database: str | Path,
+    structure: bytes,
+    config: PrecisionTaskConfig,
+    filename: str = "POSCAR",
+) -> dict[str, object]:
+    """Submit symmetry-routed thermal expansion (cubic QHA / non-cubic AGV2)."""
+    return _submit_job(database, structure, config, filename=filename, mode="thermal")
+
+
 def _submit_job(
     database: str | Path,
     structure: bytes,
@@ -180,22 +214,59 @@ def _submit_job(
     filename: str,
     mode: CalculationMode,
 ) -> dict[str, object]:
+    inspection = inspect_structure(filename, structure)
+    symmetry = inspection.symmetry
+    if mode == "qha" and symmetry.is_cubic is not True:
+        raise ValueError(
+            "Scalar QHA is restricted to cubic structures; use the automatic thermal-expansion workflow for non-cubic materials"
+        )
+    if mode == "thermal":
+        if symmetry.is_cubic is True:
+            actual_method = "qha"
+            routing_reason = "cubic_structure_uses_scalar_qha"
+        elif symmetry.is_cubic is False:
+            actual_method = "agv2"
+            routing_reason = "non_cubic_structure_requires_tensor_aware_agv2"
+        else:
+            raise ValueError(
+                "Could not resolve crystal symmetry; refusing to route an ambiguous structure through scalar QHA"
+            )
+    else:
+        actual_method = mode
+        routing_reason = "explicit_workflow_mode"
     workflow = {
         "combined": "precision_elastic_qha",
         "elastic": "precision_elastic",
         "qha": "precision_qha",
+        "thermal": "precision_thermal_expansion",
     }[mode]
     job = create_job(
         database,
         workflow=workflow,
-        parameters={"config": config.__dict__, "mode": mode, "filename": filename},
+        parameters={
+            "config": config.__dict__,
+            "mode": mode,
+            "actual_method": actual_method,
+            "routing_reason": routing_reason,
+            "filename": filename,
+            "symmetry": symmetry.to_dict(),
+        },
+        model_name=(
+            f"mattersim-v1.0.0-{config.agv2_model_size}+anisotropic-gruneisen-v2"
+            if actual_method == "agv2"
+            else "mattersim-v1.0.0-5M"
+        ),
     )
     work = Path(database).parent / "runs" / job["id"]
     work.mkdir(parents=True, exist_ok=False)
     write_precision_poscar(work, filename=filename, content=structure)
-    prepare_precision_task(work)
+    prepare_precision_task(work, include_agv2=actual_method == "agv2")
     transition_job(database, job["id"], JobStatus.QUEUED)
-    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, mode), daemon=True).start()
+    threading.Thread(
+        target=_run,
+        args=(Path(database), job["id"], work, config, mode, actual_method),
+        daemon=True,
+    ).start()
     return job
 
 
@@ -226,7 +297,11 @@ def resume_precision_qha(database: str | Path, parent_job_id: str) -> dict[str, 
         shutil.copy2(source_bm_log, elastic_work / "BM_SS.log")
     prepare_precision_task(work)
     transition_job(database, job["id"], JobStatus.QUEUED)
-    threading.Thread(target=_run, args=(Path(database), job["id"], work, config, "qha"), daemon=True).start()
+    threading.Thread(
+        target=_run,
+        args=(Path(database), job["id"], work, config, "qha", "qha"),
+        daemon=True,
+    ).start()
     return job
 
 
@@ -254,13 +329,28 @@ def refresh_precision_result(database: str | Path, job_id: str) -> dict[str, obj
     job = get_job(database, job_id)
     work = Path(database).parent / "runs" / job_id
     mode = job["parameters"].get("mode", "combined")
-    result = _parse_completed_result(work, mode)
+    actual_method = job["parameters"].get("actual_method", mode)
+    result = _parse_completed_result(work, mode, actual_method)
+    result.update(
+        {
+            "symmetry": job["parameters"].get("symmetry", {}),
+            "routing_reason": job["parameters"].get("routing_reason", "explicit_workflow_mode"),
+        }
+    )
     return replace_completed_job_result(database, job_id, result)
 
 
-def _parse_completed_result(work: Path, mode: str) -> dict[str, object]:
+def _parse_completed_result(work: Path, mode: str, actual_method: str | None = None) -> dict[str, object]:
+    if mode == "thermal" or actual_method == "agv2":
+        if actual_method == "agv2":
+            return {"calculation_mode": "agv2", **parse_anisotropic_results(work).to_dict()}
+        return {
+            "calculation_mode": "qha",
+            "calculation_method": "qha_cubic",
+            **parse_qha_results(work).to_dict(),
+        }
     if mode == "qha":
-        return {"calculation_mode": "qha", **parse_qha_results(work).to_dict()}
+        return {"calculation_mode": "qha", "calculation_method": "qha_cubic", **parse_qha_results(work).to_dict()}
     if mode == "elastic":
         elastic = parse_elastic_results(work)
         mattersim = predict_mattersim_descriptors(work / "POSCAR")
@@ -288,13 +378,18 @@ def _run(
     work: Path,
     config: PrecisionTaskConfig,
     mode: CalculationMode,
+    actual_method: str,
 ) -> None:
     transition_job(database, job_id, JobStatus.RUNNING)
     log = work / "workflow.log"
     try:
         with log.open("w", encoding="utf-8") as handle:
             completed = subprocess.run(
-                build_precision_command(work, config, mode=mode),
+                (
+                    build_anisotropic_command(work, config)
+                    if actual_method == "agv2"
+                    else build_precision_command(work, config, mode=mode if mode != "thermal" else "qha")
+                ),
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 check=False,
@@ -302,7 +397,14 @@ def _run(
         if completed.returncode != 0:
             transition_job(database, job_id, JobStatus.FAILED, error_message=f"Workflow failed; see {log}")
             return
-        result = _parse_completed_result(work, mode)
+        result = _parse_completed_result(work, mode, actual_method)
+        job_parameters = get_job(database, job_id)["parameters"]
+        result.update(
+            {
+                "symmetry": job_parameters.get("symmetry", {}),
+                "routing_reason": job_parameters.get("routing_reason", "explicit_workflow_mode"),
+            }
+        )
         transition_job(database, job_id, JobStatus.SUCCEEDED, result=result)
     except Exception as error:
         transition_job(database, job_id, JobStatus.FAILED, error_message=str(error))
