@@ -1242,7 +1242,10 @@ def create_app(
             "alignn": alignn.to_dict(),
             "mattersim": mattersim.to_dict(),
             "fast_sbr": result.to_dict(),
-            "next_step": "Use full elastic tensor and QHA for a high-confidence alpha(T) result.",
+            "next_step": (
+                "Use the automatic thermal-expansion workflow: cubic structures use scalar QHA; "
+                "non-cubic structures use the full elastic tensor and anisotropic Grüneisen v2."
+            ),
         }
 
     @app.post("/api/precision/jobs")
