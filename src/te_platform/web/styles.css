@@ -977,7 +977,7 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   align-items: start;
 }
 .mechanical-tensor-card,
-.mechanical-values-card {
+.detail-descriptors-card {
   min-width: 0;
   padding: var(--space-md);
   border: 1px solid var(--border-hairline);
@@ -993,21 +993,21 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
 }
 .property-section-heading h3 { margin: 0; font-size: var(--text-base); }
 .property-section-heading .curve-note { margin: 3px 0 0; }
-.mechanical-metric-grid {
+.descriptor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-sm);
   margin: 0;
 }
-.mechanical-metric {
+.descriptor-metric {
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
   background: var(--surface-raised);
 }
-.mechanical-metric dt { color: var(--text-tertiary); font-size: var(--text-2xs); line-height: var(--leading-snug); }
-.mechanical-metric dd {
+.descriptor-metric dt { color: var(--text-tertiary); font-size: var(--text-2xs); line-height: var(--leading-snug); }
+.descriptor-metric dd {
   margin: 4px 0 0;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -1943,7 +1943,7 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   .property-grid, .detail-panel .property-grid { grid-template-columns: 1fr; }
   .properties-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
   .properties-count { text-align: left; }
-  .mechanical-metric-grid { grid-template-columns: 1fr; }
+  .descriptor-grid { grid-template-columns: 1fr; }
   .provenance-card dl { grid-template-columns: 1fr; gap: 3px; }
   .structure-heading { align-items: stretch; flex-direction: column; }
   .structure-viewer, .structure-ctk-stage { height: 360px; }
