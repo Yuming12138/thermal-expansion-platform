@@ -239,7 +239,13 @@ def build(*, include_local_agent_config: bool = False) -> dict[str, object]:
             "bytes": tar_path.stat().st_size,
             "sha256": sha256_file(tar_path),
         },
-        "catalog_materials": catalog_manifest["counts"]["materials"],
+        # Newer release manifests expose per-curve counts plus a source
+        # contract record count rather than a separate ``materials`` key.
+        # Keep the portable builder compatible with both manifest shapes.
+        "catalog_materials": catalog_manifest.get("counts", {}).get(
+            "materials",
+            catalog_manifest.get("source_contract", {}).get("record_count"),
+        ),
         "contains_private_agent_config": include_local_agent_config,
     }
 

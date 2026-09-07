@@ -673,6 +673,61 @@ function detailPropertyText(property, fallbackUnit = "") {
   return escapeHtml(value + (unit ? " " + unit : ""));
 }
 
+function parseElasticTensor(data) {
+  const structure = (data.structures || []).find(item =>
+    String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
+  );
+  if (!structure) return null;
+  const rows = String(structure.content)
+    .split(/\r?\n/)
+    .map(line => line.trim().split(/\s+/).map(Number).filter(Number.isFinite))
+    .filter(row => row.length >= 6)
+    .map(row => row.slice(0, 6));
+  return rows.length >= 6 ? rows.slice(-6) : null;
+}
+
+function renderElasticTensorMatrix(tensor) {
+  if (!Array.isArray(tensor) || tensor.length !== 6) {
+    return "<div class='property-empty'>暂无完整弹性常数矩阵。</div>";
+  }
+  const labels = ["1", "2", "3", "4", "5", "6"];
+  return "<div class='elastic-tensor-wrap'><table class='elastic-tensor-table' aria-label='弹性常数矩阵 Cij，单位 GPa'><thead><tr><th scope='col'>Cᵢⱼ</th>" +
+    labels.map(label => "<th scope='col'>" + label + "</th>").join("") +
+    "</tr></thead><tbody>" + tensor.map((row, index) =>
+      "<tr><th scope='row'>" + labels[index] + "</th>" + row.map(value => "<td>" + Number(value).toFixed(2) + "</td>").join("") + "</tr>"
+    ).join("") + "</tbody></table></div>";
+}
+
+function renderMaterialProperties(data, hasElasticTensor, metricDefinitions) {
+  const tensor = parseElasticTensor(data);
+  const mechanicalNames = new Set([
+    "K_GPa", "G_GPa", "E_tilde_GPa", "xi", "Uv_GPa", "E_coh_eV_per_atom", "AAV", "avg_cn",
+  ]);
+  const mechanicalMetrics = metricDefinitions
+    .filter(([name]) => mechanicalNames.has(name) && data.properties[name])
+    .map(([name, label, unit]) =>
+      "<div class='mechanical-metric'><dt>" + label + "</dt><dd>" + detailPropertyText(data.properties[name], unit) + "</dd></div>"
+    ).join("");
+  const statusLabel = hasElasticTensor ? "已收录" : "未收录";
+  return "<section class='material-properties' id='material-properties' aria-labelledby='material-properties-title'>" +
+    "<div class='properties-heading'><div><p class='detail-card-kicker'>计算属性</p><h2 id='material-properties-title'>Properties</h2></div>" +
+    "<span class='properties-count'>" + escapeHtml(hasElasticTensor ? "Mechanical · 弹性张量" : "Mechanical · 部分数据") + "</span></div>" +
+    "<div class='properties-tabs' role='tablist' aria-label='属性类别'>" +
+    "<button id='properties-mechanical-tab' class='properties-tab active' type='button' role='tab' aria-selected='true' aria-controls='properties-mechanical-panel'>Mechanical</button>" +
+    "<button id='properties-phonon-tab' class='properties-tab' type='button' role='tab' aria-selected='false' aria-controls='properties-phonon-panel' disabled title='声子谱数据尚未接入'>Phonon <span>即将接入</span></button>" +
+    "</div>" +
+    "<section id='properties-mechanical-panel' class='properties-panel' role='tabpanel' aria-labelledby='properties-mechanical-tab'>" +
+    "<div class='mechanical-property-grid'><article class='mechanical-tensor-card'><div class='property-section-heading'><div><h3>Elastic Constants</h3><p class='curve-note'>Stiffness tensor Cᵢⱼ (GPa)</p></div><span class='elastic-status " + (hasElasticTensor ? "available" : "missing") + "'>" + statusLabel + "</span></div>" +
+    renderElasticTensorMatrix(tensor) +
+    "<p class='property-footnote'>Voigt 6 × 6 表示；对称位置保留原始计算值。</p></article>" +
+    "<article class='mechanical-values-card'><div class='property-section-heading'><div><h3>Mechanical properties</h3><p class='curve-note'>用于平台筛选与各向异性热膨胀计算</p></div></div>" +
+    "<dl class='mechanical-metric-grid'>" + (mechanicalMetrics || "<div class='property-empty'>暂无机械属性。</div>") + "</dl>" +
+    renderMaterialDownloads(data) + "</article></div></section>" +
+    "<section id='properties-phonon-panel' class='properties-panel properties-panel-placeholder' role='tabpanel' aria-labelledby='properties-phonon-tab' hidden>" +
+    "<h3>Phonon</h3><p class='muted'>声子谱数据接入后将在这里展示 band structure、态密度和虚频质量检查。</p></section>" +
+    "</section>";
+}
+
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
   const detailTitle = data.material.formula || data.material.material_key || key;
@@ -688,13 +743,15 @@ async function loadDetail(key) {
     ["CTE_ppm", "体积 αV", "ppm/K", ""],
     ["TE_300K", "300 K αV", "ppm/K", ""],
     ["K_GPa", "体积模量 K", "GPa", ""],
+    ["Uv_GPa", "Voigt 平均模量 Uv", "GPa", ""],
     ["E_coh_eV_per_atom", "内聚能 E<sub>coh</sub>", "eV/atom", ""],
+    ["AAV", "平均原子体积 AAV", "Å³/atom", ""],
     ["avg_cn", "平均配位数 CN", "", ""],
     ["Band_Gap_eV", "带隙", "eV", ""],
     ["NTE_temp_range", "NTE 温区", "", ""],
   ];
-  const metrics = metricDefinitions
-    .filter(([name]) => data.properties[name])
+  const summaryMetrics = metricDefinitions
+    .filter(([name]) => ["xi", "G_GPa", "E_tilde_GPa", "CTE_ppm"].includes(name) && data.properties[name])
     .map(([name, label, unit, modifier]) => "<div class='detail-property " + modifier + "'><dt>" +
       label + "</dt><dd>" + detailPropertyText(data.properties[name], unit) + "</dd></div>")
     .join("");
@@ -705,12 +762,12 @@ async function loadDetail(key) {
     "</p></div></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
     "<div class='material-detail-overview'>" + renderStructureViewer(data.structures, data.material.material_key) +
-    "<section class='material-properties-card'><div class='detail-card-heading'><div><p class='detail-card-kicker'>关键属性</p>" +
+    "<section class='material-properties-card'><div class='detail-card-heading'><div><p class='detail-card-kicker'>Summary</p>" +
     "<h3>力学与热膨胀</h3></div><span class='elastic-status " +
     (hasElasticTensor ? "available" : "missing") + "'>弹性张量 · " +
     (hasElasticTensor ? "已收录" : "未收录") + "</span></div>" +
-    "<dl class='property-grid detail-property-grid'>" + metrics + "</dl>" +
-    renderMaterialDownloads(data) + "</section></div>" +
+    "<dl class='property-grid detail-property-grid'>" + summaryMetrics + "</dl></section></div>" +
+    renderMaterialProperties(data, hasElasticTensor, metricDefinitions) +
     "<div class='material-detail-anisotropic'>" +
     renderAnisotropicThermalExpansion(data.anisotropic_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
