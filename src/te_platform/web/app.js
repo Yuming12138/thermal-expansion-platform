@@ -31,10 +31,6 @@ let structureFullscreenHandlerInstalled = false;
 let catalogElementMode = "contains";
 let catalogElementCounts = {};
 let catalogSearchSequence = 0;
-let comparisonMaterialKeys = [];
-let analysisProjects = [];
-let activeAnalysisProjectId = null;
-let lastComparisonPayload = null;
 let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
 let lastZteScreeningParameters = null;
@@ -46,6 +42,8 @@ let zteFocusedPairId = null;
 let zteCandidateDetailPayload = null;
 let zteCandidateReturnUrl = "/zte";
 let zteCandidateStructureViewers = [];
+let predictionProgressStartedAt = null;
+let predictionPollTimer = null;
 const zteSelectedPairIds = new Set();
 const selectedCatalogElements = new Set();
 const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
@@ -53,8 +51,6 @@ const LANDSCAPE_REFERENCE_MARKER_SIZE = 3.6;
 // consistent linear radius ratio of ~1.2566 across all marker shapes.
 const LANDSCAPE_CUBIC_SIZE_RATIO = 1.2566;
 const LANDSCAPE_REFERENCE_PLOT = {width: 670, height: 332};
-const MATERIAL_COMPARE_STORAGE_KEY = "tep.material-compare.v1";
-const ANALYSIS_PROJECT_STORAGE_KEY = "tep.analysis-projects.v1";
 const COMPARISON_COLORS = ["#d84a3a", "#2864c7", "#15906f", "#d98624", "#7b57b2", "#5d6a76"];
 
 const PERIODIC_MAIN_ROWS = [
@@ -87,7 +83,6 @@ const WORKSPACE_PAGES = {
   predict: {path: "/predict", title: "结构预测"},
   landscape: {path: "/landscape", title: "热膨胀景观"},
   zte: {path: "/zte", title: "ZTE 复合设计"},
-  about: {path: "/about", title: "关于软件"},
 };
 
 function prepareHiDpiCanvas(canvas) {
@@ -121,31 +116,6 @@ async function loadStats() {
     "<span class='catalog-stats-meta'>结构 " + escapeHtml(counts.structures) +
     " · 属性 " + escapeHtml(counts.property_values) +
     " · v" + escapeHtml(dataset.release.version) + "</span>";
-}
-
-async function loadAbout() {
-  const payload = await api("/api/about");
-  const software = payload.software;
-  const datasets = payload.datasets;
-  document.querySelector("#about-name").textContent = software.name_zh;
-  document.querySelector("#about-name-en").textContent = software.name_en;
-  document.querySelector("#about-version").textContent = "v" + software.version;
-  document.querySelector("#about-owner").textContent = software.copyright_owner;
-  const repository = document.querySelector("#about-repository");
-  repository.href = software.repository;
-  repository.textContent = software.repository.replace("https://github.com/", "");
-  document.querySelector("#about-nte").textContent =
-    datasets.nte_materials + " 条 · " + datasets.nte.version;
-  document.querySelector("#about-pte").textContent =
-    datasets.pte_materials + " 条 · " + datasets.pte.version;
-  document.querySelector("#about-total").textContent = datasets.catalog_materials + " 条";
-  document.querySelector("#about-descriptor").textContent =
-    payload.descriptor.bonding_modulus + "；正式分类边界 ξc=" +
-    Number(payload.descriptor.formal_boundary).toFixed(5) + "。";
-  document.querySelector("#about-scope").textContent = payload.scientific_scope;
-  document.querySelector("#about-technology").innerHTML = payload.technology
-    .map(item => "<span>" + escapeHtml(item) + "</span>")
-    .join("");
 }
 
 function elementFamily(symbol) {
@@ -250,15 +220,21 @@ function setupElementFilter() {
   updateElementFilterSummary();
 }
 
-function workspacePageFromPath(pathname = window.location.pathname) {
-  if (pathname.startsWith("/materials/")) return "material";
-  return Object.entries(WORKSPACE_PAGES)
-    .find(([, page]) => page.path === pathname)?.[0] || "database";
+function materialKeyFromPath(pathname = window.location.pathname) {
+  const prefix = "/materials/";
+  if (!String(pathname).startsWith(prefix)) return "";
+  try {
+    return decodeURIComponent(String(pathname).slice(prefix.length).replace(/\/+$/, ""));
+  } catch (error) {
+    console.warn("材料详情链接无法解码", error);
+    return "";
+  }
 }
 
-function materialKeyFromPath(pathname = window.location.pathname) {
-  if (!pathname.startsWith("/materials/")) return "";
-  return decodeURIComponent(pathname.slice("/materials/".length));
+function workspacePageFromPath(pathname = window.location.pathname) {
+  if (materialKeyFromPath(pathname)) return "material";
+  return Object.entries(WORKSPACE_PAGES)
+    .find(([, page]) => page.path === pathname)?.[0] || "database";
 }
 
 function validLandscapeContext(point) {
@@ -299,10 +275,10 @@ function persistLandscapeContext() {
 }
 
 function workspaceUrl(pageName) {
-  if (pageName === "material" && window.location.pathname.startsWith("/materials/")) {
-    return window.location.pathname;
-  }
   const page = WORKSPACE_PAGES[pageName] || WORKSPACE_PAGES.database;
+  if (pageName === "material") {
+    return window.location.pathname + window.location.search;
+  }
   if (pageName === "landscape" && selectedLandscapePoint?.context_origin === "database" &&
       selectedLandscapePoint.database_key) {
     return page.path + "?material=" + encodeURIComponent(selectedLandscapePoint.database_key);
@@ -371,10 +347,11 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     section.hidden = section.dataset.page !== selectedPage;
   });
   document.querySelectorAll("[data-page-link]").forEach(link => {
-    if (link.dataset.pageLink === selectedPage) link.setAttribute("aria-current", "page");
+    const navigationPage = selectedPage === "material" ? "database" : selectedPage;
+    if (link.dataset.pageLink === navigationPage) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
-  document.title = page.title + " · 热膨胀材料智能计算与设计平台";
+  document.title = page.title + " · NTE Materials";
   const targetUrl = workspaceUrl(selectedPage);
   if (updateHistory && window.location.pathname + window.location.search !== targetUrl) {
     window.history.pushState({page: selectedPage}, "", targetUrl);
@@ -390,6 +367,37 @@ function showWorkspacePage(pageName, {updateHistory = false} = {}) {
     resizeZteCandidateStructures();
     if (selectedPage === "landscape") focusLandscapeContext();
   });
+}
+
+function materialUrl(materialKey) {
+  return "/materials/" + encodeURIComponent(String(materialKey));
+}
+
+async function navigateToMaterial(materialKey, {updateHistory = true} = {}) {
+  const key = String(materialKey || "").trim();
+  if (!key) return;
+  const targetUrl = materialUrl(key);
+  if (updateHistory && window.location.pathname + window.location.search !== targetUrl) {
+    window.history.pushState({page: "material", material_key: key}, "", targetUrl);
+  }
+  showWorkspacePage("material");
+  window.scrollTo({top: 0, behavior: "auto"});
+  const detail = document.querySelector("#material-detail");
+  if (!detail) return;
+  detail.className = "placeholder";
+  detail.textContent = "正在读取材料详情…";
+  try {
+    await loadDetail(key);
+  } catch (error) {
+    detail.className = "structure-error";
+    detail.textContent = error.message;
+  }
+}
+
+async function restoreMaterialFromLocation() {
+  const key = materialKeyFromPath();
+  if (!key) return;
+  await navigateToMaterial(key, {updateHistory: false});
 }
 
 function resizeZteCandidateStructures() {
@@ -424,11 +432,9 @@ function setupMaterialContext() {
     if (!point) return;
     if (point.context_origin === "predict") {
       navigateToWorkspace("predict");
-    } else if (point.database_key) {
-      window.location.href = "/materials/" + encodeURIComponent(point.database_key);
-    } else {
-      navigateToWorkspace("database");
+      return;
     }
+    if (point.database_key) await navigateToMaterial(point.database_key);
   });
   document.querySelector("#material-context-clear").addEventListener("click", () => clearLandscapeContext());
   document.addEventListener("click", event => {
@@ -450,7 +456,15 @@ function setupWorkspaceNavigation() {
     } catch (error) {
       console.warn("无法恢复景观材料", error);
     }
-    showWorkspacePage(workspacePageFromPath());
+    const page = workspacePageFromPath();
+    showWorkspacePage(page);
+    if (page === "material") {
+      try {
+        await restoreMaterialFromLocation();
+      } catch (error) {
+        document.querySelector("#material-detail").textContent = error.message;
+      }
+    }
     try {
       await restoreZteCandidateFromLocation();
     } catch (error) {
@@ -460,192 +474,7 @@ function setupWorkspaceNavigation() {
   showWorkspacePage(workspacePageFromPath());
 }
 
-function restoreComparisonMaterials() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(MATERIAL_COMPARE_STORAGE_KEY));
-    comparisonMaterialKeys = Array.isArray(stored)
-      ? [...new Set(stored.filter(item => typeof item === "string" && item.trim()))].slice(0, 4)
-      : [];
-  } catch (error) {
-    console.warn("无法恢复材料收藏", error);
-    comparisonMaterialKeys = [];
-  }
-}
-
-function persistComparisonMaterials() {
-  try {
-    window.localStorage.setItem(MATERIAL_COMPARE_STORAGE_KEY, JSON.stringify(comparisonMaterialKeys));
-  } catch (error) {
-    console.warn("无法保存材料收藏", error);
-  }
-}
-
-function restoreAnalysisProjects() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(ANALYSIS_PROJECT_STORAGE_KEY));
-    analysisProjects = Array.isArray(stored)
-      ? stored.filter(project => project && typeof project.id === "string" &&
-        typeof project.name === "string" && Array.isArray(project.material_keys)).slice(0, 30)
-      : [];
-  } catch (error) {
-    console.warn("无法恢复分析项目", error);
-    analysisProjects = [];
-  }
-}
-
-function persistAnalysisProjects() {
-  try {
-    window.localStorage.setItem(ANALYSIS_PROJECT_STORAGE_KEY, JSON.stringify(analysisProjects));
-  } catch (error) {
-    console.warn("无法保存分析项目", error);
-  }
-}
-
-function renderAnalysisProjectList() {
-  const select = document.querySelector("#analysis-project-select");
-  const sorted = [...analysisProjects].sort((left, right) =>
-    String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
-  );
-  select.innerHTML = "<option value=''>选择已保存项目…</option>" + sorted.map(project =>
-    "<option value='" + escapeHtml(project.id) + "'>" + escapeHtml(project.name) +
-    "（" + project.material_keys.length + "个材料）</option>"
-  ).join("");
-  if (activeAnalysisProjectId && analysisProjects.some(item => item.id === activeAnalysisProjectId)) {
-    select.value = activeAnalysisProjectId;
-  } else {
-    activeAnalysisProjectId = null;
-    select.value = "";
-  }
-  const hasSelection = Boolean(select.value);
-  document.querySelector("#analysis-project-load").disabled = !hasSelection;
-  document.querySelector("#analysis-project-delete").disabled = !hasSelection;
-}
-
-function saveAnalysisProject() {
-  const input = document.querySelector("#analysis-project-name");
-  const name = input.value.trim();
-  if (comparisonMaterialKeys.length < 2) return;
-  if (!name) {
-    input.focus();
-    input.placeholder = "请先输入分析项目名称";
-    return;
-  }
-  const now = new Date().toISOString();
-  let project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
-  if (!project) project = analysisProjects.find(item => item.name === name);
-  if (project) {
-    project.name = name;
-    project.material_keys = [...comparisonMaterialKeys];
-    project.temperature_k = Number(document.querySelector("#material-compare-temperature").value) || 300;
-    project.updated_at = now;
-  } else {
-    project = {
-      id: "analysis-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
-      name,
-      material_keys: [...comparisonMaterialKeys],
-      temperature_k: Number(document.querySelector("#material-compare-temperature").value) || 300,
-      created_at: now,
-      updated_at: now,
-    };
-    analysisProjects.push(project);
-  }
-  activeAnalysisProjectId = project.id;
-  persistAnalysisProjects();
-  renderAnalysisProjectList();
-  const result = document.querySelector("#material-compare-result");
-  if (!lastComparisonPayload) {
-    result.className = "compare-result placeholder";
-    result.textContent = "分析项目已保存。点击“生成对比”读取属性和真实QHA曲线。";
-  }
-}
-
-async function loadAnalysisProject() {
-  const selectedId = document.querySelector("#analysis-project-select").value;
-  const project = analysisProjects.find(item => item.id === selectedId);
-  if (!project) return;
-  activeAnalysisProjectId = project.id;
-  document.querySelector("#analysis-project-name").value = project.name;
-  document.querySelector("#material-compare-temperature").value = String(project.temperature_k || 300);
-  comparisonMaterialKeys = [...new Set(project.material_keys)].slice(0, 4);
-  persistComparisonMaterials();
-  renderComparisonSelection();
-  renderAnalysisProjectList();
-  await loadMaterialComparison();
-}
-
-function deleteAnalysisProject() {
-  const selectedId = document.querySelector("#analysis-project-select").value;
-  if (!selectedId) return;
-  analysisProjects = analysisProjects.filter(item => item.id !== selectedId);
-  if (activeAnalysisProjectId === selectedId) activeAnalysisProjectId = null;
-  persistAnalysisProjects();
-  document.querySelector("#analysis-project-name").value = "";
-  renderAnalysisProjectList();
-}
-
-function comparisonSelected(materialKey) {
-  return comparisonMaterialKeys.includes(materialKey);
-}
-
-function updateComparisonButtons() {
-  document.querySelectorAll("button[data-compare-key]").forEach(button => {
-    const materialKey = decodeURIComponent(button.dataset.compareKey);
-    const selected = comparisonSelected(materialKey);
-    button.classList.toggle("selected", selected);
-    button.textContent = selected ? "已收藏" : "收藏";
-    button.setAttribute("aria-pressed", String(selected));
-  });
-}
-
-function renderComparisonSelection() {
-  lastComparisonPayload = null;
-  const selection = document.querySelector("#material-compare-selection");
-  const runButton = document.querySelector("#material-compare-run");
-  const clearButton = document.querySelector("#material-compare-clear");
-  runButton.disabled = comparisonMaterialKeys.length < 2;
-  clearButton.disabled = comparisonMaterialKeys.length === 0;
-  document.querySelector("#analysis-project-save").disabled = comparisonMaterialKeys.length < 2;
-  if (!comparisonMaterialKeys.length) {
-    selection.className = "compare-selection muted";
-    selection.textContent = "尚未收藏材料。";
-  } else {
-    selection.className = "compare-selection";
-    selection.innerHTML = comparisonMaterialKeys.map(materialKey =>
-      "<span class='compare-chip'><span>" + escapeHtml(materialKey) + "</span>" +
-      "<button type='button' data-compare-remove='" +
-      escapeHtml(encodeURIComponent(materialKey)) + "' aria-label='移除 " +
-      escapeHtml(materialKey) + "'>×</button></span>"
-    ).join("");
-    selection.querySelectorAll("button[data-compare-remove]").forEach(button => {
-      button.addEventListener("click", () => toggleComparisonMaterial(
-        decodeURIComponent(button.dataset.compareRemove),
-      ));
-    });
-  }
-  updateComparisonButtons();
-  const result = document.querySelector("#material-compare-result");
-  result.className = "compare-result placeholder";
-  result.textContent = comparisonMaterialKeys.length >= 2
-    ? "收藏列表已更新，请点击“生成对比”读取属性和真实QHA曲线。"
-    : "至少收藏两个材料后即可生成对比。";
-}
-
-function toggleComparisonMaterial(materialKey) {
-  if (comparisonSelected(materialKey)) {
-    comparisonMaterialKeys = comparisonMaterialKeys.filter(item => item !== materialKey);
-  } else if (comparisonMaterialKeys.length >= 4) {
-    const result = document.querySelector("#material-compare-result");
-    result.className = "compare-result";
-    result.textContent = "一次最多收藏并对比 4 个材料，请先移除一个材料。";
-    return;
-  } else {
-    comparisonMaterialKeys.push(materialKey);
-  }
-  persistComparisonMaterials();
-  renderComparisonSelection();
-}
-
-function comparisonFilterBounds() {
+function cteFilterBounds() {
   const selected = document.querySelector("#material-cte-filter").value;
   return {
     strong: {cte_max_ppm: "-20"},
@@ -664,7 +493,7 @@ function updateCatalogFilterSummary() {
   const limit = document.querySelector("#material-limit");
   const sortLabel = sortBy?.selectedOptions?.[0]?.textContent || "材料名称";
   const orderLabel = sortOrder?.value === "descending" ? "从大到小" : "从小到大";
-  const cteLabel = cteFilter?.selectedOptions?.[0]?.textContent || "全部 CTE";
+  const cteLabel = cteFilter?.selectedOptions?.[0]?.textContent || "全部 αV";
   const limitLabel = limit?.value || "50";
   summary.textContent = sortLabel + " · " + orderLabel + " · " + cteLabel + " · " + limitLabel + " 条";
 }
@@ -682,30 +511,31 @@ function renderMaterials(items) {
   }
   const rows = items.map(item => {
     const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
-    const selectedClass = comparisonSelected(item.material_key) ? " selected" : "";
-    const selectedText = comparisonSelected(item.material_key) ? "已收藏" : "收藏";
-    return "<tr><td class='material-key'>" + escapeHtml(item.material_key) + "</td><td>" + numeric(item.G_GPa) +
-      "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
-      "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
-      "<button class='compare-toggle" + selectedClass + "' data-compare-key='" + encodedKey +
-      "' aria-pressed='" + String(comparisonSelected(item.material_key)) + "'>" + selectedText +
-      "</button><a class='detail-link' href='/materials/" + encodedKey + "'>详情</a></div></td></tr>";
+    const formula = escapeHtml(item.formula || item.material_key || "—");
+    const externalId = escapeHtml(item.external_id || item.material_key || "—");
+    const materialLink = "<a class='material-record-link' href='/materials/" + encodedKey +
+      "' data-material-link='" + encodedKey + "'>" + externalId + "</a>";
+    return "<tr><td class='material-mp-id'>" + materialLink + "</td><td class='material-formula'>" + formula +
+      "</td><td>" + numeric(item.G_GPa) + "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
+      "</td><td>" + numeric(item.CTE_ppm) + "</td></tr>";
   }).join("");
   container.innerHTML =
     "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
-    "<caption class='sr-only'>材料的剪切模量、键合模量、剪切—键合比和体积热膨胀系数</caption>" +
+    "<caption class='sr-only'>材料 MP ID、化学式、剪切模量、键合模量、剪切—键合比和体积热膨胀系数 αV</caption>" +
     "<thead><tr>" +
-    "<th scope='col'>材料</th>" +
+    "<th scope='col'>MP ID</th>" +
+    "<th scope='col'>化学式</th>" +
     "<th scope='col'>G <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>Ẽ <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>ξ</th>" +
-    "<th scope='col'>CTE <span class='table-unit'>(ppm/K)</span></th>" +
-    "<th scope='col'>操作</th>" +
+    "<th scope='col'>αV <span class='table-unit'>(ppm/K)</span></th>" +
     "</tr></thead><tbody>" + rows + "</tbody></table>";
-  container.querySelectorAll("button[data-compare-key]").forEach(button => {
-    button.addEventListener("click", () => toggleComparisonMaterial(
-      decodeURIComponent(button.dataset.compareKey),
-    ));
+  container.querySelectorAll("[data-material-link]").forEach(link => {
+    link.addEventListener("click", event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigateToMaterial(decodeURIComponent(link.dataset.materialLink));
+    });
   });
 }
 
@@ -720,7 +550,7 @@ async function searchMaterials() {
     element_mode: catalogElementMode,
     sort_by: document.querySelector("#material-sort-by").value,
     sort_order: document.querySelector("#material-sort-order").value,
-    ...comparisonFilterBounds(),
+    ...cteFilterBounds(),
   });
   try {
     const items = await api("/api/materials?" + params.toString());
@@ -737,6 +567,19 @@ function displaySourceName(value) {
   const text = String(value || "未记录");
   const parts = text.split(/[\\/]/);
   return parts[parts.length - 1] || text;
+}
+
+function preferredMaterialStructure(structures) {
+  const priority = {POSCAR: 0, VASP: 0, CIF: 1};
+  return (structures || [])
+    .filter(item => item?.content)
+    .slice()
+    .sort((left, right) => {
+      const leftPriority = priority[String(left.format || "").toUpperCase()] ?? 2;
+      const rightPriority = priority[String(right.format || "").toUpperCase()] ?? 2;
+      return leftPriority - rightPriority ||
+        String(left.format || "").localeCompare(String(right.format || ""));
+    })[0] || null;
 }
 
 function renderMaterialProvenance(data) {
@@ -770,12 +613,11 @@ function renderMaterialProvenance(data) {
 function renderMaterialDownloads(data) {
   const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
   const hasPoscar = data.structures?.some(item =>
-    String(item.format || "").toUpperCase() === "POSCAR" && item.content
+    ["POSCAR", "VASP"].includes(String(item.format || "").toUpperCase()) && item.content
   );
   const hasElasticTensor = data.structures?.some(item =>
     String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
   );
-  const hasCurve = Boolean(data.precision_thermal_expansion?.points?.length >= 2);
   const anisotropic = data.anisotropic_thermal_expansion || {};
   const links = [];
   if (hasPoscar) {
@@ -786,20 +628,117 @@ function renderMaterialDownloads(data) {
     links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
       "/download/ELASTIC_TENSOR' download>下载完整弹性张量</a>");
   }
-  if (hasCurve) {
-    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
-      "/download/thermal_expansion.dat' download>下载 thermal_expansion.dat</a>");
-    links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
-      "/download/thermal_expansion.pdf' download>下载曲线 PDF</a>");
-  }
   ["cartesian", "directional"].forEach(kind => {
     if (!anisotropic[kind]?.points?.length) return;
     links.push("<a class='secondary-download' href='/api/materials/" + encodedKey +
       "/download/thermal_expansion_" + kind + ".dat' download>下载 " + kind + " 曲线</a>");
   });
   return links.length
-    ? "<div class='material-download-actions'>" + links.join("") + "</div>"
+    ? "<div class='material-download-actions detail-download-actions' aria-label='结构与各向异性数据下载'>" + links.join("") + "</div>"
     : "";
+}
+
+function detailPropertyText(property, fallbackUnit = "") {
+  if (!property) return "—";
+  const value = Number.isFinite(Number(property.value))
+    ? numeric(property.value)
+    : String(property.value ?? "—");
+  const unit = property.unit || fallbackUnit;
+  return escapeHtml(value + (unit ? " " + unit : ""));
+}
+
+function parseElasticTensor(data) {
+  const structure = (data.structures || []).find(item =>
+    String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
+  );
+  if (!structure) return null;
+  const rows = String(structure.content)
+    .split(/\r?\n/)
+    .map(line => line.trim().split(/\s+/).map(Number).filter(Number.isFinite))
+    .filter(row => row.length >= 6)
+    .map(row => row.slice(0, 6));
+  return rows.length >= 6 ? rows.slice(-6) : null;
+}
+
+function renderElasticTensorMatrix(tensor) {
+  if (!Array.isArray(tensor) || tensor.length !== 6) {
+    return "<div class='property-empty'>暂无完整弹性常数矩阵。</div>";
+  }
+  const labels = ["1", "2", "3", "4", "5", "6"];
+  return "<div class='elastic-tensor-wrap'><table class='elastic-tensor-table' aria-label='弹性常数矩阵 Cij，单位 GPa'><thead><tr><th scope='col'>Cᵢⱼ</th>" +
+    labels.map(label => "<th scope='col'>" + label + "</th>").join("") +
+    "</tr></thead><tbody>" + tensor.map((row, index) =>
+      "<tr><th scope='row'>" + labels[index] + "</th>" + row.map(value => "<td>" + Number(value).toFixed(2) + "</td>").join("") + "</tr>"
+    ).join("") + "</tbody></table></div>";
+}
+
+function descriptorValue(name, property) {
+  if (!property || property.value === null || property.value === undefined || property.value === "") {
+    return "—";
+  }
+  const raw = String(property.value);
+  const maps = {
+    dominant_geometry: {
+      linear: "线性",
+      trigonal: "三角配位",
+      tetrahedral: "四面体",
+      octahedral: "八面体",
+      fourfold: "四配位",
+      fivefold: "五配位",
+      sevenfold: "七配位",
+    },
+    dominant_connectivity: {
+      "corner-sharing": "角共享",
+      "edge-sharing": "边共享",
+      "face-sharing": "面共享",
+      "mixed-sharing": "混合共享",
+    },
+    topology_confidence: {high: "高", medium: "中", low: "低"},
+  };
+  return escapeHtml(maps[name]?.[raw] || raw);
+}
+
+function renderMaterialProperties(data, hasElasticTensor) {
+  const tensor = parseElasticTensor(data);
+  const descriptorDefinitions = [
+    ["motif_dimension", "结构维度"],
+    ["dominant_motif_family", "Motif 家族"],
+    ["dominant_geometry", "主导几何"],
+    ["dominant_connectivity", "连接方式"],
+    ["dominant_center_species", "骨架中心"],
+    ["dominant_ligand_species", "配体元素"],
+    ["topology_confidence", "分类置信度"],
+    ["thermal_expansion_method", "热膨胀方法"],
+  ];
+  const descriptorMetrics = descriptorDefinitions
+    .filter(([name]) => data.properties[name])
+    .map(([name, label]) =>
+      "<div class='descriptor-metric'><dt>" + label + "</dt><dd>" + descriptorValue(name, data.properties[name]) + "</dd></div>"
+    ).join("");
+  const statusLabel = hasElasticTensor ? "已收录" : "未收录";
+  const phonon = data.phonon || {};
+  const hasPhonon = Boolean(
+    phonon.band_available || phonon.dos_available || phonon.combined_available
+  );
+  return "<section class='material-properties' id='material-properties' aria-labelledby='material-properties-title'>" +
+    "<div class='properties-heading'><div><p class='detail-card-kicker'>计算属性</p><h2 id='material-properties-title'>Properties</h2></div>" +
+    "<span class='properties-count'>" + escapeHtml(hasElasticTensor ? "Mechanical · 弹性张量" : "Mechanical · 部分数据") + "</span></div>" +
+    "<div class='properties-tabs' role='tablist' aria-label='属性类别'>" +
+    "<button id='properties-mechanical-tab' class='properties-tab active' type='button' role='tab' aria-selected='true' aria-controls='properties-mechanical-panel'>Mechanical</button>" +
+    "<button id='properties-phonon-tab' class='properties-tab' type='button' role='tab' aria-selected='false' aria-controls='properties-phonon-panel'" +
+    (hasPhonon ? "" : " disabled title='当前材料没有可用声子谱图'") + ">Phonon" +
+    (hasPhonon ? "" : " <span>暂无数据</span>") + "</button>" +
+    "</div>" +
+    "<section id='properties-mechanical-panel' class='properties-panel' role='tabpanel' aria-labelledby='properties-mechanical-tab'>" +
+    "<div class='mechanical-property-grid'><article class='mechanical-tensor-card'><div class='property-section-heading'><div><h3>Elastic Constants</h3><p class='curve-note'>Stiffness tensor Cᵢⱼ (GPa)</p></div><span class='elastic-status " + (hasElasticTensor ? "available" : "missing") + "'>" + statusLabel + "</span></div>" +
+    renderElasticTensorMatrix(tensor) +
+    "<p class='property-footnote'>Voigt 6 × 6 表示；对称位置保留原始计算值。</p></article>" +
+    "<article class='detail-descriptors-card'><div class='property-section-heading'><div><h3>Structure &amp; calculation</h3><p class='curve-note'>补充结构分类与热膨胀来源</p></div></div>" +
+    "<dl class='descriptor-grid'>" + (descriptorMetrics || "<div class='property-empty'>暂无结构描述符。</div>") + "</dl>" +
+    renderMaterialDownloads(data) + "</article></div></section>" +
+    "<section id='properties-phonon-panel' class='properties-panel' role='tabpanel' aria-labelledby='properties-phonon-tab' hidden>" +
+    renderPhononProperties(data) + "</section>" +
+    "</section>";
 }
 
 function renderPhononProperties(data) {
@@ -833,77 +772,80 @@ function renderPhononProperties(data) {
 }
 
 function setupPropertiesTabs() {
-  const tabs = [...document.querySelectorAll("[data-properties-tab]")];
-  const panels = [...document.querySelectorAll("[data-properties-panel]")];
+  const tabs = [...document.querySelectorAll("#material-properties [data-properties-tab], #material-properties .properties-tab")];
+  const panels = [...document.querySelectorAll("#material-properties [data-properties-panel], #material-properties .properties-panel[role='tabpanel']")];
   tabs.forEach(tab => tab.addEventListener("click", () => {
-    const target = tab.dataset.propertiesTab;
+    if (tab.disabled) return;
+    const target = tab.id === "properties-phonon-tab" ? "phonon" : "mechanical";
     tabs.forEach(item => {
       const active = item === tab;
       item.classList.toggle("active", active);
       item.setAttribute("aria-selected", String(active));
     });
     panels.forEach(panel => {
-      panel.hidden = panel.dataset.propertiesPanel !== target;
+      const panelTarget = panel.id === "properties-phonon-panel" ? "phonon" : "mechanical";
+      panel.hidden = panelTarget !== target;
     });
   }));
 }
 
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
-  document.title = (data.material.formula || data.material.material_key) +
-    " · 材料详情 · 热膨胀材料平台";
-  const structures = data.structures.map(s => s.format + " (" + s.content_characters + " chars)").join(", ");
-  const metricNames = [
-    "CTE_ppm", "TE_300K", "G_GPa", "E_tilde_GPa", "K_GPa",
-    "E_coh_eV_per_atom", "avg_cn", "Band_Gap_eV", "NTE_temp_range",
+  // A bookmarked URL can carry a generated MP alias from an older release.
+  // Once the API resolves it, keep the address bar on the canonical key so
+  // reloads and copied links point at the current catalog record.
+  const canonicalKey = data.material?.material_key;
+  if (canonicalKey && canonicalKey !== key) {
+    const canonicalPath = "/materials/" + encodeURIComponent(canonicalKey);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState(null, "", canonicalPath + window.location.search);
+    }
+  }
+  const detailTitle = data.material.formula || data.material.material_key || key;
+  document.querySelector("#material-detail-breadcrumb")?.replaceChildren(document.createTextNode(detailTitle));
+  document.title = detailTitle + " · 材料详情 · NTE Materials";
+  const hasElasticTensor = Boolean(data.structures?.some(item =>
+    String(item.format || "").toUpperCase() === "ELASTIC_TENSOR" && item.content
+  ));
+  const metricDefinitions = [
+    ["xi", "剪切—键合比 ξ", "", "featured"],
+    ["G_GPa", "剪切模量 G", "GPa", ""],
+    ["E_tilde_GPa", "键合模量 Ẽ", "GPa", ""],
+    ["CTE_ppm", "体积 αV", "ppm/K", ""],
+    ["TE_300K", "300 K αV", "ppm/K", ""],
+    ["K_GPa", "体积模量 K", "GPa", ""],
+    ["Uv_GPa", "Voigt 平均模量 Uv", "GPa", ""],
+    ["E_coh_eV_per_atom", "内聚能 E<sub>coh</sub>", "eV/atom", ""],
+    ["AAV", "平均原子体积 AAV", "Å³/atom", ""],
+    ["avg_cn", "平均配位数 CN", "", ""],
+    ["Band_Gap_eV", "带隙", "eV", ""],
+    ["NTE_temp_range", "NTE 温区", "", ""],
   ];
-  const metrics = metricNames
-    .filter(name => data.properties[name])
-    .map(name => "<div><dt>" + escapeHtml(name) + "</dt><dd>" +
-      propertyText(data.properties[name]) + "</dd></div>")
+  const summaryMetrics = metricDefinitions
+    .filter(([name]) => ["xi", "G_GPa", "E_tilde_GPa", "CTE_ppm"].includes(name) && data.properties[name])
+    .map(([name, label, unit, modifier]) => "<div class='detail-property " + modifier + "'><dt>" +
+      label + "</dt><dd>" + detailPropertyText(data.properties[name], unit) + "</dd></div>")
     .join("");
-  const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
-  const phonon = data.phonon || {};
-  const hasPhonon = Boolean(phonon.band_available || phonon.dos_available);
-  const activeTab = hasPhonon ? "phonon" : "mechanical";
   document.querySelector("#material-detail").innerHTML =
-    "<div class='compare-summary'><p><strong>" + escapeHtml(data.material.material_key) +
-    "</strong> · " + escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
-    "<button class='compare-toggle' data-compare-key='" + encodedKey + "' type='button'>收藏</button></div>" +
+    "<div class='material-detail-identity'><div><h3>" +
+    escapeHtml(data.material.formula || data.material.material_key) + "</h3>" +
+    "<p class='material-detail-id'>" + escapeHtml(data.material.external_id || data.material.material_key) +
+    "</p></div></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
-    renderMaterialDownloads(data) +
-    "<p class='muted'>结构：" + escapeHtml(structures) + "</p>" +
-    "<section class='properties-shell' aria-label='材料性质'>" +
-    "<div class='properties-heading'><h3>Properties</h3></div>" +
-    "<div class='properties-tabs' role='tablist' aria-label='材料性质分类'>" +
-    "<button type='button' role='tab' data-properties-tab='mechanical' aria-selected='" +
-    String(activeTab === "mechanical") + "' class='" + (activeTab === "mechanical" ? "active" : "") +
-    "'>Mechanical</button>" +
-    "<button type='button' role='tab' data-properties-tab='phonon' aria-selected='" +
-    String(activeTab === "phonon") + "' class='" + (activeTab === "phonon" ? "active" : "") +
-    "'>Phonon</button></div>" +
-    "<div class='properties-tab-panel' data-properties-panel='mechanical' hidden='" +
-    String(activeTab !== "mechanical") + "'><dl class='property-grid'>" + metrics +
-    "</dl>" + renderMaterialProvenance(data) + "</div>" +
-    "<div class='properties-tab-panel phonon-tab-panel' data-properties-panel='phonon' hidden='" +
-    String(activeTab !== "phonon") + "'>" + renderPhononProperties(data) + "</div></section>" +
-    "<div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
-    renderPrecisionThermalExpansion(data.precision_thermal_expansion) +
+    "<div class='material-detail-overview'>" + renderStructureViewer(data.structures, data.material.material_key) +
+    "<section class='material-properties-card'><div class='detail-card-heading'><div><p class='detail-card-kicker'>Summary</p>" +
+    "<h3>力学与热膨胀</h3></div><span class='elastic-status " +
+    (hasElasticTensor ? "available" : "missing") + "'>弹性张量 · " +
+    (hasElasticTensor ? "已收录" : "未收录") + "</span></div>" +
+    "<dl class='property-grid detail-property-grid'>" + summaryMetrics + "</dl></section></div>" +
+    renderMaterialProperties(data, hasElasticTensor) +
+    "<div class='material-detail-anisotropic'>" +
     renderAnisotropicThermalExpansion(data.anisotropic_thermal_expansion) + "</div>" +
     "<details><summary>查看全部数据字段</summary><pre>" +
-    escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
-  const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
-  detailCompareButton.addEventListener("click", () => toggleComparisonMaterial(data.material.material_key));
-  updateComparisonButtons();
+  escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
   setupPropertiesTabs();
-  drawMaterialStructure(data.material, selectRenderableStructure(data.structures), data.structure_view);
-  drawPrecisionThermalExpansion(data.precision_thermal_expansion);
   drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
   selectLandscapeMaterial(data);
-}
-
-function comparisonMetric(value, unit = "") {
-  return Number.isFinite(Number(value)) ? numeric(value) + (unit ? " " + unit : "") : "—";
 }
 
 function safeExportStem(value) {
@@ -925,363 +867,20 @@ function downloadBlob(content, mediaType, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function comparisonProjectName() {
-  return document.querySelector("#analysis-project-name").value.trim() || "material-comparison";
-}
-
-function comparisonExportPayload(payload) {
-  return {
-    report: {
-      project_name: comparisonProjectName(),
-      generated_at: new Date().toISOString(),
-      platform: "Thermal Expansion Materials Platform",
-      descriptor_definition: "E_tilde=160.21766208*abs(E_coh)/(AAV*avg_cn)",
-    },
-    comparison: payload,
-  };
-}
-
-function comparisonCsv(payload) {
-  const columns = [
-    "material_key", "formula", "external_id", "G_GPa", "E_tilde_GPa", "xi",
-    "catalog_CTE_ppm_per_K", "alpha_at_temperature_ppm_per_K", "temperature_K",
-    "K_GPa", "E_coh_eV_per_atom", "avg_cn", "dataset_version", "curve_job_id",
-  ];
-  const csvCell = value => {
-    const text = String(value ?? "");
-    return /[\",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
-  };
-  const rows = payload.materials.map(item => [
-    item.material.material_key,
-    item.material.formula,
-    item.material.external_id,
-    item.metrics.G_GPa,
-    item.metrics.E_tilde_GPa,
-    item.metrics.xi,
-    item.metrics.CTE_ppm,
-    item.metrics.alpha_at_temperature_ppm_per_k,
-    payload.temperature_k,
-    item.metrics.K_GPa,
-    item.metrics.E_coh_eV_per_atom,
-    item.metrics.avg_cn,
-    item.dataset_release?.version,
-    item.curve?.job_id,
-  ]);
-  return [columns, ...rows].map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
-}
-
-function comparisonHtml(payload) {
-  const chart = document.querySelector("#material-comparison-chart");
-  const chartImage = chart ? chart.toDataURL("image/png") : "";
-  const headers = payload.materials.map(item =>
-    "<th>" + escapeHtml(item.material.material_key) + "</th>"
-  ).join("");
-  const rows = [
-    ["G (GPa)", "G_GPa"],
-    ["Ẽ (GPa)", "E_tilde_GPa"],
-    ["ξ = G/Ẽ", "xi"],
-    ["目录 CTE (ppm/K)", "CTE_ppm"],
-    ["α(" + numeric(payload.temperature_k) + " K) (ppm/K)", "alpha_at_temperature_ppm_per_k"],
-  ].map(([label, key]) => "<tr><th>" + escapeHtml(label) + "</th>" +
-    payload.materials.map(item => "<td>" + comparisonMetric(item.metrics[key]) + "</td>").join("") +
-    "</tr>").join("");
-  return "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>" +
-    escapeHtml(comparisonProjectName()) + "</title><style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;" +
-    "max-width:1100px;margin:32px auto;color:#21384a}table{width:100%;border-collapse:collapse}" +
-    "th,td{border:1px solid #d9e3ea;padding:8px;text-align:center}th{background:#eef5f7}" +
-    "img{width:100%;margin-top:18px;border:1px solid #d9e3ea}small{color:#687b8a}</style></head><body>" +
-    "<h1>" + escapeHtml(comparisonProjectName()) + "</h1><p><small>生成时间：" +
-    escapeHtml(new Date().toLocaleString()) + " · 数据版本：" +
-    escapeHtml(payload.materials[0]?.dataset_release?.version || "—") +
-    " · Ẽ=160.21766208×|E_coh|/(AAV×avg_cn)</small></p><table><thead><tr><th>指标</th>" +
-    headers + "</tr></thead><tbody>" + rows + "</tbody></table>" +
-    (chartImage ? "<img src='" + chartImage + "' alt='QHA曲线对比'>" : "") +
-    "</body></html>";
-}
-
-function exportComparisonPdf(payload) {
-  const params = new URLSearchParams({
-    material_keys: payload.materials.map(item => item.material.material_key).join("|"),
-    temperature_k: String(payload.temperature_k),
-    project_name: comparisonProjectName(),
-  });
-  const link = document.createElement("a");
-  link.href = "/api/materials/compare/report.pdf?" + params.toString();
-  link.download = safeExportStem(comparisonProjectName()) + "_comparison_report.pdf";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-function bindComparisonExports(payload) {
-  const stem = safeExportStem(comparisonProjectName());
-  document.querySelector("#comparison-export-json").addEventListener("click", () =>
-    downloadBlob(
-      JSON.stringify(comparisonExportPayload(payload), null, 2),
-      "application/json;charset=utf-8",
-      stem + "_comparison.json",
-    ));
-  document.querySelector("#comparison-export-csv").addEventListener("click", () =>
-    downloadBlob(comparisonCsv(payload), "text/csv;charset=utf-8", stem + "_comparison.csv"));
-  document.querySelector("#comparison-export-html").addEventListener("click", () =>
-    downloadBlob(comparisonHtml(payload), "text/html;charset=utf-8", stem + "_report.html"));
-  document.querySelector("#comparison-export-pdf").addEventListener("click", () =>
-    exportComparisonPdf(payload));
-}
-
-function renderMaterialComparison(payload) {
-  lastComparisonPayload = payload;
-  const result = document.querySelector("#material-compare-result");
-  const temperature = Number(payload.temperature_k);
-  const columns = payload.materials.map(item =>
-    "<th>" + escapeHtml(item.material.material_key) + "</th>"
-  ).join("");
-  const metricRows = [
-    ["G", "G_GPa", "GPa"],
-    ["Ẽ", "E_tilde_GPa", "GPa"],
-    ["ξ = G/Ẽ", "xi", ""],
-    ["目录 CTE", "CTE_ppm", "ppm/K"],
-    [temperature.toFixed(0) + " K 曲线 α", "alpha_at_temperature_ppm_per_k", "ppm/K"],
-    ["体积模量 K", "K_GPa", "GPa"],
-    ["内聚能", "E_coh_eV_per_atom", "eV/atom"],
-    ["平均配位数", "avg_cn", ""],
-  ].map(([label, key, unit]) =>
-    "<tr><th>" + escapeHtml(label) + "</th>" + payload.materials.map(item =>
-      "<td>" + comparisonMetric(item.metrics[key], unit) + "</td>"
-    ).join("") + "</tr>"
-  ).join("");
-  const detailButtons = payload.materials.map(item =>
-    "<td><a class='detail-link' href='/materials/" +
-    escapeHtml(encodeURIComponent(item.material.material_key)) + "'>查看详情</a></td>"
-  ).join("");
-  const curveCount = payload.materials.filter(item => item.curve?.points?.length >= 2).length;
-  result.className = "compare-result";
-  result.innerHTML =
-    "<div class='compare-summary'><strong>已比较 " + payload.material_count + " 个材料</strong>" +
-    "<span>" + escapeHtml(payload.method_note) + "</span></div>" +
-    "<div class='table-wrap'><table class='comparison-table'><thead><tr><th>指标</th>" + columns +
-    "</tr></thead><tbody>" + metricRows + "<tr><th>材料详情</th>" + detailButtons +
-    "</tr></tbody></table></div>" +
-    (curveCount
-      ? "<canvas id='material-comparison-chart' class='comparison-chart' width='1100' height='480' " +
-        "aria-label='收藏材料的QHA热膨胀曲线对比'></canvas>"
-      : "<p class='muted'>所选材料暂无可共同展示的已关联QHA曲线。</p>") +
-    "<div class='comparison-export-actions'><span>导出分析结果</span>" +
-    "<button id='comparison-export-csv' type='button'>CSV</button>" +
-    "<button id='comparison-export-json' type='button'>JSON</button>" +
-    "<button id='comparison-export-html' type='button'>HTML报告</button>" +
-    "<button id='comparison-export-pdf' type='button'>PDF报告</button></div>";
-  if (curveCount) drawMaterialComparisonCurves(payload);
-  bindComparisonExports(payload);
-}
-
-function buildComparisonSeries(item, color) {
-  const aniso = item.anisotropic_thermal_expansion;
-  const source = aniso && (aniso.cartesian || aniso.directional);
-  const axialKeys = aniso && aniso.cartesian
-    ? ["alpha_xx", "alpha_yy", "alpha_zz"]
-    : ["alpha_a", "alpha_b", "alpha_c"];
-  let volume = [];
-  let axial = [];
-  let hasAnisotropic = false;
-  if (source && (source.points || []).length >= 2) {
-    const raw = source.points
-      .filter(point => Number.isFinite(Number(point.T_K)))
-      .map(point => {
-        const mapped = {x: Number(point.T_K)};
-        Object.keys(point).forEach(key => {
-          if (key !== "T_K") mapped[key] = Number(point[key]);
-        });
-        return mapped;
-      })
-      .filter(point => Number.isFinite(point.x));
-    volume = raw
-      .filter(point => Number.isFinite(point.alpha_volume))
-      .map(point => ({x: point.x, y: point.alpha_volume}));
-    axial = axialKeys
-      .map(key => ({
-        key,
-        points: raw
-          .filter(point => Number.isFinite(point[key]))
-          .map(point => ({x: point.x, y: point[key]})),
-      }))
-      .filter(part => part.points.length >= 2);
-    hasAnisotropic = volume.length >= 2;
-  }
-  if (!hasAnisotropic) {
-    volume = (item.curve?.points || [])
-      .map(point => ({x: Number(point.temperature_k), y: Number(point.alpha_ppm_per_k)}))
-      .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
-  }
-  return {key: item.material.material_key, color, volume, axial, hasAnisotropic};
-}
-
-function drawMaterialComparisonCurves(payload) {
-  const canvas = document.querySelector("#material-comparison-chart");
-  if (!canvas) return;
-  const series = payload.materials
-    .map((item, index) => buildComparisonSeries(item, COMPARISON_COLORS[index % COMPARISON_COLORS.length]))
-    .filter(item => item.volume.length >= 2);
-  if (!series.length) return;
-  const {ctx, width, height} = prepareHiDpiCanvas(canvas);
-  const margin = {left: 66, right: 20, top: 46, bottom: 50};
-  const plotWidth = Math.max(1, width - margin.left - margin.right);
-  const plotHeight = Math.max(1, height - margin.top - margin.bottom);
-  const allPoints = series.flatMap(item =>
-    item.volume.concat(...item.axial.map(part => part.points)));
-  let xMin = Math.min(...allPoints.map(point => point.x));
-  let xMax = Math.max(...allPoints.map(point => point.x));
-  let yMin = Math.min(0, ...allPoints.map(point => point.y));
-  let yMax = Math.max(0, ...allPoints.map(point => point.y));
-  if (xMax === xMin) xMax = xMin + 1;
-  if (yMax === yMin) yMax = yMin + 1;
-  const yPadding = Math.max(1, (yMax - yMin) * .08);
-  yMin -= yPadding;
-  yMax += yPadding;
-  const xScale = value => margin.left + (value - xMin) / (xMax - xMin) * plotWidth;
-  const yScale = value => margin.top + plotHeight - (value - yMin) / (yMax - yMin) * plotHeight;
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (let index = 0; index <= 5; index += 1) {
-    const xValue = xMin + (xMax - xMin) * index / 5;
-    const yValue = yMin + (yMax - yMin) * index / 5;
-    const x = xScale(xValue);
-    const y = yScale(yValue);
-    ctx.strokeStyle = "#e7edf2";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, margin.top);
-    ctx.lineTo(x, margin.top + plotHeight);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(margin.left, y);
-    ctx.lineTo(margin.left + plotWidth, y);
-    ctx.stroke();
-    ctx.fillStyle = "#657889";
-    ctx.fillText(xValue.toFixed(0), x, height - 28);
-    ctx.textAlign = "right";
-    ctx.fillText(yValue.toFixed(1), margin.left - 9, y);
-    ctx.textAlign = "center";
-  }
-  if (yMin <= 0 && yMax >= 0) {
-    ctx.strokeStyle = "#9aa8b4";
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.moveTo(margin.left, yScale(0));
-    ctx.lineTo(margin.left + plotWidth, yScale(0));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  series.forEach(item => {
-    item.axial.forEach(part => {
-      ctx.strokeStyle = rgba(item.color, .48);
-      ctx.lineWidth = 1.15;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      part.points.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
-        else ctx.lineTo(xScale(point.x), yScale(point.y));
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-    });
-    ctx.strokeStyle = item.color;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    item.volume.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(xScale(point.x), yScale(point.y));
-      else ctx.lineTo(xScale(point.x), yScale(point.y));
-    });
-    ctx.stroke();
-  });
-  ctx.fillStyle = "#445b6d";
-  ctx.fillText("温度 T (K)", margin.left + plotWidth / 2, height - 10);
-  ctx.save();
-  ctx.translate(16, margin.top + plotHeight / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText("热膨胀系数 α (ppm/K)", 0, 0);
-  ctx.restore();
-  let legendX = margin.left;
-  series.forEach(item => {
-    const label = item.key.length > 24 ? item.key.slice(0, 22) + "…" : item.key;
-    ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, 18, 14, 3);
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#40586a";
-    ctx.fillText(label, legendX + 19, 20);
-    legendX += Math.min(230, 38 + ctx.measureText(label).width);
-  });
-  ctx.fillStyle = "#8496a5";
-  ctx.font = "11px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText("实线 = 体积 α_V（迹）· 虚线 = 轴向分量 α_xx/yy/zz（或 α_a/b/c）",
-    margin.left, 38);
-  ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
-  ctx.textAlign = "center";
-  canvas.teRedraw = () => drawMaterialComparisonCurves(payload);
-}
-
-async function loadMaterialComparison() {
-  if (comparisonMaterialKeys.length < 2) return;
-  const result = document.querySelector("#material-compare-result");
-  result.className = "compare-result placeholder";
-  result.textContent = "正在读取材料属性和真实QHA曲线…";
-  const temperature = Number(document.querySelector("#material-compare-temperature").value);
-  const params = new URLSearchParams({
-    material_keys: comparisonMaterialKeys.join("|"),
-    temperature_k: Number.isFinite(temperature) && temperature >= 0 ? String(temperature) : "300",
-  });
-  try {
-    renderMaterialComparison(await api("/api/materials/compare?" + params.toString()));
-  } catch (error) {
-    result.className = "compare-result";
-    result.textContent = error.message;
-  }
-}
-
-function renderStructureViewer(structures) {
-  const structure = selectRenderableStructure(structures);
+function renderStructureViewer(structures, materialKey = "") {
+  const structure = preferredMaterialStructure(structures);
   if (!structure) {
     return "<h3>三维晶体结构</h3><p class='muted'>暂无可用于三维显示的结构文件。</p>";
   }
+  const encodedKey = escapeHtml(encodeURIComponent(materialKey));
+  const viewerUrl = "/ctk/?material_key=" + encodedKey;
   return "<section class='structure-panel' id='structure-panel'>" +
-    "<div class='structure-heading'><div><h3>三维晶体结构</h3>" +
-    "<p class='curve-note'>左键拖拽旋转 · 滚轮缩放 · 中键或 Ctrl+拖拽平移</p></div>" +
-    "<span id='material-structure-summary' class='structure-summary-badge'>正在加载…</span></div>" +
-    "<div class='structure-stage'>" +
-    "<div id='structure-viewer' class='structure-viewer' role='img' aria-label='可旋转缩放的三维晶体结构'></div>" +
-    "<div class='structure-viewer-tools' role='toolbar' aria-label='三维结构工具'>" +
-    structureToolButton("structure-fullscreen", "全屏", "fullscreen") +
-    structureToolButton("structure-settings-button", "显示设置", "settings") +
-    structureToolButton("structure-reset", "重置视角", "reset") +
-    structureToolButton("structure-snapshot", "保存图片", "camera") +
+    "<div class='structure-heading'><div><h3>三维晶体结构</h3></div></div>" +
+    "<div class='structure-stage structure-ctk-stage'>" +
+    "<iframe id='structure-ctk-frame' class='structure-ctk-frame' src='" + viewerUrl + "' " +
+    "title='Crystal Toolkit 三维晶体结构' loading='eager' allow='fullscreen'></iframe>" +
     "</div>" +
-    "<div id='structure-settings' class='structure-settings' hidden>" +
-    "<strong>显示设置</strong>" +
-    "<label>原子样式<select id='structure-style'><option value='ball-stick'>球棍</option>" +
-    "<option value='spacefill'>空间填充</option><option value='stick'>键线</option></select></label>" +
-    "<label>显示范围<select id='structure-supercell'><option value='periodic'>周期邻居（推荐）</option>" +
-    "<option value='1'>1×1×1 原胞</option>" +
-    "<option value='2'>2×2×2</option><option value='3'>3×3×3</option></select></label>" +
-    "<label class='structure-checkbox'><input id='structure-unit-cell' type='checkbox' checked>显示晶胞边框</label>" +
-    "</div>" +
-    "<div id='structure-axis-viewer' class='structure-axis-viewer' role='img' " +
-    "aria-label='随晶体旋转的三维坐标轴'></div>" +
-    "<div id='structure-element-legend' class='structure-element-legend' aria-label='元素图例'></div>" +
-    "</div>" +
-    "<p id='structure-atom-info' class='structure-atom-info'>点击原子可查看元素和笛卡尔坐标。</p>" +
     "</section>";
-}
-
-function selectRenderableStructure(structures) {
-  const items = Array.isArray(structures) ? structures : [];
-  return items.find(item =>
-    String(item?.format || "").toUpperCase() === "POSCAR" && item?.content
-  ) || items.find(item => item?.content) || null;
 }
 
 function structureToolButton(id, label, icon) {
@@ -1398,6 +997,108 @@ function fractionalToCartesian(fractional, lattice) {
   ));
 }
 
+function subtractStructurePoints(left, right) {
+  return {x: left.x - right.x, y: left.y - right.y, z: left.z - right.z};
+}
+
+function crossStructurePoints(left, right) {
+  return {
+    x: left.y * right.z - left.z * right.y,
+    y: left.z * right.x - left.x * right.z,
+    z: left.x * right.y - left.y * right.x,
+  };
+}
+
+function dotStructurePoints(left, right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+function structurePointNorm(point) {
+  return Math.hypot(point.x, point.y, point.z);
+}
+
+function convexHullTriangleFaces(points) {
+  const faces = [];
+  const seen = new Set();
+  const tolerance = 1e-6;
+  for (let left = 0; left < points.length - 2; left += 1) {
+    for (let middle = left + 1; middle < points.length - 1; middle += 1) {
+      const leftEdge = subtractStructurePoints(points[middle], points[left]);
+      for (let right = middle + 1; right < points.length; right += 1) {
+        const normal = crossStructurePoints(
+          leftEdge,
+          subtractStructurePoints(points[right], points[left]),
+        );
+        if (structurePointNorm(normal) < tolerance) continue;
+        let hasPositive = false;
+        let hasNegative = false;
+        for (let other = 0; other < points.length; other += 1) {
+          if (other === left || other === middle || other === right) continue;
+          const signedDistance = dotStructurePoints(
+            normal,
+            subtractStructurePoints(points[other], points[left]),
+          );
+          if (signedDistance > tolerance) hasPositive = true;
+          if (signedDistance < -tolerance) hasNegative = true;
+          if (hasPositive && hasNegative) break;
+        }
+        if (hasPositive && hasNegative) continue;
+        const key = [left, middle, right].sort((a, b) => a - b).join(":");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        faces.push([left, middle, right]);
+      }
+    }
+  }
+  return faces;
+}
+
+function mixStructureColor(hex, whiteFraction = .22) {
+  const value = String(hex || "#9aa9b8").replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return "#b8c8d7";
+  const channels = [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16));
+  const mixed = channels.map(channel => Math.round(channel + (255 - channel) * whiteFraction));
+  return "#" + mixed.map(channel => channel.toString(16).padStart(2, "0")).join("");
+}
+
+function addStructurePolyhedra(viewer, atoms, centralCount) {
+  if (!viewer || !Array.isArray(atoms) || !atoms.length) return 0;
+  const requestedCount = Number(centralCount);
+  const maxCenters = Math.min(
+    atoms.length,
+    Number.isFinite(requestedCount) && requestedCount > 0 ? requestedCount : atoms.length,
+    180,
+  );
+  let rendered = 0;
+  for (let centerIndex = 0; centerIndex < maxCenters; centerIndex += 1) {
+    const center = atoms[centerIndex];
+    const neighborIndices = Array.from(new Set((center.bonds || []).map(Number)))
+      .filter(index => Number.isInteger(index) && index >= 0 && index < atoms.length && index !== centerIndex)
+      .map(index => ({index, atom: atoms[index]}))
+      .filter(({atom}) => Number.isFinite(Number(atom.x)) && Number.isFinite(Number(atom.y)) && Number.isFinite(Number(atom.z)))
+      .sort((left, right) => {
+        const leftDistance = structurePointNorm(subtractStructurePoints(left.atom, center));
+        const rightDistance = structurePointNorm(subtractStructurePoints(right.atom, center));
+        return leftDistance - rightDistance;
+      })
+      .slice(0, 12);
+    if (neighborIndices.length < 3) continue;
+    const points = neighborIndices.map(({atom}) => ({x: Number(atom.x), y: Number(atom.y), z: Number(atom.z)}));
+    const faces = convexHullTriangleFaces(points);
+    if (!faces.length) continue;
+    viewer.addShape({
+      vertexArr: points,
+      faceArr: faces.flat(),
+      color: mixStructureColor(structureElementColors[center.elem]),
+      alpha: .28,
+      wireframe: true,
+      linewidth: 1,
+    });
+    rendered += 1;
+  }
+  return rendered;
+}
+
 function translatedCartesian(atom, translation, lattice) {
   const offset = fractionalToCartesian(translation, lattice);
   return atom.cart.map((value, index) => value + offset[index]);
@@ -1452,18 +1153,35 @@ function buildPeriodicStructure(parsed) {
   return {atoms, centralCount: parsed.atoms.length, periodicCount: atoms.length - parsed.atoms.length};
 }
 
-function addStructureUnitCell(viewer, lattice) {
+function addStructureUnitCell(viewer, lattice, {fill = false} = {}) {
   const corners = [];
   for (let a = 0; a <= 1; a += 1) for (let b = 0; b <= 1; b += 1) for (let c = 0; c <= 1; c += 1) {
     const [x, y, z] = fractionalToCartesian([a, b, c], lattice);
     corners.push({a, b, c, x, y, z});
+  }
+  if (fill && typeof viewer.addShape === "function") {
+    viewer.addShape({
+      vertexArr: corners.map(corner => ({x: corner.x, y: corner.y, z: corner.z})),
+      // 3Dmol consumes one flat index list, with every consecutive triplet a triangle.
+      faceArr: [
+        0, 1, 3, 0, 3, 2,
+        4, 6, 7, 4, 7, 5,
+        0, 4, 5, 0, 5, 1,
+        2, 3, 7, 2, 7, 6,
+        0, 2, 6, 0, 6, 4,
+        1, 5, 7, 1, 7, 3,
+      ],
+      color: "#9fc5df",
+      alpha: 0.16,
+      wireframe: false,
+    });
   }
   corners.forEach(corner => {
     [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(delta => {
       const end = corners.find(candidate =>
         candidate.a === corner.a + delta[0] && candidate.b === corner.b + delta[1] && candidate.c === corner.c + delta[2]
       );
-      if (end) viewer.addLine({start: corner, end, color: "#77879b", linewidth: 1});
+      if (end) viewer.addLine({start: corner, end, color: "#5d7890", linewidth: 1.6});
     });
   });
 }
@@ -1563,12 +1281,15 @@ function drawMaterialStructure(material, structure, structureView = null) {
     return;
   }
 
-  const state = {style: "ball-stick", display: "periodic", unitCell: true};
+  const state = {style: "ball-stick", display: "periodic", unitCell: true, unitCellFill: true};
   let parsedStructure;
-  try {
-    parsedStructure = parsePoscar(structure.content);
-  } catch (error) {
-    console.warn("自定义 POSCAR 解析失败，将使用基础查看模式。", error);
+  const structureFormat = String(structure.format || "").toUpperCase();
+  if (["POSCAR", "VASP"].includes(structureFormat)) {
+    try {
+      parsedStructure = parsePoscar(structure.content);
+    } catch (error) {
+      console.warn("自定义 POSCAR 解析失败，将使用基础查看模式。", error);
+    }
   }
   const baseAtomCount = Number(structureView?.central_count) || parsedStructure?.atoms.length || 0;
   if (baseAtomCount > 300) {
@@ -1582,6 +1303,10 @@ function drawMaterialStructure(material, structure, structureView = null) {
       stick: {radius: periodicImage ? .07 : .08, color, opacity: periodicImage ? .86 : .96},
     },
     spacefill: {sphere: {scale: periodicImage ? .62 : .70, color, opacity: periodicImage ? .78 : 1}},
+    polyhedral: {
+      sphere: {radius: periodicImage ? .24 : .30, color, opacity: periodicImage ? .84 : 1},
+      stick: {radius: periodicImage ? .035 : .045, color, opacity: periodicImage ? .52 : .68},
+    },
     stick: {stick: {radius: periodicImage ? .07 : .09, color, opacity: periodicImage ? .72 : .96}},
   })[state.style];
 
@@ -1659,7 +1384,10 @@ function drawMaterialStructure(material, structure, structureView = null) {
         model.addAtoms(periodic.atoms);
         periodicCount = periodic.periodicCount;
       } else {
-        model = materialStructureViewer.addModel(structure.content, "vasp");
+        const viewerFormat = ["POSCAR", "VASP"].includes(structureFormat)
+          ? "vasp"
+          : String(structure.format || "cif").toLowerCase();
+        model = materialStructureViewer.addModel(structure.content, viewerFormat);
         const repeat = Number(state.display);
         if (repeat > 1) {
         materialStructureViewer.replicateUnitCell(
@@ -1675,16 +1403,24 @@ function drawMaterialStructure(material, structure, structureView = null) {
           [atom.x, atom.y, atom.z].map(value => Number(value).toFixed(3)).join(", ") + ") Å";
       });
       if (state.unitCell) {
-        if (structureView?.lattice) addStructureUnitCell(materialStructureViewer, structureView.lattice);
-        else if (parsedStructure) addStructureUnitCell(materialStructureViewer, parsedStructure.lattice);
+        if (structureView?.lattice) {
+          addStructureUnitCell(materialStructureViewer, structureView.lattice, {fill: state.unitCellFill});
+        } else if (parsedStructure) {
+          addStructureUnitCell(materialStructureViewer, parsedStructure.lattice, {fill: state.unitCellFill});
+        }
         else materialStructureViewer.addUnitCell(model, {box: {color: "#7d8ba2", linewidth: 1}});
+      }
+      if (state.style === "polyhedral") {
+        const polyhedralCentralCount = state.display === "periodic" && structureView
+          ? Number(structureView.central_count)
+          : baseAtomCount || atoms.length;
+        addStructurePolyhedra(materialStructureViewer, atoms, polyhedralCentralCount);
       }
       applyDefaultStructureView();
       materialStructureViewer.render();
       const atomCount = atoms.length;
       summary.textContent = state.display === "periodic"
-        ? structure.format + " · 原胞 " + baseAtomCount + " + 周期邻居 " + periodicCount +
-          (structureView?.source ? " · CrystalNN" : "")
+        ? structure.format + " · 原胞 " + baseAtomCount + " + 周期邻居 " + periodicCount
         : structure.format + " · " + atomCount + " 原子" + (Number(state.display) > 1 ? " · " + state.display + "×超胞" : "");
       atomInfo.textContent = state.display === "periodic"
         ? "已补齐跨晶胞边界的周期配位；半透明原子为相邻晶胞镜像。点击原子可查看坐标。"
@@ -1718,6 +1454,10 @@ function drawMaterialStructure(material, structure, structureView = null) {
   });
   document.querySelector("#structure-unit-cell").addEventListener("change", event => {
     state.unitCell = event.target.checked;
+    rebuild();
+  });
+  document.querySelector("#structure-unit-cell-fill").addEventListener("change", event => {
+    state.unitCellFill = event.target.checked;
     rebuild();
   });
   document.querySelector("#structure-reset").addEventListener("click", () => {
@@ -1833,14 +1573,9 @@ function renderAnisotropicThermalExpansion(curves) {
       "<p class='curve-note'>Cartesian 张量与晶轴 directional 表示</p></div>" +
       "<div class='thermal-empty'><p class='muted'>暂无已关联的各向异性曲线。</p></div></section>";
   }
-  const methods = [curves.cartesian, curves.directional]
-    .filter(Boolean)
-    .map(item => item.method || "AGV2")
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .join("；");
   return "<section class='thermal-panel anisotropic-thermal-panel'><div class='thermal-heading'><h3>" +
-    "各向异性热膨胀曲线</h3><p class='curve-note'>" + escapeHtml(methods) +
-    " · 分量单位 ppm/K · α<sub>V</sub> 为体积曲线</p></div>" +
+    "各向异性热膨胀曲线</h3><p class='curve-note'>" +
+    "分量单位 ppm/K · α<sub>V</sub> 为体积曲线</p></div>" +
     "<canvas id='anisotropic-thermal-curve' class='thermal-curve' width='720' height='440'></canvas>" +
     "<p class='curve-note'>Cartesian 显示 α<sub>xx</sub>、α<sub>yy</sub>、α<sub>zz</sub> 与 α<sub>V</sub>；" +
     "directional 文件保留 α<sub>a</sub>、α<sub>b</sub>、α<sub>c</sub> 和 F<sub>ani</sub>。</p></section>";
@@ -1897,7 +1632,9 @@ function drawAnisotropicThermalExpansion(curves) {
   ctx.setLineDash([]);
   series.forEach(item => {
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = item.key === "alpha_volume" ? 2.2 : 1.7;
+    ctx.lineWidth = item.key === "alpha_volume" ? 3.4 : 1.7;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     let started = false;
     points.forEach(point => {
@@ -1923,7 +1660,7 @@ function drawAnisotropicThermalExpansion(curves) {
   let legendX = margin.left;
   series.forEach(item => {
     ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, 16, 18, 3);
+    ctx.fillRect(legendX, 16, 18, item.key === "alpha_volume" ? 5 : 3);
     ctx.fillStyle = "#40586a";
     ctx.fillText(item.key, legendX + 23, 20);
     legendX += 92;
@@ -2238,6 +1975,56 @@ function setPredictionButtonsDisabled(disabled) {
   });
 }
 
+function clearPredictionProgressTimer() {
+  if (predictionPollTimer) window.clearTimeout(predictionPollTimer);
+  predictionPollTimer = null;
+  predictionProgressStartedAt = null;
+}
+
+function formatElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes} 分 ${String(remainder).padStart(2, "0")} 秒`;
+}
+
+function predictionStatusLabel(status) {
+  return {
+    PENDING: "准备中",
+    QUEUED: "排队中",
+    RUNNING: "计算中",
+    SUCCEEDED: "已完成",
+    FAILED: "失败",
+    CANCELLED: "已取消",
+  }[String(status || "").toUpperCase()] || String(status || "处理中");
+}
+
+function predictionStageLabel(stage, mode) {
+  return {
+    elastic: "弹性张量：应变结构计算",
+    agv2_force_constants: "AGV2：各向异性力常数",
+    elastic_force_constants: "弹性张量：力常数",
+    qha_force_constants: "QHA：位移力常数",
+    fast_screening: "快速筛选：ALIGNN + MatterSim",
+  }[stage] || (mode === "thermal" ? "热膨胀工作流" : "弹性工作流");
+}
+
+function predictionProgressDetail(progress) {
+  if (!progress) return "正在等待计算节点…";
+  const completed = ["completed_states", "completed_strains", "completed_displacements"]
+    .find(key => Number.isFinite(Number(progress[key])));
+  const total = completed ? {
+    completed_states: "total_states",
+    completed_strains: "total_strains",
+    completed_displacements: "total_displacements",
+  }[completed] : null;
+  if (completed && total && Number.isFinite(Number(progress[total]))) {
+    return `${progress[completed]} / ${progress[total]} 个任务单元`;
+  }
+  return "已进入计算流程";
+}
+
 function classificationText(value) {
   return {
     high_probability_nte: "高概率 NTE",
@@ -2343,51 +2130,139 @@ function renderQhaPrediction(result) {
   );
 }
 
-function renderJobProgress(job, label) {
-  const progress = job.progress || {};
-  const progressText = Number.isFinite(Number(progress.percent)) ? " · " + progress.percent + "%" : "";
+function thermalMethodLabel(result) {
+  if (result?.calculation_method === "anisotropic_gruneisen_v2" || result?.calculation_mode === "agv2") {
+    return "各向异性 Grüneisen v2";
+  }
+  return "立方材料 QHA";
+}
+
+function renderThermalExpansionPrediction(file, result) {
+  const symmetry = result.symmetry || {};
+  const method = thermalMethodLabel(result);
+  const directional = Array.isArray(result.thermal_expansion_directional_curve)
+    ? result.thermal_expansion_directional_curve : [];
+  const at300 = directional.reduce((best, point) =>
+    !best || Math.abs(Number(point.T_K) - 300) < Math.abs(Number(best.T_K) - 300) ? point : best, null);
+  const directionalHtml = at300 ?
+    "<div class='directional-summary'><span>300 K 方向分量</span>" +
+    "<strong>αa " + numeric(Number(at300.alpha_a)) + "</strong>" +
+    "<strong>αb " + numeric(Number(at300.alpha_b)) + "</strong>" +
+    "<strong>αc " + numeric(Number(at300.alpha_c)) + "</strong> ppm/K</div>" : "";
   document.querySelector("#prediction-result").innerHTML =
-    "<h3>" + escapeHtml(label) + "</h3><p>任务 " + escapeHtml(job.id) +
-    " · " + escapeHtml(job.status) + progressText + "</p>";
+    "<h3>热膨胀计算结果</h3>" +
+    metricCards([
+      ["300 K 体积热膨胀", numeric(result.alpha_300k_ppm_per_k) + " ppm/K"],
+      ["实际算法", method],
+      ["晶体系统", symmetry.crystal_system || "待解析"],
+      ["温度点数", String(result.thermal_expansion_curve?.length || 0)],
+    ]) +
+    directionalHtml +
+    "<canvas id='prediction-thermal-curve' class='prediction-thermal-curve' width='900' height='360'></canvas>" +
+    "<p class='curve-note'>" + escapeHtml(result.routing_reason || "按结构对称性自动选择计算方法。") + "</p>" +
+    (result.quality_warnings?.length ? "<p class='curve-note'>质量提示：" +
+      escapeHtml(result.quality_warnings.join("；")) + "</p>" : "");
+  drawPrecisionThermalExpansion(
+    {points: (result.thermal_expansion_curve || []).map(point => ({
+      temperature_k: point[0], alpha_ppm_per_k: point[1] * 1_000_000,
+    }))},
+    "#prediction-thermal-curve",
+  );
+}
+
+function renderJobProgress(job, label, mode) {
+  const progress = job.progress || null;
+  const rawPercent = Number(progress?.percent);
+  const hasPercent = Number.isFinite(rawPercent) && rawPercent >= 0 && rawPercent <= 100;
+  const percent = hasPercent ? Math.max(0, Math.min(100, rawPercent)) : null;
+  const method = job.parameters?.actual_method || job.routing?.method;
+  const methodLabel = method === "agv2"
+    ? "非立方 · AGV2"
+    : method === "qha" || mode === "qha"
+      ? "立方 · QHA"
+      : mode === "thermal" ? "自动路由" : "完整弹性";
+  const elapsed = predictionProgressStartedAt
+    ? formatElapsed(Date.now() - predictionProgressStartedAt)
+    : "—";
+  const trackClass = percent === null ? "prediction-progress-track indeterminate" : "prediction-progress-track";
+  const trackStyle = percent === null ? "" : ` style="--progress:${percent}%"`;
+  const progressAria = percent === null
+    ? " role='progressbar' aria-label='计算进度'"
+    : ` role='progressbar' aria-label='计算进度' aria-valuemin='0' aria-valuemax='100' aria-valuenow='${percent}'`;
+  document.querySelector("#prediction-result").innerHTML =
+    "<div class='prediction-progress-heading'><h3>" + escapeHtml(label) +
+    "</h3><span class='prediction-status'>" + escapeHtml(predictionStatusLabel(job.status)) + "</span></div>" +
+    "<div class='prediction-progress-meta'><span>" + escapeHtml(methodLabel) + "</span><span>任务 " +
+    escapeHtml(job.id) + "</span><span>已用 " + escapeHtml(elapsed) + "</span></div>" +
+    "<div class='" + trackClass + "'" + progressAria + trackStyle + "><span></span></div>" +
+    "<div class='prediction-progress-foot'><span>" + escapeHtml(predictionStageLabel(progress?.stage, mode)) +
+    " · " + escapeHtml(predictionProgressDetail(progress)) + "</span><strong>" +
+    (percent === null ? "处理中" : escapeHtml(percent.toFixed(1) + "%")) + "</strong></div>";
+}
+
+function predictionEndpoint(mode) {
+  return mode === "elastic"
+    ? "/api/precision/elastic-jobs"
+    : "/api/precision/thermal-expansion-jobs";
+}
+
+function renderPredictionFailure(job, mode, file) {
+  const result = document.querySelector("#prediction-result");
+  result.innerHTML =
+    "<div class='prediction-progress-heading'><h3>计算未完成</h3><span class='prediction-status error'>" +
+    escapeHtml(predictionStatusLabel(job.status)) + "</span></div>" +
+    "<p class='prediction-error-message'>" + escapeHtml(job.error_message || "请查看任务日志并重试。") + "</p>" +
+    "<div class='prediction-progress-meta'><span>任务 " + escapeHtml(job.id) +
+    "</span><span>可以使用同一结构重新提交</span></div>" +
+    "<button id='prediction-retry-button' class='secondary-button' type='button'>重新提交</button>";
+  document.querySelector("#prediction-retry-button").addEventListener("click", () => {
+    submitPredictionJob(predictionEndpoint(mode), mode, file);
+  });
 }
 
 async function pollPredictionJob(jobId, mode, file) {
   try {
     const job = await api("/api/precision/jobs/" + encodeURIComponent(jobId));
-    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "QHA 计算中");
+    renderJobProgress(job, mode === "elastic" ? "精准弹性计算中" : "热膨胀计算中", mode);
     if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
-      window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
+      predictionPollTimer = window.setTimeout(() => pollPredictionJob(jobId, mode, file), 3000);
       return;
     }
     setPredictionButtonsDisabled(false);
     if (job.status !== "SUCCEEDED") {
-      document.querySelector("#prediction-result").innerHTML =
-        "<h3>计算失败</h3><p>" + escapeHtml(job.error_message || "请查看任务日志。") + "</p>";
+      renderPredictionFailure(job, mode, file);
+      clearPredictionProgressTimer();
       return;
     }
+    clearPredictionProgressTimer();
     if (mode === "elastic") renderElasticPrediction(file, job.result);
+    else if (mode === "thermal") renderThermalExpansionPrediction(file, job.result);
     else renderQhaPrediction(job.result);
   } catch (error) {
     setPredictionButtonsDisabled(false);
+    clearPredictionProgressTimer();
     document.querySelector("#prediction-result").textContent = error.message;
   }
 }
 
-async function submitPredictionJob(endpoint, mode) {
-  const file = uploadedStructure();
+async function submitPredictionJob(endpoint, mode, selectedFile = null) {
+  const file = selectedFile || uploadedStructure();
   if (!file) {
     document.querySelector("#prediction-result").textContent = "请先选择 CIF 或 POSCAR 文件。";
     return;
   }
+  clearPredictionProgressTimer();
+  predictionProgressStartedAt = Date.now();
   setPredictionButtonsDisabled(true);
   document.querySelector("#prediction-result").textContent = mode === "elastic"
-    ? "正在提交完整弹性张量计算…" : "正在提交 MatterSim QHA 计算…";
+    ? "正在提交完整弹性张量计算…" : "正在按晶体系统提交热膨胀计算…";
   try {
     const job = await api(endpoint, {method: "POST", body: structureBody(file)});
-    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "QHA 任务已提交");
-    window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
+    renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "热膨胀任务已提交", mode);
+    predictionPollTimer = window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
   } catch (error) {
     setPredictionButtonsDisabled(false);
+    clearPredictionProgressTimer();
     document.querySelector("#prediction-result").textContent = error.message;
   }
 }
@@ -3422,7 +3297,7 @@ function renderZteCandidatePhase(role, detail, designMaterial) {
   const material = detail.material || {};
   const key = material.material_key || designMaterial.material_key;
   const formula = material.formula || designMaterial.formula || key;
-  const structure = selectRenderableStructure(detail.structures);
+  const structure = (detail.structures || []).find(item => item.content) || null;
   const scene = detail.structure_view || {};
   const encodedRole = encodeURIComponent(role);
   const encodedKey = encodeURIComponent(key);
@@ -3449,7 +3324,7 @@ function renderZteCandidatePhase(role, detail, designMaterial) {
 
 function drawZteCandidateStructure(role, detail) {
   const container = document.querySelector("#zte-" + role + "-structure-viewer");
-  const structure = selectRenderableStructure(detail.structures);
+  const structure = (detail.structures || []).find(item => item.content);
   if (!container || !structure) return;
   if (!window.$3Dmol) {
     container.innerHTML = "<p class='structure-error'>三维渲染组件未加载。</p>";
@@ -4334,12 +4209,7 @@ async function designZteComposite() {
 }
 
 async function initialize() {
-  const materialKey = materialKeyFromPath();
   restoreLandscapeContext();
-  restoreComparisonMaterials();
-  restoreAnalysisProjects();
-  renderComparisonSelection();
-  renderAnalysisProjectList();
   setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
@@ -4349,12 +4219,8 @@ async function initialize() {
       loadPeriodicElementCounts(),
       searchMaterials(),
       api("/static/fig1d-reference.json"),
-      loadAbout(),
     ]);
     fig1dReference = results[3];
-    if (materialKey) {
-      await loadDetail(materialKey);
-    }
     try {
       await restoreLandscapeContextFromLocation();
     } catch (error) {
@@ -4362,6 +4228,9 @@ async function initialize() {
       document.querySelector("#landscape-selection").textContent = "链接中的材料无法加载。";
     }
     drawLandscape();
+    if (workspacePageFromPath() === "material") {
+      await restoreMaterialFromLocation();
+    }
   } catch (error) {
     document.querySelector("#health-status").textContent = "服务异常";
     console.error(error);
@@ -4375,30 +4244,8 @@ async function initialize() {
     .forEach(selector => document.querySelector(selector).addEventListener("change", () => {
       updateCatalogFilterSummary();
       searchMaterials();
-    }));
+  }));
   updateCatalogFilterSummary();
-  document.querySelector("#material-compare-run").addEventListener("click", loadMaterialComparison);
-  document.querySelector("#material-compare-clear").addEventListener("click", () => {
-    comparisonMaterialKeys = [];
-    persistComparisonMaterials();
-    renderComparisonSelection();
-    const result = document.querySelector("#material-compare-result");
-    result.className = "compare-result placeholder";
-    result.textContent = "至少收藏两个材料后即可生成对比。";
-  });
-  document.querySelector("#analysis-project-save").addEventListener("click", saveAnalysisProject);
-  document.querySelector("#analysis-project-load").addEventListener("click", () =>
-    loadAnalysisProject().catch(error => {
-      document.querySelector("#material-compare-result").textContent = error.message;
-    }));
-  document.querySelector("#analysis-project-delete").addEventListener("click", deleteAnalysisProject);
-  document.querySelector("#analysis-project-select").addEventListener("change", event => {
-    activeAnalysisProjectId = event.target.value || null;
-    const project = analysisProjects.find(item => item.id === activeAnalysisProjectId);
-    if (project) document.querySelector("#analysis-project-name").value = project.name;
-    document.querySelector("#analysis-project-load").disabled = !activeAnalysisProjectId;
-    document.querySelector("#analysis-project-delete").disabled = !activeAnalysisProjectId;
-  });
   document.querySelector("#pte-search-button").addEventListener("click", () =>
     loadCompositeMaterials("pte").catch(error => { document.querySelector("#zte-result").textContent = error.message; }));
   document.querySelector("#nte-search-button").addEventListener("click", () =>
@@ -4519,6 +4366,25 @@ async function initialize() {
         file.name + " · " + inspection.format.toUpperCase() + " · " +
         (inspection.atom_count ?? "待解析") + " atoms · " +
         (Number.isFinite(Number(inspection.cell_volume_a3)) ? Number(inspection.cell_volume_a3).toFixed(3) + " Å³" : "体积待解析");
+      const symmetry = inspection.symmetry || {};
+      const route = document.querySelector("#structure-method-route");
+      route.hidden = false;
+      if (symmetry.is_cubic === true) {
+        route.className = "method-route";
+        route.innerHTML = "<strong>" + escapeHtml(symmetry.crystal_system || "cubic") + " · " +
+          escapeHtml(symmetry.space_group_symbol || "立方空间群") + "</strong>" +
+          "<span class='method-route-arrow'>→</span><strong>立方材料 QHA</strong>" +
+          "<span class='method-route-reason'>自动路由，不使用 AGV2</span>";
+      } else if (symmetry.is_cubic === false) {
+        route.className = "method-route";
+        route.innerHTML = "<strong>" + escapeHtml(symmetry.crystal_system || "非立方") + " · " +
+          escapeHtml(symmetry.space_group_symbol || "") + "</strong>" +
+          "<span class='method-route-arrow'>→</span><strong>各向异性 Grüneisen v2</strong>" +
+          "<span class='method-route-reason'>先生成完整弹性张量，再计算 α<sub>V</sub>(T) 与方向分量</span>";
+      } else {
+        route.className = "method-route unresolved";
+        route.innerHTML = "<strong>晶体系统待解析</strong><span class='method-route-reason'>无法安全路由时不会静默使用 QHA，请检查结构文件</span>";
+      }
       document.querySelector("#prediction-result").textContent = "结构检查完成，请选择计算层级。";
     } catch (error) {
       document.querySelector("#structure-summary").textContent = error.message;
@@ -4543,7 +4409,7 @@ async function initialize() {
   document.querySelector("#elastic-button").addEventListener("click", () =>
     submitPredictionJob("/api/precision/elastic-jobs", "elastic"));
   document.querySelector("#qha-button").addEventListener("click", () =>
-    submitPredictionJob("/api/precision/qha-jobs", "qha"));
+    submitPredictionJob("/api/precision/thermal-expansion-jobs", "thermal"));
   const agentWidget = document.querySelector("#agent-widget");
   const agentToggle = document.querySelector("#agent-toggle");
   const setAgentCollapsed = collapsed => {
@@ -4551,8 +4417,12 @@ async function initialize() {
     agentToggle.textContent = collapsed ? "+" : "−";
     agentToggle.setAttribute("aria-expanded", String(!collapsed));
     agentToggle.setAttribute("aria-label", collapsed ? "展开 Agent" : "最小化 Agent");
+    agentToggle.title = collapsed ? "展开 Agent" : "最小化 Agent";
+    try { window.localStorage.setItem("tep.agent-collapsed.v1", String(collapsed)); } catch (_) {}
   };
-  if (window.matchMedia("(max-width: 560px)").matches) setAgentCollapsed(true);
+  let storedAgentCollapsed = null;
+  try { storedAgentCollapsed = window.localStorage.getItem("tep.agent-collapsed.v1"); } catch (_) {}
+  setAgentCollapsed(storedAgentCollapsed === null ? true : storedAgentCollapsed !== "false");
   agentToggle.addEventListener("click", () => {
     setAgentCollapsed(!agentWidget.classList.contains("collapsed"));
   });
@@ -4617,6 +4487,7 @@ async function initialize() {
         fast_structure_screening: "快速预测",
         precision_elastic: "精准弹性",
         precision_qha: "QHA",
+        precision_thermal_expansion: "自动热膨胀",
       }[job.workflow] || "计算";
       bubble.textContent = `${jobLabel}任务 ${job.id}\n状态：${job.status}${percent}`;
       if (["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
@@ -4658,7 +4529,7 @@ async function initialize() {
       const canvasId = "agent-job-curve-" + job.id;
       bubble.classList.add("wide");
       bubble.innerHTML =
-        "<strong>QHA 热膨胀计算完成</strong>" +
+        "<strong>" + escapeHtml(result.calculation_method === "anisotropic_gruneisen_v2" ? "各向异性热膨胀计算完成" : "立方材料 QHA 计算完成") + "</strong>" +
         "<p>300 K：" + numeric(result.alpha_300k_ppm_per_k) + " ppm/K · " +
         escapeHtml(String(result.thermal_expansion_curve?.length || 0)) + " 个温度点</p>" +
         "<canvas id='" + canvasId + "' class='agent-job-curve' width='720' height='300'></canvas>";
@@ -4685,6 +4556,7 @@ async function initialize() {
       fast: "快速预测",
       elastic: "精准弹性预测",
       qha: "QHA 热膨胀计算",
+      thermal: "自动热膨胀计算",
     }[approval.mode] || "结构计算";
     title.textContent = "需要确认：提交" + modeLabel;
     const summary = document.createElement("div");
@@ -4800,6 +4672,14 @@ async function initialize() {
       ? `${capability.model} · 已连接`
       : `尚未配置 AI 密钥`;
     statusDot.classList.add(capability.configured ? "online" : "offline");
+    const agentFile = document.querySelector("#agent-file");
+    const agentMessage = document.querySelector("#agent-message");
+    const agentSend = document.querySelector("#agent-send");
+    [agentFile, agentMessage, agentSend].forEach(control => {
+      control.disabled = !capability.configured;
+      if (!capability.configured) control.title = "请先配置 AI 密钥";
+    });
+    agentWidget.classList.toggle("agent-unconfigured", !capability.configured);
     const pendingApprovals = await api("/api/agent/approvals?status=PENDING_APPROVAL&limit=10");
     (pendingApprovals.requests || []).forEach(item => appendAgentApproval({
       approval_id: item.id,
@@ -4810,6 +4690,10 @@ async function initialize() {
   } catch (error) {
     document.querySelector("#agent-status").textContent = error.message;
     document.querySelector("#agent-status-dot").classList.add("offline");
+    document.querySelector("#agent-file").disabled = true;
+    document.querySelector("#agent-message").disabled = true;
+    document.querySelector("#agent-send").disabled = true;
+    document.querySelector("#agent-widget").classList.add("agent-unconfigured");
   }
 }
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from te_platform.db.schema import connect_readonly_database
 from te_platform.screening.fast_sbr import calculate_bonding_modulus_from_atomic_volume
+from pymatgen.core import Composition
 
 
 ELEMENT_SYMBOLS = frozenset(
@@ -97,6 +98,37 @@ def _selected_elements(elements: list[str] | tuple[str, ...] | None) -> frozense
     if invalid:
         raise ValueError(f"Unknown element symbols: {', '.join(invalid)}")
     return selected
+
+
+def _formula_from_material_key(material_key: str) -> str | None:
+    """Extract a formula-like prefix from legacy material keys.
+
+    Older releases used generated MP aliases (for example
+    ``BaCrSi4O10-mp-aaaabcws``), while the current catalog stores the
+    canonical MP id.  The formula prefix is the only stable part shared by
+    those keys.  Return ``None`` for keys that are not safe to interpret as a
+    formula so a failed lookup still produces the normal 404 response.
+    """
+    match = re.match(r"^(?P<formula>.+?)[-_]mp-[A-Za-z0-9]+$", str(material_key))
+    if match is None:
+        return None
+    prefix = match.group("formula")
+    prefix = re.sub(r"^\d+[._-]", "", prefix)
+    prefix = prefix.replace("_", "")
+    if not prefix or not re.fullmatch(r"[A-Za-z0-9()]+", prefix):
+        return None
+    try:
+        Composition(prefix)
+    except (TypeError, ValueError):
+        return None
+    return prefix
+
+
+def _same_composition(formula_a: str, formula_b: str) -> bool:
+    try:
+        return Composition(formula_a).reduced_formula == Composition(formula_b).reduced_formula
+    except (TypeError, ValueError):
+        return False
 
 
 def _precision_thermal_expansion(job: Any | None) -> dict[str, Any] | None:
@@ -238,6 +270,40 @@ def dataset_summary(
         "counts": dict(counts),
         "quality_flags": [dict(row) for row in flags],
     }
+
+
+def distinct_material_count(
+    database_path: str | Path,
+    release_slugs: list[str] | tuple[str, ...],
+) -> int:
+    """Count materials once across a set of releases.
+
+    A material can intentionally belong to more than one role release (for
+    example a synthetic test fixture may reuse an NTE structure as a PTE
+    placeholder).  Summing per-release counts would then report duplicates as
+    separate catalog materials.
+    """
+    normalized = tuple(
+        dict.fromkeys(
+            str(slug).strip()
+            for slug in release_slugs
+            if str(slug).strip()
+        )
+    )
+    if not normalized:
+        return 0
+    placeholders = ",".join("?" for _ in normalized)
+    with connect_readonly_database(database_path) as connection:
+        row = connection.execute(
+            f"""
+            SELECT COUNT(DISTINCT dm.material_id) AS material_count
+            FROM dataset_memberships dm
+            JOIN dataset_releases dr ON dr.id = dm.dataset_release_id
+            WHERE dr.slug IN ({placeholders})
+            """,
+            normalized,
+        ).fetchone()
+    return int(row["material_count"] or 0)
 
 
 def search_materials(
@@ -419,6 +485,33 @@ def material_detail(
             (release_slug, material_key),
         ).fetchone()
         if material is None:
+            # Keep old shared links usable after a release switches from
+            # generated MP aliases to canonical MP ids.  Resolve only when
+            # the formula prefix identifies exactly one material; silently
+            # picking among polymorphs would be worse than a clear 404.
+            legacy_formula = _formula_from_material_key(material_key)
+            if legacy_formula is not None:
+                alias_rows = connection.execute(
+                    """
+                    SELECT m.id, m.material_key, m.formula, m.external_id,
+                           dr.id AS release_id, dr.slug AS release_slug,
+                           dr.title AS release_title, dr.version AS release_version,
+                           dr.source_file_name, dr.source_sha256, dr.imported_at
+                    FROM dataset_releases dr
+                    JOIN dataset_memberships dm ON dm.dataset_release_id = dr.id
+                    JOIN materials m ON m.id = dm.material_id
+                    WHERE dr.slug = ?
+                    ORDER BY m.material_key
+                    """,
+                    (release_slug,),
+                ).fetchall()
+                matches = [
+                    row for row in alias_rows
+                    if _same_composition(legacy_formula, str(row["formula"] or ""))
+                ]
+                if len(matches) == 1:
+                    material = matches[0]
+        if material is None:
             raise ValueError(f"Material is not present in {release_slug}: {material_key}")
         properties = connection.execute(
             """
@@ -447,7 +540,16 @@ def material_detail(
             SELECT format, content, content_sha256, LENGTH(content) AS content_characters
             FROM structures
             WHERE dataset_release_id = ? AND material_id = ?
-            ORDER BY format
+            -- A detail view needs a renderable crystallographic structure first.
+            -- Elastic tensors are stored alongside POSCAR/CIF files, but are
+            -- not structure documents and must never become the viewer input.
+            ORDER BY CASE UPPER(format)
+                       WHEN 'POSCAR' THEN 0
+                       WHEN 'VASP' THEN 0
+                       WHEN 'CIF' THEN 1
+                       ELSE 2
+                     END,
+                     format
             """,
             (material["release_id"], material["id"]),
         ).fetchall()
@@ -528,7 +630,7 @@ def material_detail(
             ),
             "CTE_ppm": (
                 "目录筛选字段用于材料检索和总体比较；精确温度依赖行为应优先参考"
-                "已关联的各向异性 Cartesian/directional 曲线或其 legacy 体积曲线。"
+                "已关联的各向异性 Cartesian/directional alpha_volume 曲线。"
             ),
             "precision_thermal_expansion": (
                 "legacy 体积曲线；AGV2 记录来自 Cartesian alpha_volume，QHA 记录来自标量 QHA。"
@@ -573,6 +675,45 @@ def _curve_alpha_at_temperature(
     ) else None
 
 
+def _anisotropic_alpha_at_temperature(
+    curves: dict[str, Any] | None,
+    temperature_k: float,
+) -> float | None:
+    """Interpolate the tensor-aware volumetric component at one temperature.
+
+    Cartesian is preferred because it is the canonical six-component export;
+    directional is a compatible fallback for releases that only contain the
+    crystallographic-axis representation.  The returned value is in ppm/K,
+    matching the catalog CTE field and the browser plots.
+    """
+    for kind in ("cartesian", "directional"):
+        curve = (curves or {}).get(kind) or {}
+        points = curve.get("points") or []
+        normalized = []
+        for point in points:
+            try:
+                temperature = float(point["T_K"])
+                alpha = float(point["alpha_volume"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(temperature) and math.isfinite(alpha):
+                normalized.append((temperature, alpha))
+        if len(normalized) < 2:
+            continue
+        normalized.sort(key=lambda item: item[0])
+        if temperature_k < normalized[0][0] or temperature_k > normalized[-1][0]:
+            continue
+        for (left_t, left_alpha), (right_t, right_alpha) in zip(normalized, normalized[1:]):
+            if left_t <= temperature_k <= right_t:
+                if temperature_k == left_t or right_t == left_t:
+                    return left_alpha
+                fraction = (temperature_k - left_t) / (right_t - left_t)
+                return left_alpha + fraction * (right_alpha - left_alpha)
+        if temperature_k == normalized[-1][0]:
+            return normalized[-1][1]
+    return None
+
+
 def compare_materials(
     database_path: str | Path,
     release_slug: str,
@@ -606,6 +747,14 @@ def compare_materials(
             else None
         )
         curve = detail["precision_thermal_expansion"]
+        anisotropic_curves = detail["anisotropic_thermal_expansion"]
+        alpha_at_temperature = _anisotropic_alpha_at_temperature(
+            anisotropic_curves, temperature_k
+        )
+        if alpha_at_temperature is None:
+            # Keep older catalog releases readable while all current 3665
+            # records use the tensor-aware export above.
+            alpha_at_temperature = _curve_alpha_at_temperature(curve, temperature_k)
         compared.append(
             {
                 "material": detail["material"],
@@ -617,9 +766,7 @@ def compare_materials(
                     "K_GPa": numeric_property("K_GPa"),
                     "E_coh_eV_per_atom": numeric_property("E_coh_eV_per_atom"),
                     "avg_cn": numeric_property("avg_cn"),
-                    "alpha_at_temperature_ppm_per_k": _curve_alpha_at_temperature(
-                        curve, temperature_k
-                    ),
+                    "alpha_at_temperature_ppm_per_k": alpha_at_temperature,
                 },
                 "curve": curve,
                 "anisotropic_thermal_expansion": detail["anisotropic_thermal_expansion"],
@@ -633,7 +780,7 @@ def compare_materials(
         "material_count": len(compared),
         "materials": compared,
         "method_note": (
-            "表格比较目录字段；alpha(T)列由各材料已存储的真实QHA曲线在线性插值后得到。"
+            "表格比较目录字段；alpha(T)列由已存储的各向异性 alpha_volume 曲线线性插值得到。"
         ),
     }
 

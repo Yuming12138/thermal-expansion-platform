@@ -3,14 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>热膨胀材料智能计算与设计平台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-16">
+    <title>NTE Materials · 材料数据库</title>
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-26">
   </head>
   <body>
     <header>
-      <div>
-        <p class="eyebrow">Thermal Expansion Materials Platform</p>
-        <h1>热膨胀材料智能计算与设计平台</h1>
+      <div class="site-brand">
+        <a class="site-brand-mark" href="/database" aria-label="返回材料数据库">NTE</a>
+        <div class="site-brand-copy">
+          <p class="eyebrow">Thermal Expansion Database</p>
+          <h1>NTE Materials</h1>
+        </div>
       </div>
       <span id="health-status" class="status">连接中</span>
     </header>
@@ -20,7 +23,6 @@
         <a href="/predict" data-page-link="predict"><span>02</span>结构预测</a>
         <a href="/landscape" data-page-link="landscape"><span>03</span>热膨胀景观</a>
         <a href="/zte" data-page-link="zte"><span>04</span>ZTE 复合设计</a>
-        <a href="/about" data-page-link="about"><span>05</span>关于软件</a>
       </div>
     </nav>
     <section id="material-context" class="material-context" aria-label="当前研究材料" aria-live="polite" hidden>
@@ -67,7 +69,7 @@
             <details class="catalog-filter-details">
               <summary>
                 <span class="catalog-filter-summary-title">筛选与排序</span>
-                <span id="catalog-filter-summary" class="catalog-filter-summary-hint">默认排序 · 全部 CTE · 50 条</span>
+                <span id="catalog-filter-summary" class="catalog-filter-summary-hint">默认排序 · 全部 αV · 50 条</span>
               </summary>
               <div class="catalog-analysis-toolbar" aria-label="材料排序与筛选">
                 <label>排序字段
@@ -85,13 +87,13 @@
                     <option value="descending">从大到小</option>
                   </select>
                 </label>
-                <label>CTE 范围
+                <label>αV 范围
                   <select id="material-cte-filter">
                     <option value="all">全部</option>
-                    <option value="strong">强 NTE（≤ -20）</option>
+                    <option value="strong">强 NTE（αV ≤ -20）</option>
                     <option value="moderate">-20 ～ -5</option>
-                    <option value="near-zero">近零（-5 ～ 5）</option>
-                    <option value="positive">正膨胀（≥ 5）</option>
+                    <option value="near-zero">近零（αV -5 ～ 5）</option>
+                    <option value="positive">正膨胀（αV ≥ 5）</option>
                   </select>
                 </label>
                 <label>显示数量
@@ -119,50 +121,22 @@
             <div id="material-results" class="table-wrap"></div>
           </article>
         </section>
-        <section id="material-compare-panel" class="panel material-compare-panel workspace-page" data-page="database">
-          <div class="compare-heading">
-            <div>
-              <h2>收藏与材料对比</h2>
-              <p class="muted">收藏 2–4 个材料，对比 G、Ẽ、ξ、目录 CTE 以及体积/各向异性热膨胀曲线。</p>
-            </div>
-            <div class="compare-actions">
-              <label>比较温度
-                <span><input id="material-compare-temperature" type="number" min="0" max="2000" step="10" value="300"> K</span>
-              </label>
-              <button id="material-compare-run" type="button" disabled>生成对比</button>
-              <button id="material-compare-clear" class="secondary-button" type="button" disabled>清空</button>
-            </div>
-          </div>
-          <div id="material-compare-selection" class="compare-selection muted">尚未收藏材料。</div>
-          <div class="analysis-project-toolbar" aria-label="分析项目管理">
-            <input id="analysis-project-name" placeholder="分析项目名称，例如：强 NTE 候选对比" maxlength="80">
-            <button id="analysis-project-save" type="button" disabled>保存项目</button>
-            <select id="analysis-project-select" aria-label="已保存分析项目">
-              <option value="">选择已保存项目…</option>
-            </select>
-            <button id="analysis-project-load" class="secondary-button" type="button" disabled>载入</button>
-            <button id="analysis-project-delete" class="secondary-button danger-button" type="button" disabled>删除</button>
-          </div>
-          <div id="material-compare-result" class="compare-result placeholder">至少收藏两个材料后即可生成对比。</div>
-        </section>
       </div>
       <section class="workspace-page material-detail-page" data-page="material" hidden>
+        <div class="material-route-bar">
+          <a href="/database" data-page-link="database" class="material-back-link">← 返回材料数据库</a>
+          <span id="material-detail-breadcrumb">材料详情</span>
+        </div>
         <article class="panel detail-panel">
-          <div class="detail-page-heading">
-            <div>
-              <p class="eyebrow">Material record</p>
-              <h2>材料详情</h2>
-            </div>
-            <a class="secondary-button detail-back-link" href="/database">← 返回数据库</a>
-          </div>
-          <div id="material-detail" class="placeholder">正在加载材料详情…</div>
+          <div id="material-detail" class="placeholder">正在读取材料详情…</div>
         </article>
       </section>
       <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
-        <h2>上传结构与分级预测（实验性扩展）</h2>
-        <p class="muted">该工作区用于展示软件的未来扩展能力，当前版本的重点是内置数据库查询与分析；没有配置科研计算环境时不会执行真实任务。</p>
+        <h2>上传结构与热膨胀计算</h2>
+        <p class="muted">上传结构后先判定晶体系统。立方材料使用标量 QHA；非立方材料先计算完整弹性张量，再使用各向异性 Grüneisen v2。</p>
         <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
         <div id="structure-summary" class="structure-summary muted">选择文件后将自动检查结构。</div>
+        <div id="structure-method-route" class="method-route" hidden aria-live="polite"></div>
         <div class="prediction-actions">
           <button id="fast-screen-button" type="button">
             <strong>1. 快速预测</strong><span>ALIGNN G + MatterSim Ẽ</span>
@@ -171,17 +145,13 @@
             <strong>2. 精准预测</strong><span>完整弹性张量 + SBR</span>
           </button>
           <button id="qha-button" type="button">
-            <strong>3. QHA 计算</strong><span>MatterSim α(T)</span>
+            <strong>3. 热膨胀计算</strong><span>自动路由：立方 QHA · 非立方 AGV2</span>
           </button>
         </div>
         <div id="prediction-result" class="prediction-result muted">尚未开始计算。</div>
       </section>
       <section class="panel workspace-page" data-page="landscape" hidden>
         <h2>论文 Fig. 1d：G–Ẽ 热膨胀景观</h2>
-        <p class="muted">论文原始散点与渐变背景。数据库选中的材料或结构预测结果会以红色星标定位，悬停可查看来源与数值。</p>
-        <div class="material-download-actions">
-          <a href="/static/fig1d_points.csv" download>下载绘图数据 CSV</a>
-        </div>
         <div class="landscape-wrap">
           <canvas id="landscape" width="1100" height="600" role="img" aria-label="论文 Fig. 1d 双对数热膨胀分类图"></canvas>
           <div id="landscape-tooltip" class="landscape-tooltip" hidden></div>
@@ -343,50 +313,8 @@
           </div>
         </div>
       </section>
-      <section class="workspace-page about-page" data-page="about" hidden>
-        <article class="panel about-hero">
-          <div>
-            <p class="eyebrow about-eyebrow">Software Information</p>
-            <h2 id="about-name">热膨胀材料智能计算与设计平台</h2>
-            <p id="about-scope" class="muted">正在读取软件与科学边界信息…</p>
-          </div>
-          <div class="about-version-block">
-            <span>当前版本</span>
-            <strong id="about-version">—</strong>
-          </div>
-        </article>
-        <section class="about-grid">
-          <article class="panel">
-            <h2>软件登记信息</h2>
-            <dl class="about-list">
-              <div><dt>英文名称</dt><dd id="about-name-en">—</dd></div>
-              <div><dt>著作权人/开发单位</dt><dd id="about-owner">—</dd></div>
-              <div><dt>源代码仓库</dt><dd><a id="about-repository" href="#" target="_blank" rel="noreferrer">—</a></dd></div>
-            </dl>
-          </article>
-          <article class="panel">
-            <h2>内置数据版本</h2>
-            <dl class="about-list">
-              <div><dt>NTE 候选材料</dt><dd id="about-nte">—</dd></div>
-              <div><dt>PTE 参考材料</dt><dd id="about-pte">—</dd></div>
-              <div><dt>目录材料总数</dt><dd id="about-total">—</dd></div>
-            </dl>
-          </article>
-          <article class="panel">
-            <h2>核心科学定义</h2>
-            <div class="about-formula"><span>键合模量</span><strong>Ẽ = U<sub>V</sub> / n</strong></div>
-            <div class="about-formula"><span>剪切—键合比</span><strong>ξ = G / Ẽ</strong></div>
-            <p id="about-descriptor" class="curve-note">—</p>
-          </article>
-          <article class="panel">
-            <h2>技术组成</h2>
-            <div id="about-technology" class="about-tags"></div>
-            <p class="curve-note">第三方组件的许可证与归属见 NOTICE-THIRD-PARTY.md。</p>
-          </article>
-        </section>
-      </section>
     </main>
-    <aside id="agent-widget" class="agent-widget" aria-label="热膨胀材料 Agent">
+    <aside id="agent-widget" class="agent-widget collapsed" aria-label="热膨胀材料 Agent">
       <div class="agent-header">
         <div class="agent-identity">
           <span id="agent-status-dot" class="agent-status-dot" aria-hidden="true"></span>
@@ -395,11 +323,11 @@
             <span id="agent-status">正在检查配置…</span>
           </div>
         </div>
-        <button id="agent-toggle" class="agent-toggle" type="button" aria-expanded="true" aria-label="最小化 Agent">−</button>
+        <button id="agent-toggle" class="agent-toggle" type="button" aria-expanded="false" aria-controls="agent-body" aria-label="展开 Agent" title="展开 Agent">+</button>
       </div>
-      <div class="agent-body">
+      <div id="agent-body" class="agent-body">
         <div id="agent-messages" class="agent-messages" aria-live="polite">
-          <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析 QHA 曲线、设计 ZTE 配比，也可以为上传结构规划快速、弹性或 QHA 计算。</div>
+          <div class="agent-bubble assistant">你好，我可以检索 NTE/PTE 数据、分析热膨胀曲线、设计 ZTE 配比，也可以为上传结构规划快速、弹性或按对称性路由的热膨胀计算。</div>
         </div>
         <div id="agent-attachment" class="agent-attachment" hidden>
           <span id="agent-attachment-name"></span>
@@ -417,6 +345,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-28"></script>
+    <script src="/static/app.js?v=0.10.0-40"></script>
   </body>
 </html>

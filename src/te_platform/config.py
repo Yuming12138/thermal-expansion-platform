@@ -106,6 +106,8 @@ def load_compute_env(path: Path | None = None) -> dict[str, str]:
         "TEP_PRECISION_CONDA_INIT",
         "TEP_PRECISION_CONDA_ENV",
         "TEP_VASPKIT_BIN_DIR",
+        "TEP_AGV2_SOURCE_ROOT",
+        "TEP_AGV2_MODEL",
     }
     values: dict[str, str] = {}
     for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():

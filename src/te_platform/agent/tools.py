@@ -25,6 +25,9 @@ from te_platform.screening.sbr import classify_sbr
 def default_registry(
     catalog_database: Path | None = None,
     workspace_database: Path | None = None,
+    *,
+    nte_release_slug: str | None = None,
+    pte_release_slug: str | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
@@ -68,7 +71,10 @@ def default_registry(
         },
     )
     if catalog_database is not None:
-        releases = {"nte": DEFAULT_RELEASE_SLUG, "pte": DEFAULT_PTE_RELEASE_SLUG}
+        releases = {
+            "nte": nte_release_slug or DEFAULT_RELEASE_SLUG,
+            "pte": pte_release_slug or DEFAULT_PTE_RELEASE_SLUG,
+        }
 
         registry.register(
             "describe_database",
@@ -230,8 +236,8 @@ def default_registry(
             "design_zte_material_pair",
             lambda **kwargs: optimize_material_pair(
                 catalog_database,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=releases["pte"],
+                nte_release_slug=releases["nte"],
                 **kwargs,
             ),
             description=(
@@ -305,8 +311,8 @@ def default_registry(
             "screen_zte_material_pairs",
             lambda **kwargs: screen_material_pairs(
                 catalog_database,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=releases["pte"],
+                nte_release_slug=releases["nte"],
                 **kwargs,
             ),
             description=(
@@ -435,9 +441,15 @@ def default_registry(
                 "typical_cost": "中",
             },
             "qha": {
-                "label": "QHA热膨胀计算",
+                "label": "立方材料 QHA 热膨胀计算",
                 "workflow": "precision_qha",
-                "purpose": "MatterSim QHA计算完整alpha(T)曲线。",
+                "purpose": "仅对已确认立方结构使用标量 MatterSim QHA 计算完整 alpha(T) 曲线。",
+                "typical_cost": "高",
+            },
+            "thermal": {
+                "label": "自动热膨胀计算",
+                "workflow": "precision_thermal_expansion",
+                "purpose": "按晶体系统路由：立方结构使用 QHA，非立方结构使用各向异性 Grüneisen v2；不静默回退。",
                 "typical_cost": "高",
             },
         }
@@ -452,7 +464,7 @@ def default_registry(
                 "required_input": "已上传CIF/POSCAR的structure_id",
             },
             description=(
-                "查看可提交的fast、elastic和qha任务、用途、成本层级及审批规则。"
+                "查看可提交的 fast、elastic、qha 和 thermal 任务、用途、成本层级及审批规则。"
                 "当用户目标含糊或需要权衡计算层级时调用。"
             ),
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
@@ -475,7 +487,7 @@ def default_registry(
             )
             config.validate()
             if mode not in calculation_capabilities:
-                raise ValueError("mode must be 'fast', 'elastic', or 'qha'")
+                raise ValueError("mode must be 'fast', 'elastic', 'qha', or 'thermal'")
             capability = calculation_capabilities[mode]
             action = create_action_request(
                 workspace_database,
@@ -485,7 +497,7 @@ def default_registry(
                     + (
                         f"；qha_points={qha_points}, mesh={qha_mesh}, scale={qha_scale}, "
                         f"parallel_workers={parallel_workers}"
-                        if mode == "qha"
+                        if mode in {"qha", "thermal"}
                         else ""
                     )
                 ),
@@ -513,13 +525,14 @@ def default_registry(
             description=(
                 "为已上传结构统一创建计算任务审批请求。根据用户目标自主选择mode："
                 "fast用于快速判断NTE/PTE倾向，elastic用于完整弹性张量和精准SBR，"
-                "qha用于直接计算alpha(T)热膨胀曲线。此工具不会直接启动计算，必须由用户批准。"
+                "thermal用于按对称性自动计算alpha(T)，qha仅用于已确认的立方结构。"
+                "此工具不会直接启动计算，必须由用户批准。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "structure_id": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha"]},
+                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha", "thermal"]},
                     "qha_points": {"type": "integer", "enum": [7, 9, 11], "default": 11},
                     "qha_mesh": {"type": "integer", "minimum": 10, "maximum": 60, "default": 30},
                     "qha_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01, "default": 0.003},
@@ -539,7 +552,7 @@ def default_registry(
                 "type": "object",
                 "properties": {
                     "structure_id": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha"]},
+                    "mode": {"type": "string", "enum": ["fast", "elastic", "qha", "thermal"]},
                     "qha_points": {"type": "integer", "enum": [7, 9, 11], "default": 11},
                     "qha_mesh": {"type": "integer", "minimum": 10, "maximum": 60, "default": 30},
                     "qha_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.01, "default": 0.003},
@@ -594,7 +607,7 @@ def default_registry(
         registry.register(
             "get_calculation_job",
             calculation_job_status,
-            description="查询已提交弹性或QHA任务的状态、进度、错误和结构化结果。",
+            description="查询已提交弹性、QHA 或自动热膨胀任务的状态、进度、错误和结构化结果。",
             parameters={
                 "type": "object",
                 "properties": {"job_id": {"type": "string"}},

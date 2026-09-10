@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -31,6 +32,26 @@ class QhaResults:
     thermal_expansion_source_path: str
     alpha_300k_per_k: float | None
     alpha_300k_ppm_per_k: float | None
+    quality_warnings: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AnisotropicResults:
+    """Tensor-aware AGV2 output with a scalar-compatible alpha(T) view."""
+
+    calculation_method: str
+    thermal_expansion_curve: tuple[tuple[float, float], ...]
+    thermal_expansion_cartesian_curve: tuple[dict[str, float | None], ...]
+    thermal_expansion_directional_curve: tuple[dict[str, float | None], ...]
+    thermal_expansion_source_path: str
+    directional_source_path: str
+    alpha_300k_per_k: float | None
+    alpha_300k_ppm_per_k: float | None
+    crystal_system: str | None
+    quality_report: dict[str, object]
     quality_warnings: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -192,6 +213,110 @@ def parse_qha_results(work_directory: str | Path) -> QhaResults:
         thermal_expansion_source_path=str(thermal_path.resolve()),
         alpha_300k_per_k=alpha_300,
         alpha_300k_ppm_per_k=alpha_300 * 1_000_000 if alpha_300 is not None else None,
+        quality_warnings=tuple(warnings),
+    )
+
+
+def _parse_named_table(
+    path: Path,
+    required_columns: tuple[str, ...],
+    *,
+    allow_nonfinite: tuple[str, ...] = (),
+) -> tuple[dict[str, float | None], ...]:
+    header: list[str] | None = None
+    rows: list[dict[str, float | None]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            candidate = stripped[1:].strip().split()
+            if candidate and all(column in candidate for column in required_columns):
+                header = candidate
+            continue
+        if header is None:
+            continue
+        values = stripped.split()
+        if len(values) < len(header):
+            continue
+        try:
+            row = {
+                column: (
+                    float(values[index])
+                    if math.isfinite(float(values[index]))
+                    else None
+                )
+                for index, column in enumerate(header)
+            }
+        except (TypeError, ValueError):
+            continue
+        if any(value is None and column not in allow_nonfinite for column, value in row.items()):
+            continue
+        if row.get("T_K") is None:
+            continue
+        if all(value is None or math.isfinite(value) for value in row.values()):
+            rows.append(row)
+    if len(rows) < 2:
+        raise ValueError(f"{path.name} has fewer than two valid data rows")
+    if any(right["T_K"] <= left["T_K"] for left, right in zip(rows, rows[1:])):
+        raise ValueError(f"{path.name} temperatures must be strictly increasing")
+    return tuple(rows)
+
+
+def parse_anisotropic_results(
+    work_directory: str | Path,
+    *,
+    crystal_system: str | None = None,
+) -> AnisotropicResults:
+    root = Path(work_directory)
+    result_root = root / "gruneisen_aniso_1M_v2"
+    cartesian_path = result_root / "thermal_expansion_cartesian.dat"
+    directional_path = result_root / "thermal_expansion_directional.dat"
+    quality_path = result_root / "quality_report.json"
+    if not cartesian_path.is_file() or not directional_path.is_file():
+        raise ValueError("AGV2 result directory must contain Cartesian and directional curves")
+    cartesian = _parse_named_table(
+        cartesian_path,
+        ("T_K", "alpha_xx", "alpha_yy", "alpha_zz", "alpha_volume"),
+    )
+    directional = _parse_named_table(
+        directional_path,
+        ("T_K", "alpha_a", "alpha_b", "alpha_c", "alpha_volume", "F_ani"),
+        allow_nonfinite=("F_ani",),
+    )
+    if len(cartesian) != len(directional) or any(
+        left["T_K"] != right["T_K"] for left, right in zip(cartesian, directional)
+    ):
+        raise ValueError("AGV2 Cartesian and directional temperature grids differ")
+    volume_curve = tuple((row["T_K"], row["alpha_volume"] * 1e-6) for row in cartesian)
+    alpha_300 = interpolate_alpha(volume_curve, 300.0)
+    quality: dict[str, object] = {}
+    if quality_path.is_file():
+        try:
+            loaded = json.loads(quality_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                quality = loaded
+        except (OSError, json.JSONDecodeError):
+            quality = {"parse_warning": "quality_report.json is not valid JSON"}
+    warnings: list[str] = []
+    readiness = quality.get("production_readiness")
+    if isinstance(readiness, dict) and readiness.get("status") not in (None, "ready"):
+        warnings.append("AGV2 quality status: " + str(readiness.get("status")))
+    if quality.get("axis_mapping_status") not in (None, "ok"):
+        warnings.append("AGV2 axis mapping is not fully resolved")
+    if any(row.get("F_ani") is None for row in directional):
+        warnings.append("AGV2 anisotropy factor is unavailable at one or more temperatures")
+    return AnisotropicResults(
+        calculation_method="anisotropic_gruneisen_v2",
+        thermal_expansion_curve=volume_curve,
+        thermal_expansion_cartesian_curve=cartesian,
+        thermal_expansion_directional_curve=directional,
+        thermal_expansion_source_path=str(cartesian_path.resolve()),
+        directional_source_path=str(directional_path.resolve()),
+        alpha_300k_per_k=alpha_300,
+        alpha_300k_ppm_per_k=alpha_300 * 1e6 if alpha_300 is not None else None,
+        crystal_system=crystal_system,
+        quality_report=quality,
         quality_warnings=tuple(warnings),
     )
 

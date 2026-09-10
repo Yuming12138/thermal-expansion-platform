@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from a2wsgi import WSGIMiddleware
 
 from te_platform import __version__
 from te_platform.api.services import (
@@ -23,6 +24,7 @@ from te_platform.api.structures import inspect_structure
 from te_platform.catalog.queries import (
     compare_materials,
     dataset_summary,
+    distinct_material_count,
     material_detail,
     material_element_statistics,
     material_landscape,
@@ -50,6 +52,7 @@ from te_platform.screening.fast_sbr import fast_screen_sbr
 from te_platform.screening.sbr import classify_sbr
 from te_platform.reports.zte_report import build_zte_screening_report_pdf
 from te_platform.structures import build_structure_view
+from te_platform.structures.crystal_toolkit_viewer import create_crystal_toolkit_app
 from te_platform.workers.alignn_runner import predict_alignn_shear
 from te_platform.workers.mattersim_runner import predict_mattersim_descriptors
 from te_platform.agent.tools import default_registry
@@ -80,6 +83,7 @@ from te_platform.jobs.precision_runner import (
     submit_fast_screen_job,
     submit_precision_job,
     submit_qha_job,
+    submit_thermal_expansion_job,
 )
 from te_platform.jobs.repository import get_job
 from te_platform.precision.wsl_executor import PrecisionTaskConfig
@@ -102,6 +106,28 @@ def _attachment_headers(filename: str) -> dict[str, str]:
             f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
         )
     }
+
+
+def _preferred_structure(structures: list[dict[str, object]]) -> dict[str, object] | None:
+    """Return the best crystallographic file for a 3-D viewer.
+
+    Release catalogs also store ``ELASTIC_TENSOR`` as a downloadable structure
+    record.  It is intentionally ranked after POSCAR/VASP/CIF because it is a
+    six-by-six matrix, not a crystallographic structure.  Keeping this choice
+    in one helper prevents the material and composite detail endpoints from
+    silently selecting the tensor when both records are present.
+    """
+    priority = {"POSCAR": 0, "VASP": 0, "CIF": 1}
+    candidates = [item for item in structures if item.get("content")]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda item: (
+            priority.get(str(item.get("format", "")).upper(), 2),
+            str(item.get("format", "")),
+        ),
+    )
 
 
 def _anisotropic_curve_download_text(
@@ -276,6 +302,8 @@ def create_app(
     *,
     database: Path | None = None,
     phonon_assets: Path | None = None,
+    nte_release_slug: str | None = None,
+    pte_release_slug: str | None = None,
 ) -> FastAPI:
     if database is not None:
         catalog_database = database
@@ -284,15 +312,32 @@ def create_app(
     workspace_db = workspace_database or workspace_database_path()
     phonon_root = phonon_assets or phonon_png_root()
     allow_catalog_download = catalog_database is None and database is None
+    active_nte_release_slug = nte_release_slug or DEFAULT_RELEASE_SLUG
+    active_pte_release_slug = pte_release_slug or DEFAULT_PTE_RELEASE_SLUG
+    required_release_slugs = (active_nte_release_slug, active_pte_release_slug)
+
+    def ensure_app_catalog(*, allow_download: bool = False) -> None:
+        ensure_catalog_database(
+            catalog_db,
+            allow_download=allow_download,
+            required_release_slugs=required_release_slugs,
+        )
+
+    def active_app_dataset_summary() -> dict[str, object]:
+        return active_dataset_summary(
+            catalog_db,
+            release_slug=active_nte_release_slug,
+            required_release_slugs=required_release_slugs,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        ensure_catalog_database(catalog_db, allow_download=allow_catalog_download)
+        ensure_app_catalog(allow_download=allow_catalog_download)
         ensure_workspace_database(workspace_db)
         yield
 
     app = FastAPI(
-        title="热膨胀材料智能计算与设计平台",
+        title="NTE Materials",
         version=__version__,
         lifespan=lifespan,
     )
@@ -304,7 +349,21 @@ def create_app(
         allow_headers=["*"],
     )
     app.mount("/static", StaticFiles(directory=WEB_DIRECTORY), name="static")
-    agent_tools = default_registry(catalog_db, workspace_db)
+    # Crystal Toolkit is the same Materials Project component ecosystem used by
+    # the MP structure viewer.  It is mounted in-process as a Dash/WSGI app so
+    # the SPA and the structure scene share the catalog and port.
+    crystal_toolkit_app = create_crystal_toolkit_app(catalog_db, active_nte_release_slug)
+    app.mount(
+        "/ctk",
+        WSGIMiddleware(crystal_toolkit_app.server),
+        name="crystal-toolkit",
+    )
+    agent_tools = default_registry(
+        catalog_db,
+        workspace_db,
+        nte_release_slug=active_nte_release_slug,
+        pte_release_slug=active_pte_release_slug,
+    )
 
     @app.get("/", include_in_schema=False)
     @app.get("/database", include_in_schema=False)
@@ -312,13 +371,13 @@ def create_app(
     @app.get("/landscape", include_in_schema=False)
     @app.get("/zte", include_in_schema=False)
     @app.get("/about", include_in_schema=False)
-    @app.get("/materials/{material_key}", include_in_schema=False)
+    @app.get("/materials/{material_key:path}", include_in_schema=False)
     def web_home() -> FileResponse:
         return FileResponse(WEB_DIRECTORY / "index.html")
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
-        summary = active_dataset_summary(catalog_db)
+        summary = active_app_dataset_summary()
         return {
             "status": "ok",
             "dataset_release": summary["release"]["slug"],
@@ -329,11 +388,11 @@ def create_app(
 
     @app.get("/api/about")
     def about() -> dict[str, object]:
-        nte = active_dataset_summary(catalog_db)
-        pte = dataset_summary(catalog_db, DEFAULT_PTE_RELEASE_SLUG)
+        nte = active_app_dataset_summary()
+        pte = dataset_summary(catalog_db, active_pte_release_slug)
         return {
             "software": {
-                "name_zh": "热膨胀材料智能计算与设计平台",
+                "name_zh": "NTE Materials",
                 "name_en": "Thermal Expansion Materials Platform",
                 "version": __version__,
                 "copyright_owner": copyright_owner(),
@@ -350,10 +409,14 @@ def create_app(
                 "nte_materials": nte["counts"]["materials"],
                 "pte": pte["release"],
                 "pte_materials": pte["counts"]["materials"],
-                "catalog_materials": nte["counts"]["materials"] + pte["counts"]["materials"],
+                "catalog_materials": distinct_material_count(
+                    catalog_db,
+                    (active_nte_release_slug, active_pte_release_slug),
+                ),
             },
             "technology": [
-                "FastAPI", "SQLite", "pymatgen/CrystalNN", "3Dmol.js",
+                "FastAPI", "SQLite", "pymatgen/CrystalNN", "Crystal Toolkit",
+                "Dash/VTK.js", "3Dmol.js",
                 "ALIGNN", "MatterSim", "Phonopy", "VASPKIT",
             ],
             "scientific_scope": (
@@ -466,6 +529,12 @@ def create_app(
                     config,
                     filename=structure_path.name,
                 ),
+                "thermal": lambda: submit_thermal_expansion_job(
+                    workspace_db,
+                    structure_path.read_bytes(),
+                    config,
+                    filename=structure_path.name,
+                ),
             }.get(mode)
             if submitter is None:
                 raise ValueError(f"Unsupported calculation mode: {mode}")
@@ -505,7 +574,7 @@ def create_app(
 
     @app.get("/api/datasets/current")
     def current_dataset() -> dict[str, object]:
-        return active_dataset_summary(catalog_db)
+        return active_app_dataset_summary()
 
     @app.get("/api/materials")
     def materials(
@@ -518,7 +587,7 @@ def create_app(
         cte_min_ppm: float | None = None,
         cte_max_ppm: float | None = None,
     ) -> list[dict[str, object]]:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         selected_elements = [
             item[:1].upper() + item[1:].lower()
             for item in (part.strip() for part in elements.split(","))
@@ -527,7 +596,7 @@ def create_app(
         try:
             return search_materials(
                 catalog_db,
-                DEFAULT_RELEASE_SLUG,
+                active_nte_release_slug,
                 query,
                 limit,
                 elements=selected_elements,
@@ -544,24 +613,24 @@ def create_app(
     def landscape(
         limit: int = Query(default=1600, ge=1, le=7001),
     ) -> list[dict[str, object]]:
-        ensure_catalog_database(catalog_db)
-        return material_landscape(catalog_db, DEFAULT_RELEASE_SLUG, limit)
+        ensure_app_catalog()
+        return material_landscape(catalog_db, active_nte_release_slug, limit)
 
     @app.get("/api/materials/elements")
     def material_elements() -> dict[str, object]:
-        ensure_catalog_database(catalog_db)
-        return material_element_statistics(catalog_db, DEFAULT_RELEASE_SLUG)
+        ensure_app_catalog()
+        return material_element_statistics(catalog_db, active_nte_release_slug)
 
     @app.get("/api/materials/compare")
     def material_comparison(
         material_keys: str = Query(min_length=3, max_length=2048),
         temperature_k: float = Query(default=300.0, ge=0),
     ) -> dict[str, object]:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
             return compare_materials(
                 catalog_db,
-                DEFAULT_RELEASE_SLUG,
+                active_nte_release_slug,
                 material_keys.split("|"),
                 temperature_k=temperature_k,
             )
@@ -574,11 +643,11 @@ def create_app(
         temperature_k: float = Query(default=300.0, ge=0),
         project_name: str = Query(default="Material comparison", min_length=1, max_length=120),
     ) -> Response:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
             comparison = compare_materials(
                 catalog_db,
-                DEFAULT_RELEASE_SLUG,
+                active_nte_release_slug,
                 material_keys.split("|"),
                 temperature_k=temperature_k,
             )
@@ -594,9 +663,9 @@ def create_app(
 
     @app.get("/api/materials/{material_key}/download/POSCAR")
     def material_poscar_download(material_key: str) -> Response:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         structure = next(
@@ -621,9 +690,9 @@ def create_app(
 
     @app.get("/api/materials/{material_key}/download/ELASTIC_TENSOR")
     def material_elastic_tensor_download(material_key: str) -> Response:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         structure = next(
@@ -647,9 +716,9 @@ def create_app(
 
     @app.get("/api/materials/{material_key}/download/thermal_expansion.dat")
     def material_thermal_expansion_download(material_key: str) -> Response:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         curve = detail.get("precision_thermal_expansion")
@@ -680,9 +749,9 @@ def create_app(
     ) -> Response:
         if curve_kind not in {"cartesian", "directional"}:
             raise HTTPException(status_code=404, detail="Unknown anisotropic curve kind")
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         curves = detail.get("anisotropic_thermal_expansion") or {}
@@ -706,9 +775,9 @@ def create_app(
 
     @app.get("/api/materials/{material_key}/download/thermal_expansion.pdf")
     def material_thermal_expansion_pdf(material_key: str) -> Response:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
             content = build_material_curve_pdf(detail)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
@@ -722,9 +791,9 @@ def create_app(
     def phonon_asset_path(material_key: str, kind: str) -> Path:
         if kind not in {"band", "dos", "combined"}:
             raise HTTPException(status_code=404, detail="Unknown phonon image")
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         external_id = str(detail["material"].get("external_id") or "").strip()
@@ -755,13 +824,10 @@ def create_app(
 
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         try:
-            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
-            structure = next(
-                (item for item in detail["structures"] if item.get("content")),
-                None,
-            )
+            detail = material_detail(catalog_db, active_nte_release_slug, material_key)
+            structure = _preferred_structure(detail["structures"])
             if structure:
                 try:
                     detail["structure_view"] = build_structure_view(
@@ -852,8 +918,8 @@ def create_app(
         limit: int = Query(default=30, ge=1, le=100),
     ) -> list[dict[str, object]]:
         release_slug = {
-            "pte": DEFAULT_PTE_RELEASE_SLUG,
-            "nte": DEFAULT_RELEASE_SLUG,
+            "pte": active_pte_release_slug,
+            "nte": active_nte_release_slug,
         }.get(role.lower())
         if release_slug is None:
             raise HTTPException(status_code=422, detail="role must be 'pte' or 'nte'")
@@ -870,8 +936,8 @@ def create_app(
 
     def composite_material_detail(role: str, material_key: str) -> dict[str, object]:
         release_slug = {
-            "pte": DEFAULT_PTE_RELEASE_SLUG,
-            "nte": DEFAULT_RELEASE_SLUG,
+            "pte": active_pte_release_slug,
+            "nte": active_nte_release_slug,
         }.get(role.lower())
         if release_slug is None:
             raise HTTPException(status_code=422, detail="role must be 'pte' or 'nte'")
@@ -879,10 +945,7 @@ def create_app(
             detail = material_detail(catalog_db, release_slug, material_key)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        structure = next(
-            (item for item in detail["structures"] if item.get("content")),
-            None,
-        )
+        structure = _preferred_structure(detail["structures"])
         if structure:
             try:
                 detail["structure_view"] = build_structure_view(
@@ -897,7 +960,7 @@ def create_app(
 
     @app.get("/api/composites/materials/{role}/{material_key}")
     def composite_material(role: str, material_key: str) -> dict[str, object]:
-        ensure_catalog_database(catalog_db)
+        ensure_app_catalog()
         return composite_material_detail(role, material_key)
 
     @app.get("/api/composites/materials/{role}/{material_key}/download/POSCAR")
@@ -968,8 +1031,8 @@ def create_app(
         try:
             return optimize_material_pair(
                 catalog_db,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=active_pte_release_slug,
+                nte_release_slug=active_nte_release_slug,
                 pte_material_key=request.pte_material_key,
                 nte_material_key=request.nte_material_key,
                 temperature_min_k=request.temperature_min_k,
@@ -996,8 +1059,8 @@ def create_app(
         try:
             return screen_material_pairs(
                 catalog_db,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=active_pte_release_slug,
+                nte_release_slug=active_nte_release_slug,
                 temperature_min_k=request.temperature_min_k,
                 temperature_max_k=request.temperature_max_k,
                 temperature_step_k=request.temperature_step_k,
@@ -1037,8 +1100,8 @@ def create_app(
         for pair in request.pairs:
             design = optimize_material_pair(
                 catalog_db,
-                pte_release_slug=DEFAULT_PTE_RELEASE_SLUG,
-                nte_release_slug=DEFAULT_RELEASE_SLUG,
+                pte_release_slug=active_pte_release_slug,
+                nte_release_slug=active_nte_release_slug,
                 pte_material_key=pair.pte_material_key,
                 nte_material_key=pair.nte_material_key,
                 temperature_min_k=request.temperature_min_k,
@@ -1162,7 +1225,8 @@ def create_app(
             "inspection": result.to_dict(),
             "next_step": (
                 "Use the ALIGNN worker to predict G, then calculate paper-defined E_tilde=U_V/n "
-                "and return the fast SBR result."
+                "and return the fast SBR result. For full alpha(T), cubic structures use scalar QHA "
+                "and non-cubic structures use the tensor-aware AGV2 workflow."
             ),
         }
 
@@ -1237,7 +1301,10 @@ def create_app(
             "alignn": alignn.to_dict(),
             "mattersim": mattersim.to_dict(),
             "fast_sbr": result.to_dict(),
-            "next_step": "Use full elastic tensor and QHA for a high-confidence alpha(T) result.",
+            "next_step": (
+                "Use the automatic thermal-expansion workflow: cubic structures use scalar QHA; "
+                "non-cubic structures use the full elastic tensor and anisotropic Grüneisen v2."
+            ),
         }
 
     @app.post("/api/precision/jobs")
@@ -1276,6 +1343,29 @@ def create_app(
             return submit_qha_job(
                 workspace_db, content, PrecisionTaskConfig(), filename=file.filename or "POSCAR"
             )
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/precision/thermal-expansion-jobs")
+    async def submit_thermal_expansion(file: UploadFile = File(...)) -> dict[str, object]:
+        """Route cubic structures to scalar QHA and other systems to AGV2."""
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="The uploaded structure is empty")
+        try:
+            inspection = inspect_structure(file.filename or "POSCAR", content)
+            job = submit_thermal_expansion_job(
+                workspace_db,
+                content,
+                PrecisionTaskConfig(),
+                filename=file.filename or "POSCAR",
+            )
+            job["routing"] = {
+                "crystal_system": inspection.symmetry.crystal_system,
+                "is_cubic": inspection.symmetry.is_cubic,
+                "method": job["parameters"].get("actual_method"),
+            }
+            return job
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
