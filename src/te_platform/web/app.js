@@ -83,6 +83,7 @@ const ELEMENT_FAMILIES = {
 const MATERIAL_CONTEXT_STORAGE_KEY = "tep.material-context.v1";
 const WORKSPACE_PAGES = {
   database: {path: "/database", title: "材料数据库"},
+  material: {path: "/materials", title: "材料详情"},
   predict: {path: "/predict", title: "结构预测"},
   landscape: {path: "/landscape", title: "热膨胀景观"},
   zte: {path: "/zte", title: "ZTE 复合设计"},
@@ -250,8 +251,14 @@ function setupElementFilter() {
 }
 
 function workspacePageFromPath(pathname = window.location.pathname) {
+  if (pathname.startsWith("/materials/")) return "material";
   return Object.entries(WORKSPACE_PAGES)
     .find(([, page]) => page.path === pathname)?.[0] || "database";
+}
+
+function materialKeyFromPath(pathname = window.location.pathname) {
+  if (!pathname.startsWith("/materials/")) return "";
+  return decodeURIComponent(pathname.slice("/materials/".length));
 }
 
 function validLandscapeContext(point) {
@@ -292,6 +299,9 @@ function persistLandscapeContext() {
 }
 
 function workspaceUrl(pageName) {
+  if (pageName === "material" && window.location.pathname.startsWith("/materials/")) {
+    return window.location.pathname;
+  }
   const page = WORKSPACE_PAGES[pageName] || WORKSPACE_PAGES.database;
   if (pageName === "landscape" && selectedLandscapePoint?.context_origin === "database" &&
       selectedLandscapePoint.database_key) {
@@ -412,15 +422,12 @@ function setupMaterialContext() {
   document.querySelector("#material-context-origin").addEventListener("click", async () => {
     const point = selectedLandscapePoint;
     if (!point) return;
-    const origin = point.context_origin === "predict" ? "predict" : "database";
-    navigateToWorkspace(origin);
-    if (origin === "database" && point.database_key) {
-      try {
-        await loadDetail(point.database_key);
-        document.querySelector(".detail-panel").scrollIntoView({behavior: "smooth", block: "start"});
-      } catch (error) {
-        document.querySelector("#material-detail").textContent = error.message;
-      }
+    if (point.context_origin === "predict") {
+      navigateToWorkspace("predict");
+    } else if (point.database_key) {
+      window.location.href = "/materials/" + encodeURIComponent(point.database_key);
+    } else {
+      navigateToWorkspace("database");
     }
   });
   document.querySelector("#material-context-clear").addEventListener("click", () => clearLandscapeContext());
@@ -682,7 +689,7 @@ function renderMaterials(items) {
       "</td><td>" + numeric(item.CTE_ppm) + "</td><td><div class='material-row-actions'>" +
       "<button class='compare-toggle" + selectedClass + "' data-compare-key='" + encodedKey +
       "' aria-pressed='" + String(comparisonSelected(item.material_key)) + "'>" + selectedText +
-      "</button><button data-key='" + encodedKey + "'>详情</button></div></td></tr>";
+      "</button><a class='detail-link' href='/materials/" + encodedKey + "'>详情</a></div></td></tr>";
   }).join("");
   container.innerHTML =
     "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
@@ -695,9 +702,6 @@ function renderMaterials(items) {
     "<th scope='col'>CTE <span class='table-unit'>(ppm/K)</span></th>" +
     "<th scope='col'>操作</th>" +
     "</tr></thead><tbody>" + rows + "</tbody></table>";
-  container.querySelectorAll("button[data-key]").forEach(button => {
-    button.addEventListener("click", () => loadDetail(decodeURIComponent(button.dataset.key)));
-  });
   container.querySelectorAll("button[data-compare-key]").forEach(button => {
     button.addEventListener("click", () => toggleComparisonMaterial(
       decodeURIComponent(button.dataset.compareKey),
@@ -798,8 +802,56 @@ function renderMaterialDownloads(data) {
     : "";
 }
 
+function renderPhononProperties(data) {
+  const phonon = data.phonon || {};
+  if (phonon.combined_available) {
+    return "<div class='phonon-panel-heading'><div><strong>Phonon dispersion and total DOS</strong>" +
+      "<p class='curve-note'>能带与总态密度共用频率纵轴，高对称点与 DOS 峰位可直接对应。</p></div>" +
+      "<span class='structure-summary-badge'>PNG</span></div>" +
+      "<figure class='phonon-combined-figure'><img src='" + escapeHtml(phonon.combined_url) +
+      "' alt='带高对称点标签且频率对齐的声子能带与总态密度图' loading='lazy'>" +
+      "<figcaption>Phonon dispersion and total DOS</figcaption></figure>";
+  }
+  const hasBand = Boolean(phonon.band_available);
+  const hasDos = Boolean(phonon.dos_available);
+  if (!hasBand && !hasDos) {
+    return "<div class='phonon-empty'><strong>暂无声子谱图</strong>" +
+      "<p>当前材料没有可用的 PNG 声子能带或总态密度图。</p></div>";
+  }
+  const band = hasBand
+    ? "<figure class='phonon-figure'><figcaption>声子能带</figcaption>" +
+      "<img src='" + escapeHtml(phonon.band_url) + "' alt='声子能带图' loading='lazy'></figure>"
+    : "";
+  const dos = hasDos
+    ? "<figure class='phonon-figure'><figcaption>声子总态密度</figcaption>" +
+      "<img src='" + escapeHtml(phonon.dos_url) + "' alt='声子总态密度图' loading='lazy'></figure>"
+    : "";
+  return "<div class='phonon-panel-heading'><div><strong>Phonon</strong>" +
+    "<p class='curve-note'>由声子筛选流程生成的静态 PNG 图像。</p></div>" +
+    "<span class='structure-summary-badge'>PNG</span></div>" +
+    "<div class='phonon-figures'>" + band + dos + "</div>";
+}
+
+function setupPropertiesTabs() {
+  const tabs = [...document.querySelectorAll("[data-properties-tab]")];
+  const panels = [...document.querySelectorAll("[data-properties-panel]")];
+  tabs.forEach(tab => tab.addEventListener("click", () => {
+    const target = tab.dataset.propertiesTab;
+    tabs.forEach(item => {
+      const active = item === tab;
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-selected", String(active));
+    });
+    panels.forEach(panel => {
+      panel.hidden = panel.dataset.propertiesPanel !== target;
+    });
+  }));
+}
+
 async function loadDetail(key) {
   const data = await api("/api/materials/" + encodeURIComponent(key));
+  document.title = (data.material.formula || data.material.material_key) +
+    " · 材料详情 · 热膨胀材料平台";
   const structures = data.structures.map(s => s.format + " (" + s.content_characters + " chars)").join(", ");
   const metricNames = [
     "CTE_ppm", "TE_300K", "G_GPa", "E_tilde_GPa", "K_GPa",
@@ -811,14 +863,30 @@ async function loadDetail(key) {
       propertyText(data.properties[name]) + "</dd></div>")
     .join("");
   const encodedKey = escapeHtml(encodeURIComponent(data.material.material_key));
+  const phonon = data.phonon || {};
+  const hasPhonon = Boolean(phonon.band_available || phonon.dos_available);
+  const activeTab = hasPhonon ? "phonon" : "mechanical";
   document.querySelector("#material-detail").innerHTML =
     "<div class='compare-summary'><p><strong>" + escapeHtml(data.material.material_key) +
     "</strong> · " + escapeHtml(data.material.external_id || "无外部ID") + "</p>" +
     "<button class='compare-toggle' data-compare-key='" + encodedKey + "' type='button'>收藏</button></div>" +
     landscapeJumpAction("已设为当前研究材料，可在论文景观中查看相对位置。") +
     renderMaterialDownloads(data) +
-    "<p class='muted'>结构：" + escapeHtml(structures) + "</p><dl class='property-grid'>" + metrics +
-    "</dl>" + renderMaterialProvenance(data) +
+    "<p class='muted'>结构：" + escapeHtml(structures) + "</p>" +
+    "<section class='properties-shell' aria-label='材料性质'>" +
+    "<div class='properties-heading'><h3>Properties</h3></div>" +
+    "<div class='properties-tabs' role='tablist' aria-label='材料性质分类'>" +
+    "<button type='button' role='tab' data-properties-tab='mechanical' aria-selected='" +
+    String(activeTab === "mechanical") + "' class='" + (activeTab === "mechanical" ? "active" : "") +
+    "'>Mechanical</button>" +
+    "<button type='button' role='tab' data-properties-tab='phonon' aria-selected='" +
+    String(activeTab === "phonon") + "' class='" + (activeTab === "phonon" ? "active" : "") +
+    "'>Phonon</button></div>" +
+    "<div class='properties-tab-panel' data-properties-panel='mechanical' hidden='" +
+    String(activeTab !== "mechanical") + "'><dl class='property-grid'>" + metrics +
+    "</dl>" + renderMaterialProvenance(data) + "</div>" +
+    "<div class='properties-tab-panel phonon-tab-panel' data-properties-panel='phonon' hidden='" +
+    String(activeTab !== "phonon") + "'>" + renderPhononProperties(data) + "</div></section>" +
     "<div class='material-visual-grid'>" + renderStructureViewer(data.structures) +
     renderPrecisionThermalExpansion(data.precision_thermal_expansion) +
     renderAnisotropicThermalExpansion(data.anisotropic_thermal_expansion) + "</div>" +
@@ -827,7 +895,8 @@ async function loadDetail(key) {
   const detailCompareButton = document.querySelector("#material-detail button[data-compare-key]");
   detailCompareButton.addEventListener("click", () => toggleComparisonMaterial(data.material.material_key));
   updateComparisonButtons();
-  drawMaterialStructure(data.material, data.structures?.[0], data.structure_view);
+  setupPropertiesTabs();
+  drawMaterialStructure(data.material, selectRenderableStructure(data.structures), data.structure_view);
   drawPrecisionThermalExpansion(data.precision_thermal_expansion);
   drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
   selectLandscapeMaterial(data);
@@ -982,8 +1051,8 @@ function renderMaterialComparison(payload) {
     ).join("") + "</tr>"
   ).join("");
   const detailButtons = payload.materials.map(item =>
-    "<td><button type='button' data-comparison-detail='" +
-    escapeHtml(encodeURIComponent(item.material.material_key)) + "'>查看详情</button></td>"
+    "<td><a class='detail-link' href='/materials/" +
+    escapeHtml(encodeURIComponent(item.material.material_key)) + "'>查看详情</a></td>"
   ).join("");
   const curveCount = payload.materials.filter(item => item.curve?.points?.length >= 2).length;
   result.className = "compare-result";
@@ -1002,12 +1071,6 @@ function renderMaterialComparison(payload) {
     "<button id='comparison-export-json' type='button'>JSON</button>" +
     "<button id='comparison-export-html' type='button'>HTML报告</button>" +
     "<button id='comparison-export-pdf' type='button'>PDF报告</button></div>";
-  result.querySelectorAll("button[data-comparison-detail]").forEach(button => {
-    button.addEventListener("click", async () => {
-      await loadDetail(decodeURIComponent(button.dataset.comparisonDetail));
-      document.querySelector(".detail-panel").scrollIntoView({behavior: "smooth", block: "start"});
-    });
-  });
   if (curveCount) drawMaterialComparisonCurves(payload);
   bindComparisonExports(payload);
 }
@@ -1181,7 +1244,7 @@ async function loadMaterialComparison() {
 }
 
 function renderStructureViewer(structures) {
-  const structure = structures?.find(item => item.content) || null;
+  const structure = selectRenderableStructure(structures);
   if (!structure) {
     return "<h3>三维晶体结构</h3><p class='muted'>暂无可用于三维显示的结构文件。</p>";
   }
@@ -1212,6 +1275,13 @@ function renderStructureViewer(structures) {
     "</div>" +
     "<p id='structure-atom-info' class='structure-atom-info'>点击原子可查看元素和笛卡尔坐标。</p>" +
     "</section>";
+}
+
+function selectRenderableStructure(structures) {
+  const items = Array.isArray(structures) ? structures : [];
+  return items.find(item =>
+    String(item?.format || "").toUpperCase() === "POSCAR" && item?.content
+  ) || items.find(item => item?.content) || null;
 }
 
 function structureToolButton(id, label, icon) {
@@ -3352,7 +3422,7 @@ function renderZteCandidatePhase(role, detail, designMaterial) {
   const material = detail.material || {};
   const key = material.material_key || designMaterial.material_key;
   const formula = material.formula || designMaterial.formula || key;
-  const structure = (detail.structures || []).find(item => item.content) || null;
+  const structure = selectRenderableStructure(detail.structures);
   const scene = detail.structure_view || {};
   const encodedRole = encodeURIComponent(role);
   const encodedKey = encodeURIComponent(key);
@@ -3379,7 +3449,7 @@ function renderZteCandidatePhase(role, detail, designMaterial) {
 
 function drawZteCandidateStructure(role, detail) {
   const container = document.querySelector("#zte-" + role + "-structure-viewer");
-  const structure = (detail.structures || []).find(item => item.content);
+  const structure = selectRenderableStructure(detail.structures);
   if (!container || !structure) return;
   if (!window.$3Dmol) {
     container.innerHTML = "<p class='structure-error'>三维渲染组件未加载。</p>";
@@ -4264,6 +4334,7 @@ async function designZteComposite() {
 }
 
 async function initialize() {
+  const materialKey = materialKeyFromPath();
   restoreLandscapeContext();
   restoreComparisonMaterials();
   restoreAnalysisProjects();
@@ -4281,6 +4352,9 @@ async function initialize() {
       loadAbout(),
     ]);
     fig1dReference = results[3];
+    if (materialKey) {
+      await loadDetail(materialKey);
+    }
     try {
       await restoreLandscapeContextFromLocation();
     } catch (error) {
