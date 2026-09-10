@@ -1066,9 +1066,28 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
 }
 .phonon-panel-heading strong { color: var(--text-primary); font-size: var(--text-md); }
 .phonon-panel-heading p { margin: 4px 0 0; }
+.phonon-original-link {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  color: var(--accent-800);
+  background: var(--surface-raised);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.phonon-original-link:hover {
+  border-color: var(--accent-400);
+  background: var(--accent-50);
+  text-decoration: none;
+}
 .phonon-figures {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(220px, 0.8fr);
+  max-width: 980px;
+  margin-inline: auto;
   gap: var(--space-md);
   align-items: start;
 }
@@ -1081,6 +1100,10 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
   background: #fff;
   overflow: hidden;
 }
+.phonon-combined-figure {
+  max-width: 920px;
+  margin-inline: auto;
+}
 .phonon-figure figcaption {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-hairline);
@@ -1092,6 +1115,7 @@ td button { padding: 3px 8px; font-size: var(--text-xs); }
 .phonon-combined-figure img {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
   min-height: 180px;
   object-fit: contain;
