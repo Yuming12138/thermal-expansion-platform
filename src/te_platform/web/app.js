@@ -746,8 +746,7 @@ function renderPhononProperties(data) {
   if (phonon.combined_available) {
     return "<div class='phonon-panel-heading'><div><strong>Phonon dispersion and total DOS</strong>" +
       "<p class='curve-note'>能带与总态密度共用频率纵轴，高对称点与 DOS 峰位可直接对应。</p></div>" +
-      "<a class='phonon-original-link' href='" + escapeHtml(phonon.combined_url) +
-      "' target='_blank' rel='noreferrer'>打开原图</a></div>" +
+      "<span class='structure-summary-badge'>PNG</span></div>" +
       "<figure class='phonon-combined-figure'><img src='" + escapeHtml(phonon.combined_url) +
       "' alt='带高对称点标签且频率对齐的声子能带与总态密度图' loading='lazy'>" +
       "<figcaption>Phonon dispersion and total DOS</figcaption></figure>";
