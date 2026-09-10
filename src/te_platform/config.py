@@ -25,6 +25,7 @@ DEFAULT_DATASET_PATH = (
 DEFAULT_MANIFEST_PATH = (
     PROJECT_ROOT / "datasets" / "manifests" / "nte_candidates_3665_agv2_v2.json"
 )
+DEFAULT_PHONON_PNG_ROOT = PROJECT_ROOT / "var" / "phonon_png"
 
 
 def database_path() -> Path:
@@ -45,6 +46,11 @@ def workspace_database_path() -> Path:
             os.environ.get("TEP_DATABASE_PATH", DEFAULT_WORKSPACE_DATABASE_PATH),
         )
     )
+
+
+def phonon_png_root() -> Path:
+    """Return the read-only root containing <mp-id>/phonon/*.png assets."""
+    return Path(os.environ.get("TEP_PHONON_PNG_ROOT", DEFAULT_PHONON_PNG_ROOT))
 
 
 def copyright_owner() -> str:

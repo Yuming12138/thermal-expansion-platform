@@ -43,6 +43,7 @@ from te_platform.config import (
     DEFAULT_RELEASE_SLUG,
     catalog_database_path,
     copyright_owner,
+    phonon_png_root,
     workspace_database_path,
 )
 from te_platform.screening.fast_sbr import fast_screen_sbr
@@ -274,12 +275,14 @@ def create_app(
     workspace_database: Path | None = None,
     *,
     database: Path | None = None,
+    phonon_assets: Path | None = None,
 ) -> FastAPI:
     if database is not None:
         catalog_database = database
         workspace_database = database
     catalog_db = catalog_database or catalog_database_path()
     workspace_db = workspace_database or workspace_database_path()
+    phonon_root = phonon_assets or phonon_png_root()
     allow_catalog_download = catalog_database is None and database is None
 
     @asynccontextmanager
@@ -309,6 +312,7 @@ def create_app(
     @app.get("/landscape", include_in_schema=False)
     @app.get("/zte", include_in_schema=False)
     @app.get("/about", include_in_schema=False)
+    @app.get("/materials/{material_key}", include_in_schema=False)
     def web_home() -> FileResponse:
         return FileResponse(WEB_DIRECTORY / "index.html")
 
@@ -715,6 +719,40 @@ def create_app(
             headers=_attachment_headers(filename),
         )
 
+    def phonon_asset_path(material_key: str, kind: str) -> Path:
+        if kind not in {"band", "dos", "combined"}:
+            raise HTTPException(status_code=404, detail="Unknown phonon image")
+        ensure_catalog_database(catalog_db)
+        try:
+            detail = material_detail(catalog_db, DEFAULT_RELEASE_SLUG, material_key)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        external_id = str(detail["material"].get("external_id") or "").strip()
+        if not external_id or Path(external_id).name != external_id:
+            raise HTTPException(status_code=404, detail="Material has no safe MP ID")
+        path = (
+            phonon_root / f"{external_id}.png"
+            if kind == "combined"
+            else phonon_root / external_id / "phonon" / f"phonon_{kind}.png"
+        ).resolve()
+        root = phonon_root.resolve()
+        if root != path and root not in path.parents:
+            raise HTTPException(status_code=404, detail="Invalid phonon asset path")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Phonon image is unavailable")
+        return path
+
+    @app.get("/api/materials/{material_key}/phonon/{kind}.png")
+    def material_phonon_image(
+        material_key: str, kind: Literal["band", "dos", "combined"]
+    ) -> FileResponse:
+        path = phonon_asset_path(material_key, kind)
+        return FileResponse(
+            path,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @app.get("/api/materials/{material_key}")
     def material(material_key: str) -> dict[str, object]:
         ensure_catalog_database(catalog_db)
@@ -733,6 +771,28 @@ def create_app(
                     detail["structure_view"] = None
             else:
                 detail["structure_view"] = None
+            external_id = str(detail["material"].get("external_id") or "").strip()
+            asset_base = f"/api/materials/{quote(material_key, safe='')}/phonon"
+            detail["phonon"] = {
+                "band_url": f"{asset_base}/band.png",
+                "dos_url": f"{asset_base}/dos.png",
+                "combined_url": f"{asset_base}/combined.png",
+                "material_id": external_id,
+                "band_available": bool(
+                    external_id
+                    and (phonon_root / external_id / "phonon" / "phonon_band.png").is_file()
+                ),
+                "dos_available": bool(
+                    external_id
+                    and (phonon_root / external_id / "phonon" / "phonon_dos.png").is_file()
+                ),
+                "combined_available": bool(
+                    external_id and (phonon_root / f"{external_id}.png").is_file()
+                ),
+            }
+            detail["phonon"]["pair_available"] = bool(
+                detail["phonon"]["band_available"] and detail["phonon"]["dos_available"]
+            )
             return detail
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
