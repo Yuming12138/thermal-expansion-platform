@@ -42,6 +42,7 @@
 - Agent可使用SQL函数 `alpha_at_temperature(points_json, T)` 从真实QHA曲线完成任意温度插值、全库排名、材料关联与统计；
 - 旧科研代码到新模块的迁移映射。
 - 可运行的 FastAPI 服务与浏览器界面：材料检索、论文 Fig. 1d 景观、CIF/POSCAR 统一上传、三级预测、单温点/温区 ROM 和受控 Agent。
+- 数据库首页默认展开可交互元素周期表，将元素筛选作为材料检索的主要视觉入口；用户仍可手动收起筛选面板。
 - 独立 Python 进程执行的受控 ALIGNN 剪切模量预测接口，以及 MatterSim + CrystalNN + SBR 的上传结构快速筛选；模型、源码、Python环境均可通过环境变量配置。
 - 材料详情采用 Materials Project 同源的 Crystal Toolkit 生成周期键合图，在同一端口嵌入 WebGL 结构查看器；设置中可切换晶胞、原子半径、键、多面体与 PNG/结构导出，并与真实各向异性 `alpha(T)` 曲线对照。
 
