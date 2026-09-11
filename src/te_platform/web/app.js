@@ -557,6 +557,7 @@ function catalogUrlState() {
   if (sortOrder && sortOrder !== "ascending") params.set("order", sortOrder);
   if (cteFilter && cteFilter !== "all") params.set("cte", cteFilter);
   if (limit && limit !== "50") params.set("limit", limit);
+  if (catalogPage > 1) params.set("page", String(catalogPage));
   return params;
 }
 
@@ -593,6 +594,8 @@ function restoreCatalogUrlState() {
   if (cte && document.querySelector(`#material-cte-filter option[value='${CSS.escape(cte)}']`)) {
     document.querySelector("#material-cte-filter").value = cte;
   }
+  const requestedPage = Number.parseInt(params.get("page") || "1", 10);
+  catalogPage = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   updateCatalogFilterSummary();
 }
 
@@ -606,7 +609,9 @@ function renderCatalogPage() {
   const container = document.querySelector("#material-results");
   const items = catalogItems;
   const pageCount = Math.max(1, Math.ceil(items.length / CATALOG_PAGE_SIZE));
+  const requestedPage = catalogPage;
   catalogPage = Math.min(Math.max(1, catalogPage), pageCount);
+  if (catalogPage !== requestedPage) syncCatalogUrl();
   const start = items.length ? (catalogPage - 1) * CATALOG_PAGE_SIZE : 0;
   const end = Math.min(start + CATALOG_PAGE_SIZE, items.length);
   const filterDescription = catalogFilterDescription();
@@ -630,10 +635,10 @@ function renderCatalogPage() {
   }).join("");
   const pagination = pageCount > 1
     ? "<nav class='catalog-pagination' aria-label='材料结果分页'>" +
-      "<button id='catalog-prev' class='secondary-button' type='button' aria-label='上一页'" +
+      "<button id='catalog-prev' class='secondary-button' type='button' aria-controls='material-results' aria-label='上一页'" +
       (catalogPage === 1 ? " disabled" : "") + ">上一页</button>" +
       "<span class='catalog-pagination-status' aria-live='polite'>第 " + catalogPage + " / " + pageCount + " 页</span>" +
-      "<button id='catalog-next' class='secondary-button' type='button' aria-label='下一页'" +
+      "<button id='catalog-next' class='secondary-button' type='button' aria-controls='material-results' aria-label='下一页'" +
       (catalogPage === pageCount ? " disabled" : "") + ">下一页</button></nav>"
     : "";
   container.innerHTML =
@@ -657,25 +662,27 @@ function renderCatalogPage() {
   container.querySelector("#catalog-prev")?.addEventListener("click", () => {
     catalogPage -= 1;
     renderCatalogPage();
+    syncCatalogUrl();
     container.scrollIntoView({behavior: "auto", block: "nearest"});
   });
   container.querySelector("#catalog-next")?.addEventListener("click", () => {
     catalogPage += 1;
     renderCatalogPage();
+    syncCatalogUrl();
     container.scrollIntoView({behavior: "auto", block: "nearest"});
   });
 }
 
 function renderMaterials(items) {
   catalogItems = Array.isArray(items) ? items : [];
-  catalogPage = 1;
   renderCatalogPage();
 }
 
-async function searchMaterials() {
+async function searchMaterials({resetPage = true} = {}) {
   const query = document.querySelector("#search-input").value;
   const requestId = ++catalogSearchSequence;
   const resultsContainer = document.querySelector("#material-results");
+  if (resetPage) catalogPage = 1;
   document.querySelector("#material-view-summary").textContent = "正在检索…";
   resultsContainer.setAttribute("aria-busy", "true");
   const params = new URLSearchParams({
@@ -4446,7 +4453,7 @@ async function initialize() {
     const results = await Promise.all([
       loadStats(),
       loadPeriodicElementCounts(),
-      searchMaterials(),
+      searchMaterials({resetPage: false}),
       api("/static/fig1d-reference.json"),
     ]);
     fig1dReference = results[3];
