@@ -77,6 +77,7 @@ const ELEMENT_FAMILIES = {
   actinide: new Set(ACTINIDES),
 };
 const MATERIAL_CONTEXT_STORAGE_KEY = "tep.material-context.v1";
+const PREDICTION_JOB_STORAGE_KEY = "tep.prediction-job.v1";
 const WORKSPACE_PAGES = {
   database: {path: "/database", title: "材料数据库"},
   material: {path: "/materials", title: "材料详情"},
@@ -490,7 +491,6 @@ function cteFilterBounds() {
     strong: {cte_max_ppm: "-20"},
     moderate: {cte_min_ppm: "-20", cte_max_ppm: "-5"},
     "near-zero": {cte_min_ppm: "-5", cte_max_ppm: "5"},
-    positive: {cte_min_ppm: "5"},
   }[selected] || {};
 }
 
@@ -506,6 +506,62 @@ function updateCatalogFilterSummary() {
   const cteLabel = cteFilter?.selectedOptions?.[0]?.textContent || "全部 αV";
   const limitLabel = limit?.value || "50";
   summary.textContent = sortLabel + " · " + orderLabel + " · " + cteLabel + " · " + limitLabel + " 条";
+}
+
+function catalogUrlState() {
+  const params = new URLSearchParams();
+  const query = document.querySelector("#search-input")?.value.trim();
+  const elements = [...selectedCatalogElements];
+  if (query) params.set("q", query);
+  if (elements.length) {
+    params.set("elements", elements.join(","));
+    if (catalogElementMode !== "contains") params.set("element_mode", catalogElementMode);
+  }
+  const sortBy = document.querySelector("#material-sort-by")?.value;
+  const sortOrder = document.querySelector("#material-sort-order")?.value;
+  const cteFilter = document.querySelector("#material-cte-filter")?.value;
+  const limit = document.querySelector("#material-limit")?.value;
+  if (sortBy && sortBy !== "material_key") params.set("sort", sortBy);
+  if (sortOrder && sortOrder !== "ascending") params.set("order", sortOrder);
+  if (cteFilter && cteFilter !== "all") params.set("cte", cteFilter);
+  if (limit && limit !== "50") params.set("limit", limit);
+  return params;
+}
+
+function syncCatalogUrl() {
+  if (window.location.pathname !== WORKSPACE_PAGES.database.path) return;
+  const query = catalogUrlState().toString();
+  const target = query ? WORKSPACE_PAGES.database.path + "?" + query : WORKSPACE_PAGES.database.path;
+  if (window.location.pathname + window.location.search !== target) {
+    window.history.replaceState({page: "database"}, "", target);
+  }
+}
+
+function restoreCatalogUrlState() {
+  if (window.location.pathname !== WORKSPACE_PAGES.database.path) return;
+  const params = new URLSearchParams(window.location.search);
+  const query = params.get("q");
+  if (query !== null) document.querySelector("#search-input").value = query;
+  const elements = (params.get("elements") || "").split(",").map(item => item.trim()).filter(Boolean);
+  elements.forEach(item => selectedCatalogElements.add(item));
+  if (elements.length) document.querySelector("#element-filter")?.setAttribute("open", "");
+  const mode = params.get("element_mode");
+  if (mode === "exact" || mode === "contains") catalogElementMode = mode;
+  const values = [
+    ["#material-sort-by", params.get("sort")],
+    ["#material-sort-order", params.get("order")],
+    ["#material-limit", params.get("limit")],
+  ];
+  values.forEach(([selector, value]) => {
+    if (value && document.querySelector(`${selector} option[value='${CSS.escape(value)}']`)) {
+      document.querySelector(selector).value = value;
+    }
+  });
+  const cte = params.get("cte");
+  if (cte && document.querySelector(`#material-cte-filter option[value='${CSS.escape(cte)}']`)) {
+    document.querySelector("#material-cte-filter").value = cte;
+  }
+  updateCatalogFilterSummary();
 }
 
 function renderMaterials(items) {
@@ -562,6 +618,7 @@ async function searchMaterials() {
     sort_order: document.querySelector("#material-sort-order").value,
     ...cteFilterBounds(),
   });
+  syncCatalogUrl();
   try {
     const items = await api("/api/materials?" + params.toString());
     if (requestId === catalogSearchSequence) renderMaterials(items);
@@ -1991,6 +2048,34 @@ function clearPredictionProgressTimer() {
   predictionProgressStartedAt = null;
 }
 
+function persistPredictionJob(jobId, mode, filename) {
+  try { window.localStorage.setItem(PREDICTION_JOB_STORAGE_KEY, JSON.stringify({job_id: jobId, mode, filename: filename || ""})); } catch (_) {}
+}
+
+function clearPersistedPredictionJob() {
+  try { window.localStorage.removeItem(PREDICTION_JOB_STORAGE_KEY); } catch (_) {}
+}
+
+async function restorePredictionJob() {
+  if (workspacePageFromPath() !== "predict") return;
+  let saved = null;
+  try { saved = JSON.parse(window.localStorage.getItem(PREDICTION_JOB_STORAGE_KEY) || "null"); } catch (_) {}
+  if (!saved?.job_id) return;
+  try {
+    const job = await api("/api/precision/jobs/" + encodeURIComponent(saved.job_id));
+    if (!["PENDING", "QUEUED", "RUNNING"].includes(job.status)) {
+      clearPersistedPredictionJob();
+      return;
+    }
+    predictionProgressStartedAt = Date.now();
+    setPredictionButtonsDisabled(true);
+    renderJobProgress(job, saved.mode === "elastic" ? "精准弹性计算中" : "热膨胀计算中", saved.mode || "thermal");
+    predictionPollTimer = window.setTimeout(() => pollPredictionJob(saved.job_id, saved.mode || "thermal", null), 300);
+  } catch (_) {
+    clearPersistedPredictionJob();
+  }
+}
+
 function formatElapsed(milliseconds) {
   const seconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
   if (seconds < 60) return `${seconds} 秒`;
@@ -2241,12 +2326,15 @@ async function pollPredictionJob(jobId, mode, file) {
     setPredictionButtonsDisabled(false);
     if (job.status !== "SUCCEEDED") {
       renderPredictionFailure(job, mode, file);
+      clearPersistedPredictionJob();
       clearPredictionProgressTimer();
       return;
     }
     clearPredictionProgressTimer();
-    if (mode === "elastic") renderElasticPrediction(file, job.result);
-    else if (mode === "thermal") renderThermalExpansionPrediction(file, job.result);
+    clearPersistedPredictionJob();
+    const renderFile = file || {name: "已恢复的结构任务"};
+    if (mode === "elastic") renderElasticPrediction(renderFile, job.result);
+    else if (mode === "thermal") renderThermalExpansionPrediction(renderFile, job.result);
     else renderQhaPrediction(job.result);
   } catch (error) {
     setPredictionButtonsDisabled(false);
@@ -2268,6 +2356,7 @@ async function submitPredictionJob(endpoint, mode, selectedFile = null) {
     ? "正在提交完整弹性张量计算…" : "正在按晶体系统提交热膨胀计算…";
   try {
     const job = await api(endpoint, {method: "POST", body: structureBody(file)});
+    persistPredictionJob(job.id, mode, file.name);
     renderJobProgress(job, mode === "elastic" ? "精准弹性任务已提交" : "热膨胀任务已提交", mode);
     predictionPollTimer = window.setTimeout(() => pollPredictionJob(job.id, mode, file), 800);
   } catch (error) {
@@ -4220,6 +4309,7 @@ async function designZteComposite() {
 
 async function initialize() {
   restoreLandscapeContext();
+  restoreCatalogUrlState();
   setupMaterialContext();
   setupWorkspaceNavigation();
   setupElementFilter();
@@ -4246,6 +4336,7 @@ async function initialize() {
     console.error(error);
   }
   setupLandscapeInteraction();
+  restorePredictionJob();
   document.querySelector("#search-button").addEventListener("click", searchMaterials);
   document.querySelector("#search-input").addEventListener("keydown", event => {
     if (event.key === "Enter") searchMaterials();
