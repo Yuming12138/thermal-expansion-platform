@@ -4,9 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NTE Materials · 材料数据库</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-31">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-32">
   </head>
   <body>
+    <a class="skip-link" href="#main-content">跳转到主要内容</a>
     <header>
       <div class="site-brand">
         <a class="site-brand-mark" href="/database" aria-label="返回材料数据库">NTE</a>
@@ -42,7 +43,7 @@
         </div>
       </div>
     </section>
-    <main>
+    <main id="main-content">
       <div class="workspace-page" data-page="database">
         <section class="grid material-workspace">
           <article class="panel catalog-panel">
@@ -62,9 +63,9 @@
                   <circle cx="11" cy="11" r="6.5"></circle>
                   <path d="m16 16 4.5 4.5"></path>
                 </svg>
-                <input id="search-input" aria-label="搜索材料" placeholder="化学式、MP ID或材料名称">
+                <input id="search-input" name="material-query" autocomplete="off" spellcheck="false" aria-label="搜索材料" placeholder="化学式、MP ID或材料名称">
               </label>
-              <button id="search-button">检索</button>
+              <button id="search-button" type="button">检索</button>
             </div>
             <details class="catalog-filter-details">
               <summary>
@@ -124,7 +125,7 @@
                 </div>
               </div>
             </details>
-            <div id="material-results" class="table-wrap"></div>
+            <div id="material-results" class="table-wrap" aria-live="polite" aria-busy="false"></div>
           </article>
         </section>
       </div>
@@ -140,7 +141,7 @@
       <section class="panel prediction-workbench workspace-page" data-page="predict" hidden>
         <h2>上传结构与热膨胀计算</h2>
         <p class="muted">上传结构后先判定晶体系统。立方材料使用标量 QHA；非立方材料先计算完整弹性张量，再使用各向异性 Grüneisen v2。</p>
-        <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" required>
+        <input id="structure-file" type="file" accept=".cif,.vasp,.poscar,.POSCAR" aria-label="上传 CIF 或 POSCAR 结构文件" required>
         <div id="structure-summary" class="structure-summary muted">选择文件后将自动检查结构。</div>
         <div id="structure-method-route" class="method-route" hidden aria-live="polite"></div>
         <div class="prediction-actions">
@@ -159,10 +160,11 @@
       <section class="panel workspace-page" data-page="landscape" hidden>
         <h2>论文 Fig. 1d：G–Ẽ 热膨胀景观</h2>
         <div class="landscape-wrap">
-          <canvas id="landscape" width="1100" height="600" role="img" aria-label="论文 Fig. 1d 双对数热膨胀分类图"></canvas>
+          <canvas id="landscape" width="1100" height="600" tabindex="0" role="img" aria-describedby="landscape-help" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Enter" aria-label="论文 Fig. 1d 双对数热膨胀分类图"></canvas>
           <div id="landscape-tooltip" class="landscape-tooltip" hidden></div>
         </div>
-        <p id="landscape-selection" class="curve-note">尚未选择材料。</p>
+        <p id="landscape-help" class="curve-note landscape-help">悬停查看材料；聚焦图表后可用方向键浏览，按 Enter 选中。</p>
+        <p id="landscape-selection" class="curve-note" aria-live="polite">尚未选择材料。</p>
       </section>
       <section class="panel workspace-page" data-page="zte" hidden>
         <h2>ZTE 与受控热膨胀曲线反向设计</h2>
@@ -176,12 +178,12 @@
           <div class="composite-pickers">
             <div>
               <label>PTE 材料搜索</label>
-              <div class="row"><input id="pte-search" placeholder="化学式或材料名称"><button id="pte-search-button" type="button">搜索</button></div>
+              <div class="row"><input id="pte-search" name="pte-query" autocomplete="off" spellcheck="false" aria-label="搜索 PTE 材料" placeholder="化学式或材料名称"><button id="pte-search-button" type="button">搜索</button></div>
               <select id="pte-material" class="material-select" aria-label="PTE材料"></select>
             </div>
             <div>
               <label>NTE 材料搜索</label>
-              <div class="row"><input id="nte-search" placeholder="化学式或MP ID"><button id="nte-search-button" type="button">搜索</button></div>
+              <div class="row"><input id="nte-search" name="nte-query" autocomplete="off" spellcheck="false" aria-label="搜索 NTE 材料" placeholder="化学式或MP ID"><button id="nte-search-button" type="button">搜索</button></div>
               <select id="nte-material" class="material-select" aria-label="NTE材料"></select>
             </div>
           </div>
@@ -351,6 +353,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-47"></script>
+    <script src="/static/app.js?v=0.10.0-48"></script>
   </body>
 </html>

@@ -16,8 +16,27 @@ const escapeHtml = value => String(value ?? "")
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&#39;");
 
-const numeric = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "—";
-const optionalNumeric = value => value === null || value === undefined || value === "" ? "—" : numeric(value);
+const numeric = value => value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+  ? "—"
+  : Number(value).toFixed(2);
+const optionalNumeric = value => numeric(value);
+const missingValue = label => {
+  const text = String(label || "该字段") + "未收录";
+  return "<span class='missing-value' title='" + escapeHtml(text) + "' aria-label='" + escapeHtml(text) + "'>—</span>";
+};
+const catalogNumeric = (value, label) =>
+  value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+    ? missingValue(label)
+    : numeric(value);
+const formatDatasetDate = value => {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+};
 
 let fig1dReference = null;
 let selectedLandscapePoint = null;
@@ -31,6 +50,10 @@ let structureFullscreenHandlerInstalled = false;
 let catalogElementMode = "contains";
 let catalogElementCounts = {};
 let catalogSearchSequence = 0;
+let catalogItems = [];
+let catalogPage = 1;
+const CATALOG_PAGE_SIZE = 50;
+let landscapeKeyboardIndex = -1;
 let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
 let lastZteScreeningParameters = null;
@@ -112,11 +135,20 @@ async function loadStats() {
   const dataset = results[1];
   document.querySelector("#health-status").textContent = "服务正常";
   const counts = dataset.counts;
+  const release = dataset.release || {};
+  const updated = formatDatasetDate(release.imported_at);
+  const metadata = [
+    "结构记录 " + escapeHtml(counts.structures),
+    "属性字段记录 " + escapeHtml(counts.property_values),
+    "v" + escapeHtml(release.version || "—"),
+  ];
+  if (updated) metadata.push("更新于 " + escapeHtml(updated));
   document.querySelector("#stats").innerHTML =
     "<strong>" + escapeHtml(counts.materials) + "</strong><span>个材料</span>" +
-    "<span class='catalog-stats-meta'>结构记录 " + escapeHtml(counts.structures) +
-    " · 属性值 " + escapeHtml(counts.property_values) +
-    " · v" + escapeHtml(dataset.release.version) + "</span>";
+    "<span class='catalog-stats-meta'>" + metadata.join(" · ") + "</span>";
+  document.querySelector("#stats").title = updated
+    ? "数据版本 " + (release.slug || release.version || "未记录") + "，更新于 " + updated
+    : "数据版本 " + (release.slug || release.version || "未记录");
 }
 
 function elementFamily(symbol) {
@@ -564,27 +596,46 @@ function restoreCatalogUrlState() {
   updateCatalogFilterSummary();
 }
 
-function renderMaterials(items) {
-  const container = document.querySelector("#material-results");
-  const filterDescription = selectedCatalogElements.size
+function catalogFilterDescription() {
+  return selectedCatalogElements.size
     ? " · " + (catalogElementMode === "exact" ? "仅含 " : "包含 ") + [...selectedCatalogElements].join("/")
     : "";
-  document.querySelector("#material-view-summary").textContent =
-    "显示 " + items.length + " 条" + filterDescription;
+}
+
+function renderCatalogPage() {
+  const container = document.querySelector("#material-results");
+  const items = catalogItems;
+  const pageCount = Math.max(1, Math.ceil(items.length / CATALOG_PAGE_SIZE));
+  catalogPage = Math.min(Math.max(1, catalogPage), pageCount);
+  const start = items.length ? (catalogPage - 1) * CATALOG_PAGE_SIZE : 0;
+  const end = Math.min(start + CATALOG_PAGE_SIZE, items.length);
+  const filterDescription = catalogFilterDescription();
+  document.querySelector("#material-view-summary").textContent = items.length
+    ? "显示 " + (start + 1) + "–" + end + " 条 · 本次返回 " + items.length + " 条" + filterDescription
+    : "显示 0 条" + filterDescription;
   if (!items.length) {
     container.innerHTML = "<p class='muted'>没有匹配材料。</p>";
     return;
   }
-  const rows = items.map(item => {
+  const rows = items.slice(start, end).map(item => {
     const encodedKey = escapeHtml(encodeURIComponent(item.material_key));
     const formula = escapeHtml(item.formula || item.material_key || "—");
     const externalId = escapeHtml(item.external_id || item.material_key || "—");
     const materialLink = "<a class='material-record-link' href='/materials/" + encodedKey +
       "' data-material-link='" + encodedKey + "'>" + externalId + "</a>";
     return "<tr><td class='material-mp-id'>" + materialLink + "</td><td class='material-formula'>" + formula +
-      "</td><td>" + numeric(item.G_GPa) + "</td><td>" + numeric(item.E_tilde_GPa) + "</td><td>" + numeric(item.xi) +
-      "</td><td>" + numeric(item.CTE_ppm) + "</td></tr>";
+      "</td><td>" + catalogNumeric(item.G_GPa, "G") + "</td><td>" + catalogNumeric(item.E_tilde_GPa, "Ẽ") +
+      "</td><td>" + catalogNumeric(item.xi, "ξ") +
+      "</td><td>" + catalogNumeric(item.CTE_ppm, "αV") + "</td></tr>";
   }).join("");
+  const pagination = pageCount > 1
+    ? "<nav class='catalog-pagination' aria-label='材料结果分页'>" +
+      "<button id='catalog-prev' class='secondary-button' type='button' aria-label='上一页'" +
+      (catalogPage === 1 ? " disabled" : "") + ">上一页</button>" +
+      "<span class='catalog-pagination-status' aria-live='polite'>第 " + catalogPage + " / " + pageCount + " 页</span>" +
+      "<button id='catalog-next' class='secondary-button' type='button' aria-label='下一页'" +
+      (catalogPage === pageCount ? " disabled" : "") + ">下一页</button></nav>"
+    : "";
   container.innerHTML =
     "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
     "<caption class='sr-only'>材料 MP ID、化学式、剪切模量、键合模量、剪切—键合比和体积热膨胀系数 αV</caption>" +
@@ -595,7 +646,7 @@ function renderMaterials(items) {
     "<th scope='col'>Ẽ <span class='table-unit'>(GPa)</span></th>" +
     "<th scope='col'>ξ</th>" +
     "<th scope='col'>αV <span class='table-unit'>(ppm/K)</span></th>" +
-    "</tr></thead><tbody>" + rows + "</tbody></table>";
+    "</tr></thead><tbody>" + rows + "</tbody></table>" + pagination;
   container.querySelectorAll("[data-material-link]").forEach(link => {
     link.addEventListener("click", event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -603,12 +654,30 @@ function renderMaterials(items) {
       navigateToMaterial(decodeURIComponent(link.dataset.materialLink));
     });
   });
+  container.querySelector("#catalog-prev")?.addEventListener("click", () => {
+    catalogPage -= 1;
+    renderCatalogPage();
+    container.scrollIntoView({behavior: "auto", block: "nearest"});
+  });
+  container.querySelector("#catalog-next")?.addEventListener("click", () => {
+    catalogPage += 1;
+    renderCatalogPage();
+    container.scrollIntoView({behavior: "auto", block: "nearest"});
+  });
+}
+
+function renderMaterials(items) {
+  catalogItems = Array.isArray(items) ? items : [];
+  catalogPage = 1;
+  renderCatalogPage();
 }
 
 async function searchMaterials() {
   const query = document.querySelector("#search-input").value;
   const requestId = ++catalogSearchSequence;
+  const resultsContainer = document.querySelector("#material-results");
   document.querySelector("#material-view-summary").textContent = "正在检索…";
+  resultsContainer.setAttribute("aria-busy", "true");
   const params = new URLSearchParams({
     limit: document.querySelector("#material-limit").value,
     query,
@@ -627,6 +696,8 @@ async function searchMaterials() {
     document.querySelector("#material-view-summary").textContent = "检索失败";
     document.querySelector("#material-results").innerHTML =
       "<p class='structure-error'>" + escapeHtml(error.message) + "</p>";
+  } finally {
+    if (requestId === catalogSearchSequence) resultsContainer.setAttribute("aria-busy", "false");
   }
 }
 
@@ -705,11 +776,13 @@ function renderMaterialDownloads(data) {
     : "";
 }
 
-function detailPropertyText(property, fallbackUnit = "") {
-  if (!property) return "—";
+function detailPropertyText(property, fallbackUnit = "", label = "该属性") {
+  if (!property || property.value === null || property.value === undefined || property.value === "") {
+    return missingValue(label);
+  }
   const value = Number.isFinite(Number(property.value))
     ? numeric(property.value)
-    : String(property.value ?? "—");
+    : String(property.value);
   const unit = property.unit || fallbackUnit;
   return escapeHtml(value + (unit ? " " + unit : ""));
 }
@@ -814,8 +887,8 @@ function renderPhononProperties(data) {
     return "<div class='phonon-panel-heading'><div><strong>Phonon dispersion and total DOS</strong>" +
       "<p class='curve-note'>能带与总态密度共用频率纵轴，高对称点与 DOS 峰位可直接对应。</p></div>" +
       "<span class='structure-summary-badge'>PNG</span></div>" +
-      "<figure class='phonon-combined-figure'><img src='" + escapeHtml(phonon.combined_url) +
-      "' alt='带高对称点标签且频率对齐的声子能带与总态密度图' loading='lazy'>" +
+      "<figure class='phonon-combined-figure'><img width='1370' height='1017' src='" + escapeHtml(phonon.combined_url) +
+      "' alt='带高对称点标签且频率对齐的声子能带与总态密度图' loading='lazy' decoding='async'>" +
       "<figcaption>Phonon dispersion and total DOS</figcaption></figure>";
   }
   const hasBand = Boolean(phonon.band_available);
@@ -826,11 +899,11 @@ function renderPhononProperties(data) {
   }
   const band = hasBand
     ? "<figure class='phonon-figure'><figcaption>声子能带</figcaption>" +
-      "<img src='" + escapeHtml(phonon.band_url) + "' alt='声子能带图' loading='lazy'></figure>"
+      "<img width='1370' height='1017' src='" + escapeHtml(phonon.band_url) + "' alt='声子能带图' loading='lazy' decoding='async'></figure>"
     : "";
   const dos = hasDos
     ? "<figure class='phonon-figure'><figcaption>声子总态密度</figcaption>" +
-      "<img src='" + escapeHtml(phonon.dos_url) + "' alt='声子总态密度图' loading='lazy'></figure>"
+      "<img width='1370' height='1017' src='" + escapeHtml(phonon.dos_url) + "' alt='声子总态密度图' loading='lazy' decoding='async'></figure>"
     : "";
   return "<div class='phonon-panel-heading'><div><strong>Phonon</strong>" +
     "<p class='curve-note'>由声子筛选流程生成的静态 PNG 图像。</p></div>" +
@@ -889,9 +962,9 @@ async function loadDetail(key) {
     ["NTE_temp_range", "NTE 温区", "", ""],
   ];
   const summaryMetrics = metricDefinitions
-    .filter(([name]) => ["xi", "G_GPa", "E_tilde_GPa", "CTE_ppm"].includes(name) && data.properties[name])
+    .filter(([name]) => ["xi", "G_GPa", "E_tilde_GPa", "CTE_ppm"].includes(name))
     .map(([name, label, unit, modifier]) => "<div class='detail-property " + modifier + "'><dt>" +
-      label + "</dt><dd>" + detailPropertyText(data.properties[name], unit) + "</dd></div>")
+      label + "</dt><dd>" + detailPropertyText(data.properties[name], unit, label) + "</dd></div>")
     .join("");
   document.querySelector("#material-detail").innerHTML =
     "<div class='material-detail-identity'><div><h3>" +
@@ -1993,6 +2066,7 @@ function setupLandscapeInteraction() {
   const canvas = document.querySelector("#landscape");
   const tooltip = document.querySelector("#landscape-tooltip");
   const wrap = document.querySelector(".landscape-wrap");
+  const defaultLabel = "论文 Fig. 1d 双对数热膨胀分类图";
   canvas.addEventListener("mousemove", event => {
     const rect = canvas.getBoundingClientRect();
     const canvasX = event.clientX - rect.left - canvas.clientLeft;
@@ -2024,6 +2098,43 @@ function setupLandscapeInteraction() {
     tooltip.style.top = top + "px";
   });
   canvas.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+  canvas.addEventListener("keydown", event => {
+    if (!landscapeHitPoints.length) return;
+    if (event.key === "Enter" || event.key === " ") {
+      const point = landscapeHitPoints[landscapeKeyboardIndex >= 0 ? landscapeKeyboardIndex : 0];
+      if (validLandscapeContext(point)) {
+        setLandscapeContext(point, landscapeSelectionText(point));
+        canvas.setAttribute("aria-label", defaultLabel + "，已选中 " + (point.formula || point.material_key));
+      }
+      event.preventDefault();
+      return;
+    }
+    const keySteps = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1};
+    const isArrow = Object.prototype.hasOwnProperty.call(keySteps, event.key);
+    if (!isArrow && event.key !== "Home" && event.key !== "End") return;
+    const count = landscapeHitPoints.length;
+    if (event.key === "Home") landscapeKeyboardIndex = 0;
+    else if (event.key === "End") landscapeKeyboardIndex = count - 1;
+    else {
+      const current = landscapeKeyboardIndex >= 0 ? landscapeKeyboardIndex : 0;
+      landscapeKeyboardIndex = (current + keySteps[event.key] + count) % count;
+    }
+    const point = landscapeHitPoints[landscapeKeyboardIndex];
+    if (validLandscapeContext(point)) {
+      const name = point.formula || point.material_key;
+      document.querySelector("#landscape-selection").textContent =
+        "预览：" + landscapeSelectionText(point) + "；按 Enter 选中。";
+      canvas.setAttribute("aria-label", defaultLabel + "，当前预览 " + name);
+    }
+    event.preventDefault();
+  });
+  canvas.addEventListener("blur", () => {
+    landscapeKeyboardIndex = -1;
+    canvas.setAttribute("aria-label", defaultLabel);
+    document.querySelector("#landscape-selection").textContent = selectedLandscapePoint
+      ? landscapeSelectionText(selectedLandscapePoint)
+      : "尚未选择材料。";
+  });
 }
 
 function uploadedStructure() {
