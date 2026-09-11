@@ -1378,6 +1378,16 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
+    @app.post("/api/precision/jobs/{job_id}/cancel")
+    def cancel_precision_job(job_id: str) -> dict[str, object]:
+        try:
+            from te_platform.jobs.repository import cancel_queued_job
+            job = cancel_queued_job(workspace_db, job_id)
+            job["progress"] = precision_progress(workspace_db, job_id)
+            return job
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/api/precision/jobs/{job_id}/resume-qha")
     def resume_qha_job(job_id: str) -> dict[str, object]:
         try:

@@ -197,6 +197,25 @@ def transition_job(
     return get_job(database, job_id)
 
 
+def cancel_queued_job(database: str | Path, job_id: str) -> dict[str, Any]:
+    """Cancel a task before its worker starts; never terminate a live process here."""
+    initialize_database(database)
+    with connect_database(database) as connection:
+        row = connection.execute(
+            "SELECT status FROM calculation_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown calculation job: {job_id}")
+        current = JobStatus(row["status"])
+        if current not in {JobStatus.PENDING, JobStatus.QUEUED}:
+            raise ValueError("Only pending or queued tasks can be cancelled safely")
+        connection.execute(
+            "UPDATE calculation_jobs SET status = ?, updated_at = ? WHERE id = ?",
+            (JobStatus.CANCELLED.value, _timestamp(), job_id),
+        )
+    return get_job(database, job_id)
+
+
 def replace_completed_job_result(
     database: str | Path, job_id: str, result: dict[str, Any]
 ) -> dict[str, Any]:

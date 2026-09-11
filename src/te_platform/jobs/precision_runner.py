@@ -130,6 +130,8 @@ def _run_fast_screen(
     structure_path: Path,
     filename: str,
 ) -> None:
+    if get_job(database, job_id)["status"] == JobStatus.CANCELLED.value:
+        return
     transition_job(database, job_id, JobStatus.RUNNING)
     try:
         content = structure_path.read_bytes()
@@ -380,6 +382,8 @@ def _run(
     mode: CalculationMode,
     actual_method: str,
 ) -> None:
+    if get_job(database, job_id)["status"] == JobStatus.CANCELLED.value:
+        return
     transition_job(database, job_id, JobStatus.RUNNING)
     log = work / "workflow.log"
     try:

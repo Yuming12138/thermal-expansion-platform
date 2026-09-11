@@ -3,11 +3,25 @@ import unittest
 from pathlib import Path
 
 from te_platform.db.schema import connect_database, initialize_database
-from te_platform.jobs.repository import create_job, get_job, replace_completed_job_result, transition_job
+from te_platform.jobs.repository import cancel_queued_job, create_job, get_job, replace_completed_job_result, transition_job
 from te_platform.jobs.states import JobStatus
 
 
 class JobRepositoryTests(unittest.TestCase):
+    def test_cancels_queued_job_but_not_running_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "jobs.db"
+            job = create_job(database, workflow="precision_elastic", parameters={})
+            transition_job(database, job["id"], JobStatus.QUEUED)
+            cancelled = cancel_queued_job(database, job["id"])
+            self.assertEqual(cancelled["status"], "CANCELLED")
+
+            running = create_job(database, workflow="precision_elastic", parameters={})
+            transition_job(database, running["id"], JobStatus.QUEUED)
+            transition_job(database, running["id"], JobStatus.RUNNING)
+            with self.assertRaises(ValueError):
+                cancel_queued_job(database, running["id"])
+
     def test_persists_allowlisted_precision_job_and_transitions(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             database = Path(temp) / "jobs.db"

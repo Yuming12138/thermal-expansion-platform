@@ -2284,6 +2284,8 @@ function renderJobProgress(job, label, mode) {
   const progressAria = percent === null
     ? " role='progressbar' aria-label='计算进度'"
     : ` role='progressbar' aria-label='计算进度' aria-valuemin='0' aria-valuemax='100' aria-valuenow='${percent}'`;
+  const cancelButton = ["PENDING", "QUEUED"].includes(String(job.status).toUpperCase())
+    ? "<button id='prediction-cancel-button' class='secondary-button' type='button'>取消排队任务</button>" : "";
   document.querySelector("#prediction-result").innerHTML =
     "<div class='prediction-progress-heading'><h3>" + escapeHtml(label) +
     "</h3><span class='prediction-status'>" + escapeHtml(predictionStatusLabel(job.status)) + "</span></div>" +
@@ -2292,7 +2294,23 @@ function renderJobProgress(job, label, mode) {
     "<div class='" + trackClass + "'" + progressAria + trackStyle + "><span></span></div>" +
     "<div class='prediction-progress-foot'><span>" + escapeHtml(predictionStageLabel(progress?.stage, mode)) +
     " · " + escapeHtml(predictionProgressDetail(progress)) + "</span><strong>" +
-    (percent === null ? "处理中" : escapeHtml(percent.toFixed(1) + "%")) + "</strong></div>";
+    (percent === null ? "处理中" : escapeHtml(percent.toFixed(1) + "%")) + "</strong></div>" + cancelButton;
+  const cancel = document.querySelector("#prediction-cancel-button");
+  cancel?.addEventListener("click", async () => {
+    cancel.disabled = true;
+    cancel.textContent = "正在取消…";
+    try {
+      const cancelled = await api("/api/precision/jobs/" + encodeURIComponent(job.id) + "/cancel", {method: "POST"});
+      clearPersistedPredictionJob();
+      clearPredictionProgressTimer();
+      setPredictionButtonsDisabled(false);
+      renderJobProgress(cancelled, "计算任务", mode);
+    } catch (error) {
+      cancel.disabled = false;
+      cancel.textContent = "取消排队任务";
+      document.querySelector("#prediction-result").insertAdjacentHTML("beforeend", "<p class='prediction-error-message'>" + escapeHtml(error.message) + "</p>");
+    }
+  });
 }
 
 function predictionEndpoint(mode) {
