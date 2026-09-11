@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NTE Materials · 材料数据库</title>
-    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-29">
+    <link rel="stylesheet" href="/static/styles.css?v=0.10.0-30">
   </head>
   <body>
     <header>
@@ -105,19 +105,25 @@
                 </label>
               </div>
             </details>
-            <div id="element-filter" class="element-filter">
-              <div class="element-filter-toolbar">
-                <div class="element-mode" role="group" aria-label="元素筛选方式">
-                  <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
-                  <button type="button" data-element-mode="exact">仅含所选元素</button>
+            <details id="element-filter" class="element-filter-details">
+              <summary>
+                <span>元素筛选</span>
+                <span id="element-filter-summary" class="element-filter-summary">未选择元素</span>
+              </summary>
+              <div class="element-filter">
+                <div class="element-filter-toolbar">
+                  <div class="element-mode" role="group" aria-label="元素筛选方式">
+                    <button type="button" data-element-mode="contains" class="active">包含所选元素</button>
+                    <button type="button" data-element-mode="exact">仅含所选元素</button>
+                  </div>
+                  <span id="element-selection" class="element-selection">尚未选择元素</span>
+                  <button id="element-clear" class="secondary-button" type="button" disabled>清除</button>
                 </div>
-                <span id="element-selection" class="element-selection">尚未选择元素</span>
-                <button id="element-clear" class="secondary-button" type="button" disabled>清除</button>
+                <div class="periodic-table-scroll">
+                  <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
+                </div>
               </div>
-              <div class="periodic-table-scroll">
-                <div id="periodic-table" class="periodic-table" aria-label="可筛选材料的元素周期表"></div>
-              </div>
-            </div>
+            </details>
             <div id="material-results" class="table-wrap"></div>
           </article>
         </section>
@@ -314,7 +320,7 @@
         </div>
       </section>
     </main>
-    <aside id="agent-widget" class="agent-widget collapsed" aria-label="热膨胀材料 Agent">
+    <aside id="agent-widget" class="agent-widget agent-unconfigured collapsed" aria-label="热膨胀材料 Agent">
       <div class="agent-header">
         <div class="agent-identity">
           <span id="agent-status-dot" class="agent-status-dot" aria-hidden="true"></span>
@@ -345,6 +351,6 @@
       </div>
     </aside>
     <script src="/static/vendor/3Dmol-2.5.5.min.js"></script>
-    <script src="/static/app.js?v=0.10.0-43"></script>
+    <script src="/static/app.js?v=0.10.0-44"></script>
   </body>
 </html>

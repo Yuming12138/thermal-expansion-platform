@@ -112,9 +112,9 @@ async function loadStats() {
   document.querySelector("#health-status").textContent = "服务正常";
   const counts = dataset.counts;
   document.querySelector("#stats").innerHTML =
-    "<strong>" + escapeHtml(counts.materials) + "</strong><span>条 NTE</span>" +
-    "<span class='catalog-stats-meta'>结构 " + escapeHtml(counts.structures) +
-    " · 属性 " + escapeHtml(counts.property_values) +
+    "<strong>" + escapeHtml(counts.materials) + "</strong><span>个材料</span>" +
+    "<span class='catalog-stats-meta'>结构记录 " + escapeHtml(counts.structures) +
+    " · 属性值 " + escapeHtml(counts.property_values) +
     " · v" + escapeHtml(dataset.release.version) + "</span>";
 }
 
@@ -190,9 +190,13 @@ function updateElementFilterSummary() {
   });
   const selected = [...selectedCatalogElements];
   const modeText = catalogElementMode === "exact" ? "仅含" : "包含";
+  const summary = document.querySelector("#element-filter-summary");
   document.querySelector("#element-selection").textContent = selected.length
     ? modeText + "：" + selected.join(" · ")
     : "尚未选择元素";
+  if (summary) summary.textContent = selected.length
+    ? modeText + " " + selected.join(" · ")
+    : "未选择元素";
   document.querySelector("#element-clear").disabled = !selected.length;
 }
 
@@ -384,8 +388,14 @@ async function navigateToMaterial(materialKey, {updateHistory = true} = {}) {
   window.scrollTo({top: 0, behavior: "auto"});
   const detail = document.querySelector("#material-detail");
   if (!detail) return;
-  detail.className = "placeholder";
-  detail.textContent = "正在读取材料详情…";
+  detail.className = "placeholder detail-loading";
+  detail.innerHTML =
+    "<div class='detail-skeleton' aria-label='正在读取材料详情' aria-busy='true'>" +
+    "<div class='skeleton-line skeleton-eyebrow'></div>" +
+    "<div class='skeleton-line skeleton-title'></div>" +
+    "<div class='skeleton-overview'><div class='skeleton-block'></div><div class='skeleton-side'><div class='skeleton-line'></div><div class='skeleton-line'></div><div class='skeleton-line'></div></div></div>" +
+    "<div class='skeleton-line skeleton-section'></div><div class='skeleton-table'></div>" +
+    "</div>";
   try {
     await loadDetail(key);
   } catch (error) {
