@@ -490,7 +490,7 @@ function cteFilterBounds() {
   return {
     strong: {cte_max_ppm: "-20"},
     moderate: {cte_min_ppm: "-20", cte_max_ppm: "-5"},
-    "near-zero": {cte_min_ppm: "-5", cte_max_ppm: "5"},
+    "near-zero": {cte_min_ppm: "-5", cte_max_ppm: "0"},
   }[selected] || {};
 }
 
