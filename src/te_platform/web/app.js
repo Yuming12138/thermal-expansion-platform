@@ -54,6 +54,7 @@ let catalogItems = [];
 let catalogPage = 1;
 const CATALOG_PAGE_SIZE = 50;
 let landscapeKeyboardIndex = -1;
+let anisotropicVisibleKeys = new Set();
 let zteScreeningResults = [];
 let lastZteScreeningPayload = null;
 let lastZteScreeningParameters = null;
@@ -639,7 +640,8 @@ function renderCatalogPage() {
       (catalogPage === 1 ? " disabled" : "") + ">上一页</button>" +
       "<span class='catalog-pagination-status' aria-live='polite'>第 " + catalogPage + " / " + pageCount + " 页</span>" +
       "<button id='catalog-next' class='secondary-button' type='button' aria-controls='material-results' aria-label='下一页'" +
-      (catalogPage === pageCount ? " disabled" : "") + ">下一页</button></nav>"
+      (catalogPage === pageCount ? " disabled" : "") + ">下一页</button>" +
+      "<label class='catalog-page-jump'>跳至 <input id='catalog-page-input' type='number' min='1' max='" + pageCount + "' value='" + catalogPage + "' inputmode='numeric' aria-label='跳转到页码'> 页</label></nav>"
     : "";
   container.innerHTML =
     "<table class='material-catalog-table' aria-label='材料属性结果表'>" +
@@ -667,6 +669,14 @@ function renderCatalogPage() {
   });
   container.querySelector("#catalog-next")?.addEventListener("click", () => {
     catalogPage += 1;
+    renderCatalogPage();
+    syncCatalogUrl();
+    container.scrollIntoView({behavior: "auto", block: "nearest"});
+  });
+  container.querySelector("#catalog-page-input")?.addEventListener("change", event => {
+    const requested = Number.parseInt(event.target.value, 10);
+    if (!Number.isInteger(requested)) return;
+    catalogPage = Math.min(Math.max(1, requested), pageCount);
     renderCatalogPage();
     syncCatalogUrl();
     container.scrollIntoView({behavior: "auto", block: "nearest"});
@@ -992,6 +1002,16 @@ async function loadDetail(key) {
   escapeHtml(JSON.stringify(data.properties, null, 2)) + "</pre></details>";
   setupPropertiesTabs();
   drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
+  document.querySelectorAll("[data-curve-key]").forEach(control => control.addEventListener("change", event => {
+    const key = event.target.dataset.curveKey;
+    if (key === "alpha_volume" && !event.target.checked) {
+      event.target.checked = true;
+      return;
+    }
+    if (event.target.checked) anisotropicVisibleKeys.add(key);
+    else anisotropicVisibleKeys.delete(key);
+    drawAnisotropicThermalExpansion(data.anisotropic_thermal_expansion);
+  }));
   selectLandscapeMaterial(data);
 }
 
@@ -1720,9 +1740,20 @@ function renderAnisotropicThermalExpansion(curves) {
       "<p class='curve-note'>Cartesian 张量与晶轴 directional 表示</p></div>" +
       "<div class='thermal-empty'><p class='muted'>暂无已关联的各向异性曲线。</p></div></section>";
   }
+  const candidateKeys = curves.cartesian
+    ? ["alpha_xx", "alpha_yy", "alpha_zz", "alpha_volume"]
+    : ["alpha_a", "alpha_b", "alpha_c", "alpha_volume"];
+  if (!anisotropicVisibleKeys.size) anisotropicVisibleKeys = new Set(candidateKeys);
+  anisotropicVisibleKeys = new Set(candidateKeys.filter(key => anisotropicVisibleKeys.has(key)));
+  const labels = {alpha_xx: "αxx", alpha_yy: "αyy", alpha_zz: "αzz", alpha_a: "αa", alpha_b: "αb", alpha_c: "αc", alpha_volume: "αV"};
+  const controls = candidateKeys.map(key =>
+    "<label class='curve-toggle'><input type='checkbox' data-curve-key='" + key + "'" +
+    (anisotropicVisibleKeys.has(key) ? " checked" : "") + ">" + labels[key] + "</label>"
+  ).join("");
   return "<section class='thermal-panel anisotropic-thermal-panel'><div class='thermal-heading'><h3>" +
     "各向异性热膨胀曲线</h3><p class='curve-note'>" +
     "分量单位 ppm/K · α<sub>V</sub> 为体积曲线</p></div>" +
+    "<div class='curve-toggles' role='group' aria-label='显示热膨胀曲线分量'>" + controls + "</div>" +
     "<canvas id='anisotropic-thermal-curve' class='thermal-curve' width='720' height='440'></canvas>" +
     "<p class='curve-note'>Cartesian 显示 α<sub>xx</sub>、α<sub>yy</sub>、α<sub>zz</sub> 与 α<sub>V</sub>；" +
     "directional 文件保留 α<sub>a</sub>、α<sub>b</sub>、α<sub>c</sub> 和 F<sub>ani</sub>。</p></section>";
@@ -1745,6 +1776,7 @@ function drawAnisotropicThermalExpansion(curves) {
     : ["alpha_a", "alpha_b", "alpha_c", "alpha_volume"];
   const series = candidateKeys
     .filter(key => points.some(point => Number.isFinite(point[key])))
+    .filter(key => anisotropicVisibleKeys.has(key))
     .map((key, index) => ({
       key,
       color: ["#1d6b83", "#c45b32", "#6e8f3f", "#8a5aa8"][index],
