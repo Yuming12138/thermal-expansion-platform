@@ -26,6 +26,8 @@
 
 ## 三、建议提交的截图
 
+已按公网版本实际采集并保存 10 张登记用截图，目录见 [`docs/software-registration-screenshots/`](software-registration-screenshots/)，建议优先使用其中 01–10：
+
 建议准备 8–10 张连续、清晰、带软件名称或页面标题的截图：
 
 1. 首页：平台入口和元素周期表；
